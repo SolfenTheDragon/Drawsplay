@@ -13,7 +13,7 @@ jobs:
   build-windows-android:
     runs-on: windows-latest
     env:
-      DRAWSPLAY_REQUIRE_SIGNING: "1"
+      DRAWSPLAY_REQUIRE_SIGNING: ${{ vars.DRAWSPLAY_REQUIRE_SIGNING || '0' }}
       DRAWSPLAY_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
       DRAWSPLAY_WINDOWS_SIGNING_TIMESTAMP_URL: ${{ secrets.WINDOWS_SIGNING_TIMESTAMP_URL }}
       DRAWSPLAY_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -40,32 +40,51 @@ jobs:
           WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX_BASE64)) {
-            throw "Missing secret WINDOWS_SIGNING_PFX_BASE64"
-          }
-          if ([string]::IsNullOrWhiteSpace($env:DRAWSPLAY_WINDOWS_SIGNING_PFX_PASSWORD)) {
-            throw "Missing secret WINDOWS_SIGNING_PFX_PASSWORD"
-          }
-          if ([string]::IsNullOrWhiteSpace($env:ANDROID_KEYSTORE_BASE64)) {
-            throw "Missing secret ANDROID_KEYSTORE_BASE64"
-          }
-          if ([string]::IsNullOrWhiteSpace($env:DRAWSPLAY_ANDROID_KEYSTORE_PASSWORD)) {
-            throw "Missing secret ANDROID_KEYSTORE_PASSWORD"
-          }
-          if ([string]::IsNullOrWhiteSpace($env:DRAWSPLAY_ANDROID_KEY_ALIAS)) {
-            throw "Missing secret ANDROID_KEY_ALIAS"
-          }
-          if ([string]::IsNullOrWhiteSpace($env:DRAWSPLAY_ANDROID_KEY_PASSWORD)) {
-            throw "Missing secret ANDROID_KEY_PASSWORD"
-          }
+          $requireSigning = $env:DRAWSPLAY_REQUIRE_SIGNING -in @("1", "true", "yes")
+          $signingGroups = @(
+            @{
+              Name = "Windows"
+              Secrets = @{
+                WINDOWS_SIGNING_PFX_BASE64 = $env:WINDOWS_SIGNING_PFX_BASE64
+                WINDOWS_SIGNING_PFX_PASSWORD = $env:DRAWSPLAY_WINDOWS_SIGNING_PFX_PASSWORD
+              }
+              FileName = "drawsplay-signing-cert.pfx"
+              Encoded = $env:WINDOWS_SIGNING_PFX_BASE64
+              PathVariable = "DRAWSPLAY_WINDOWS_SIGNING_PFX_PATH"
+            },
+            @{
+              Name = "Android"
+              Secrets = @{
+                ANDROID_KEYSTORE_BASE64 = $env:ANDROID_KEYSTORE_BASE64
+                ANDROID_KEYSTORE_PASSWORD = $env:DRAWSPLAY_ANDROID_KEYSTORE_PASSWORD
+                ANDROID_KEY_ALIAS = $env:DRAWSPLAY_ANDROID_KEY_ALIAS
+                ANDROID_KEY_PASSWORD = $env:DRAWSPLAY_ANDROID_KEY_PASSWORD
+              }
+              FileName = "drawsplay-android-release.keystore"
+              Encoded = $env:ANDROID_KEYSTORE_BASE64
+              PathVariable = "DRAWSPLAY_ANDROID_KEYSTORE_FILE"
+            }
+          )
 
-          $pfxPath = Join-Path $env:RUNNER_TEMP "drawsplay-signing-cert.pfx"
-          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64))
-          "DRAWSPLAY_WINDOWS_SIGNING_PFX_PATH=$pfxPath" >> $env:GITHUB_ENV
-
-          $keystorePath = Join-Path $env:RUNNER_TEMP "drawsplay-android-release.keystore"
-          [IO.File]::WriteAllBytes($keystorePath, [Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64))
-          "DRAWSPLAY_ANDROID_KEYSTORE_FILE=$keystorePath" >> $env:GITHUB_ENV
+          foreach ($group in $signingGroups) {
+            $missing = @($group.Secrets.Keys | Where-Object {
+              [string]::IsNullOrWhiteSpace($group.Secrets[$_])
+            })
+            if ($missing.Count -eq $group.Secrets.Count -and -not $requireSigning) {
+              if ($group.Name -eq "Windows") {
+                Write-Host "::warning::Windows signing is not configured; releasing an unsigned EXE."
+              } else {
+                Write-Host "::warning::Android signing is not configured; releasing a debug-signed APK. Updates across runs may require reinstalling the app."
+              }
+              continue
+            }
+            if ($missing.Count -gt 0) {
+              throw "$($group.Name) signing configuration is incomplete. Missing secrets: $($missing -join ', ')"
+            }
+            $path = Join-Path $env:RUNNER_TEMP $group.FileName
+            [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($group.Encoded))
+            "$($group.PathVariable)=$path" >> $env:GITHUB_ENV
+          }
 
       - name: Build Windows host and Android APK
         shell: pwsh
