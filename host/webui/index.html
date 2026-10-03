@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DrawSplay Settings</title>
+<link rel="icon" type="image/png" href="icon.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main>
+  <div class="header">
+    <h1><img src="icon.png" alt="">DrawSplay Settings</h1>
+    <div class="theme-toggle">
+      <span id="theme-label">Dark mode</span>
+      <label class="switch">
+        <input id="theme-mode-toggle" type="checkbox">
+        <span class="slider"></span>
+      </label>
+    </div>
+  </div>
+
+  <div class="panel status-panel">
+    <div class="status-line"><span id="dot" class="dot"></span><span id="status">Checking status…</span></div>
+    <div id="warnings" class="hint" hidden></div>
+    <div id="metrics-summary" class="hint"></div>
+  </div>
+
+  <div class="column column-left">
+    <div class="panel settings-panel">
+      <form id="form">
+      <div id="resolution-controls">
+        <label for="resolution-preset">Display resolution</label>
+        <select id="resolution-preset">
+          <option value="1280x720">1280 × 720 (HD)</option>
+          <option value="1600x900">1600 × 900</option>
+          <option value="1680x1050">1680 × 1050</option>
+          <option value="1920x1080" selected>1920 × 1080 (FHD, Recommended)</option>
+          <option value="2560x1440">2560 × 1440 (QHD)</option>
+          <option value="2736x1824">2736 × 1824 (Surface Pro)</option>
+          <option value="2880x1800">2880 × 1800</option>
+          <option value="3200x1800">3200 × 1800 (QHD+)</option>
+          <option value="3840x2160">3840 × 2160 (4K UHD)</option>
+          <option value="custom">Custom</option>
+        </select>
+        <div id="resolution-custom-fields" class="row">
+          <div>
+            <label for="width">Display width</label>
+            <input id="width" type="number" min="640" max="7680" required>
+          </div>
+          <div>
+            <label for="height">Display height</label>
+            <input id="height" type="number" min="480" max="4320" required>
+          </div>
+        </div>
+      </div>
+      <div id="resolution-policy-hint" class="hint" hidden>On Windows with an Android client, DrawSplay follows the resolution selected in Windows Display Settings.</div>
+      <div id="resolution-policy-hint-linux" class="hint" hidden>On Linux, change the resolution from Settings &gt; Displays (search for "MetaVendor" if it isn't the tablet display already selected) instead of here.</div>
+      <div class="hint">1920×1080 at 120 fps is the default. Higher resolutions improve sharpness but may reduce framerate and responsiveness on slower links.</div>
+      <div class="input-options">
+        <strong>Secondary monitor input</strong>
+        <div class="hint">Choose which pointer types the tablet may send to this computer.</div>
+        <div class="toggle-row">
+          <span>Touch input</span>
+          <label class="switch">
+            <input id="touch-enabled" type="checkbox">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span>Pen input</span>
+          <label class="switch">
+            <input id="pen-enabled" type="checkbox">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+      <details class="advanced">
+        <summary>Advanced settings</summary>
+        <div id="fps-control-row" class="row">
+          <div>
+            <label for="fps">Framerate</label>
+            <select id="fps"></select>
+          </div>
+        </div>
+        <div class="hint">Primary stream bitrate is managed automatically by adaptive bitrate.</div>
+        <label for="ffmpeg">ffmpeg path</label>
+        <input id="ffmpeg" type="text" required>
+        <label for="adb">adb path</label>
+        <input id="adb" type="text" required>
+        <label for="adb-serial">Preferred ADB device serial (optional)</label>
+        <input id="adb-serial" type="text" placeholder="R58M…">
+        <div class="hint">When set, reverse tunnels are created only for this device.</div>
+        <div class="input-options" data-feature-wifi hidden>
+          <strong>Optional Wi-Fi transport</strong>
+          <div class="hint">Adds LAN discovery/connectivity while keeping USB behavior unchanged when disabled.</div>
+          <div class="toggle-row">
+            <span>Enable Wi-Fi transport</span>
+            <label class="switch">
+              <input id="wifi-enabled" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <label for="wifi-service-name">Wi-Fi service name</label>
+          <input id="wifi-service-name" type="text" placeholder="DrawSplay">
+          <label for="wifi-bind-address">Wi-Fi bind address</label>
+          <input id="wifi-bind-address" type="text" placeholder="0.0.0.0">
+          <div class="row">
+            <div>
+              <label for="wifi-input-port">Wi-Fi input port</label>
+              <input id="wifi-input-port" type="number" min="1024" max="65535">
+            </div>
+            <div>
+              <label for="wifi-video-port">Wi-Fi video port</label>
+              <input id="wifi-video-port" type="number" min="1024" max="65535">
+            </div>
+          </div>
+          <label for="wifi-max-bitrate">Wi-Fi max bitrate cap</label>
+          <input id="wifi-max-bitrate" type="text" placeholder="12M">
+          <label for="wifi-auth-token">Wi-Fi auth token (optional)</label>
+          <input id="wifi-auth-token" type="text" placeholder="shared token">
+          <div class="hint">Saved tokens are not shown; enter a new token only when rotating it.</div>
+          <div class="toggle-row">
+            <span>Require TLS on Wi-Fi</span>
+            <label class="switch">
+              <input id="wifi-tls" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="input-options">
+          <strong>USB Link transport</strong>
+          <div class="hint">For a computer client connected through a USB virtual NIC (IP-over-USB). This does not use ADB and starts on the next host launch.</div>
+          <div class="toggle-row">
+            <span>Enable USB Link transport</span>
+            <label class="switch">
+              <input id="usb-link-enabled" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <label for="usb-link-bind-address">USB Link bind address</label>
+          <input id="usb-link-bind-address" type="text" placeholder="0.0.0.0">
+          <div class="row">
+            <div>
+              <label for="usb-link-input-port">USB Link input port</label>
+              <input id="usb-link-input-port" type="number" min="1024" max="65535">
+            </div>
+            <div>
+              <label for="usb-link-video-port">USB Link video port</label>
+              <input id="usb-link-video-port" type="number" min="1024" max="65535">
+            </div>
+          </div>
+          <label for="usb-link-max-bitrate">USB Link max bitrate cap</label>
+          <input id="usb-link-max-bitrate" type="text" placeholder="60M">
+          <label for="usb-link-auth-token">USB Link auth token</label>
+          <input id="usb-link-auth-token" type="password" autocomplete="new-password" placeholder="required when enabled">
+          <div class="hint">Saved tokens are not shown; enter a new token only when rotating it.</div>
+          <div class="toggle-row">
+            <span>Use TLS on USB Link</span>
+            <label class="switch">
+              <input id="usb-link-tls" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="input-options">
+          <strong>Connection & security controls</strong>
+          <div class="hint">Control trusted-device behavior, app launch, and whether sessions persist while the Android app is backgrounded.</div>
+          <div class="toggle-row">
+            <span>Low-latency local cursor</span>
+            <label class="switch">
+              <input id="local-cursor" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="hint">The local cursor is smoother on a static Windows desktop. Disable it to embed the cursor in the captured video instead.</div>
+          <div class="toggle-row">
+            <span>Require preferred ADB serial</span>
+            <label class="switch">
+              <input id="require-adb-serial" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <span>Allow keyboard passthrough</span>
+            <label class="switch">
+              <input id="keyboard-enabled" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <span>Keep session alive when Android app is running in the background</span>
+            <label class="switch">
+              <input id="keep-alive-on-background" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <span>Auto-launch Android app on USB connect</span>
+            <label class="switch">
+              <input id="auto-launch-android-app" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row" data-windows-only>
+            <span>Prefer zero-copy NVENC capture (Windows)</span>
+            <label class="switch">
+              <input id="zero-copy-capture" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <span>Enable temporal layering adaptation (experimental)</span>
+            <label class="switch">
+              <input id="temporal-layering" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <span>Allow automatic tool download/install</span>
+            <label class="switch">
+              <input id="allow-tool-auto-install" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="toggle-row" data-windows-only>
+          <span>Skip automatic virtual display driver install (Windows)</span>
+          <label class="switch">
+            <input id="no-driver-install" type="checkbox">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="hint" data-windows-only>This is rarely changed. If modified during a run, it applies on next host start.</div>
+        <div class="input-options">
+          <strong>Debug</strong>
+          <div class="toggle-row">
+            <span>Show debug console in UI</span>
+            <label class="switch">
+              <input id="show-debug-console" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        </details>
+        <div id="debug-panel" class="panel" hidden>
+          <strong>Debug console</strong>
+          <div class="hint">Live host log output. Only visible while this toggle is enabled.</div>
+          <pre id="debug-console" class="console"></pre>
+        </div>
+        <button id="save" type="submit">Save &amp; apply</button>
+        <div id="msg"></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="column column-right">
+    <div class="panel">
+      <strong>First-run checklist</strong>
+      <div id="setup-checklist" class="hint">Checking setup…</div>
+      <button id="run-setup-remediation-btn" type="button">Run setup repair checks</button>
+    </div>
+
+    <div class="panel autostart-panel">
+      <div class="toggle-row">
+        <div>
+          <strong>Start at login</strong>
+          <div class="hint" id="autostart-state">…</div>
+        </div>
+        <label class="switch">
+          <input id="autostart-toggle" type="checkbox" disabled>
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="panel tablet-panel">
+      <div class="toggle-row">
+        <div>
+          <strong>Client display preference</strong>
+          <div class="hint">Clears the connected client's saved resolution preference. The default resolution is used on the next reconnect.</div>
+        </div>
+        <button id="clear-mode-btn" type="button">Clear</button>
+      </div>
+    </div>
+
+    <div class="panel" data-windows-only>
+      <strong>Parsec VDD custom resolutions</strong>
+      <div class="hint">If custom VDD resolutions fail because HKLM is protected, run this one-time admin setup and approve UAC once.</div>
+      <button id="vdd-custom-resolution-setup-btn" type="button">Enable custom-resolution registry access (Admin)</button>
+    </div>
+
+    <div class="panel calibration-panel">
+      <strong>Per-device pen calibration</strong>
+      <div class="hint">Applies only to the currently connected client. Single-client mode is enforced on the host.</div>
+      <label for="calibration-device">Connected client</label>
+      <input id="calibration-device" type="text" readonly>
+      <div class="row">
+        <div>
+          <label for="calibration-scale-x">Scale X</label>
+          <input id="calibration-scale-x" type="number" min="0.5" max="1.5" step="0.01" value="1.00">
+        </div>
+        <div>
+          <label for="calibration-scale-y">Scale Y</label>
+          <input id="calibration-scale-y" type="number" min="0.5" max="1.5" step="0.01" value="1.00">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="calibration-offset-x">Offset X</label>
+          <input id="calibration-offset-x" type="number" min="-0.25" max="0.25" step="0.01" value="0.00">
+        </div>
+        <div>
+          <label for="calibration-offset-y">Offset Y</label>
+          <input id="calibration-offset-y" type="number" min="-0.25" max="0.25" step="0.01" value="0.00">
+        </div>
+      </div>
+      <button id="save-calibration-btn" type="button">Save calibration</button>
+    </div>
+
+    <div class="panel">
+      <strong>Session controls</strong>
+      <div class="hint">Manage the active client session without stopping the host.</div>
+      <div class="toggle-row">
+        <span>Lock client input</span>
+        <label class="switch">
+          <input id="input-lock-toggle" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <button id="pause-video-btn" type="button">Reconnect video stream</button>
+      <button id="disconnect-session-btn" type="button">Disconnect client session</button>
+    </div>
+
+    <div class="panel">
+      <strong>Diagnostics</strong>
+      <div class="hint">Download a JSON snapshot for troubleshooting and compatibility checks.</div>
+      <button id="download-diagnostics-btn" type="button">Download diagnostics</button>
+    </div>
+
+    <div class="panel stop-panel">
+      <div class="toggle-row">
+        <div>
+          <strong>Stop host</strong>
+          <div class="hint">Ends streaming and exits the host process.</div>
+        </div>
+        <button id="stop-btn" type="button" class="danger">Stop</button>
+      </div>
+    </div>
+  </div>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

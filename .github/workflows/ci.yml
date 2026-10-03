@@ -1,0 +1,97 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: host/go.mod
+
+      - name: Lint GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
+
+      - name: Check shell script syntax
+        run: |
+          for script in scripts/*.sh release/*.sh; do
+            bash -n "$script"
+          done
+
+  host:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: host
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: host/go.mod
+
+      - name: Vet host
+        run: go vet ./...
+
+      - name: Test host
+        run: go test ./...
+
+      - name: Build host (linux)
+        run: go build -o host .
+
+  host-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: host
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: host/go.mod
+
+      - name: Test host (windows)
+        run: go test ./...
+
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Compile Android release Kotlin
+        run: ./gradlew :app:compileReleaseKotlin
+
+      - name: Run Android unit tests
+        run: ./gradlew :app:testReleaseUnitTest
+
+      - name: Assemble Android release APK
+        run: ./gradlew :app:assembleRelease
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DrawSplay-APK
+          path: android/app/build/outputs/apk/release/app-release.apk

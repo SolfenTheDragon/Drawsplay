@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+# Launches the DrawSplay host service (Linux) from the release folder.
+# Checks for required runtime dependencies (adb, ffmpeg, GStreamer plugins)
+# and, if missing, offers to install them via apt before starting the host.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOST_BIN="$SCRIPT_DIR/drawsplay-host-linux-amd64"
+SKIP_INSTALL=0
+HOST_ARGS=()
+# Tracks whether *this run* actually applied a fix that needs a new login
+# session or a reboot to fully take effect, so the popup only fires when
+# it's actually relevant instead of on every launch.
+NEEDS_RELOGIN=0
+NEEDS_RESTART=0
+
+for arg in "$@"; do
+  if [[ "$arg" == "--no-install-deps" ]]; then
+    SKIP_INSTALL=1
+  else
+    HOST_ARGS+=("$arg")
+  fi
+done
+
+if [[ ! -x "$HOST_BIN" ]]; then
+  echo "Host binary not found or not executable: $HOST_BIN" >&2
+  exit 1
+fi
+
+# --- Dependency detection -----------------------------------------------
+# cmd_pkgs / elem_pkgs map a required command or GStreamer element to the
+# apt package(s) that provide it, so we only install what's actually missing.
+missing_pkgs=()
+
+check_cmd() {
+  local cmd="$1" pkgs="$2"
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "Missing command: $cmd (needs: $pkgs)"
+    for p in $pkgs; do
+      missing_pkgs+=("$p")
+    done
+  fi
+}
+
+check_gst_element() {
+  local element="$1" pkgs="$2"
+  if ! command -v gst-inspect-1.0 >/dev/null 2>&1; then
+    return
+  fi
+  if ! gst-inspect-1.0 "$element" >/dev/null 2>&1; then
+    echo "Missing GStreamer element: $element (needs: $pkgs)"
+    for p in $pkgs; do
+      missing_pkgs+=("$p")
+    done
+  fi
+}
+
+# Commands (checked every run, regardless of what was missing last time).
+check_cmd adb "android-sdk-platform-tools android-sdk-platform-tools-common"
+check_cmd ffmpeg "ffmpeg"
+check_cmd gst-launch-1.0 "gstreamer1.0-tools"
+check_cmd gst-inspect-1.0 "gstreamer1.0-tools"
+check_cmd vainfo "vainfo"
+
+# GStreamer elements the capture pipeline can use, from base/core up through
+# every hardware-encoder fallback the host tries (see host/pipeline_linux.go).
+# All are probed every run so a partially-fixed system still gets flagged.
+if command -v gst-inspect-1.0 >/dev/null 2>&1; then
+  check_gst_element pipewiresrc "gstreamer1.0-pipewire"
+  check_gst_element videoconvert "gstreamer1.0-plugins-base"
+  check_gst_element videoscale "gstreamer1.0-plugins-base"
+  check_gst_element videorate "gstreamer1.0-plugins-good"
+  check_gst_element h264parse "gstreamer1.0-plugins-bad"
+  check_gst_element vah264enc "gstreamer1.0-plugins-bad"
+  check_gst_element vaapih264enc "gstreamer1.0-vaapi"
+  check_gst_element x264enc "gstreamer1.0-plugins-ugly"
+fi
+
+# De-duplicate the package list while preserving order.
+if [[ ${#missing_pkgs[@]} -gt 0 ]]; then
+  deduped=()
+  for p in "${missing_pkgs[@]}"; do
+    found=0
+    for d in "${deduped[@]:-}"; do
+      [[ "$d" == "$p" ]] && found=1 && break
+    done
+    [[ $found -eq 0 ]] && deduped+=("$p")
+  done
+  missing_pkgs=("${deduped[@]}")
+fi
+
+# --- Dependency installation ---------------------------------------------
+if [[ ${#missing_pkgs[@]} -gt 0 ]]; then
+  echo
+  echo "Missing packages: ${missing_pkgs[*]}"
+  if [[ "$SKIP_INSTALL" -eq 1 ]]; then
+    echo "Skipping auto-install (--no-install-deps given). Install manually with:"
+    echo "  sudo apt install ${missing_pkgs[*]}"
+  elif ! command -v apt-get >/dev/null 2>&1; then
+    echo "apt-get not found; install these packages manually with your package manager:"
+    echo "  ${missing_pkgs[*]}"
+  else
+    echo "Attempting to install missing packages (you may be prompted for your sudo password)..."
+    if sudo apt-get update && sudo apt-get install -y "${missing_pkgs[@]}"; then
+      echo "Dependencies installed successfully."
+    else
+      echo "Automatic install failed. Install manually with:"
+      echo "  sudo apt install ${missing_pkgs[*]}"
+    fi
+  fi
+  echo
+fi
+
+# --- VA-API GPU driver check ---------------------------------------------
+# vainfo existing doesn't guarantee an encode-capable driver is loaded; probe
+# for "EncSlice" support and suggest the right driver package for the GPU.
+if command -v vainfo >/dev/null 2>&1; then
+  if ! vainfo 2>/dev/null | grep -q "EncSlice"; then
+    echo "No VA-API encode-capable driver detected; capture will fall back to slower software x264 encoding."
+    driver_pkg=""
+    if command -v lspci >/dev/null 2>&1; then
+      gpu_info="$(lspci 2>/dev/null | grep -iE 'vga|3d|display')"
+      if echo "$gpu_info" | grep -qi intel; then
+        driver_pkg="intel-media-va-driver-non-free"
+      elif echo "$gpu_info" | grep -qiE 'amd|radeon'; then
+        driver_pkg="mesa-va-drivers"
+      fi
+    fi
+    if [[ -n "$driver_pkg" ]]; then
+      if [[ "$SKIP_INSTALL" -eq 0 ]] && command -v apt-get >/dev/null 2>&1; then
+        echo "Installing GPU VA-API driver package: $driver_pkg (you may be prompted for your sudo password)..."
+        if sudo apt-get update && sudo apt-get install -y "$driver_pkg"; then
+          NEEDS_RESTART=1
+        else
+          echo "Automatic install failed. Install manually with: sudo apt install $driver_pkg"
+        fi
+      else
+        echo "Install manually with: sudo apt install $driver_pkg"
+      fi
+    else
+      echo "Could not auto-detect GPU vendor; install one of:"
+      echo "  sudo apt install intel-media-va-driver-non-free   # Intel integrated graphics"
+      echo "  sudo apt install mesa-va-drivers                  # AMD graphics"
+    fi
+    echo
+  fi
+fi
+
+# --- User group / permission checks (uinput + adb USB access) ------------
+# These require re-login to take effect, so we can add the user to the
+# groups but cannot make the change effective in this shell session.
+user_groups="$(groups "$USER" 2>/dev/null || true)"
+needs_groups=()
+for g in input plugdev; do
+  if [[ ! "$user_groups" =~ (^|[[:space:]])$g($|[[:space:]]) ]]; then
+    needs_groups+=("$g")
+  fi
+done
+if [[ ${#needs_groups[@]} -gt 0 ]]; then
+  echo "User '$USER' is missing group membership: ${needs_groups[*]} (needed for pen/uinput injection and ADB USB access)."
+  if [[ "$SKIP_INSTALL" -eq 0 ]]; then
+    if sudo usermod -aG "$(IFS=,; echo "${needs_groups[*]}")" "$USER"; then
+      echo "Added $USER to: ${needs_groups[*]}. Log out and back in for this to take effect."
+      NEEDS_RELOGIN=1
+    else
+      echo "Could not add groups automatically. Run manually: sudo usermod -aG $(IFS=,; echo "${needs_groups[*]}") $USER"
+    fi
+  else
+    echo "Run manually: sudo usermod -aG $(IFS=,; echo "${needs_groups[*]}") $USER"
+  fi
+  echo
+fi
+
+# --- /dev/uinput permission check (pen/touch injection) -------------------
+# Group membership alone isn't enough: without a udev rule, /dev/uinput is
+# root:root mode 0600 and stays that way even after a re-login. Install a
+# rule that grants the "input" group access, then apply it immediately so
+# injection can work without waiting for a reboot.
+UDEV_RULE_FILE="/etc/udev/rules.d/99-drawsplay-uinput.rules"
+UDEV_RULE_LINE='KERNEL=="uinput", GROUP="input", MODE="0660"'
+uinput_needs_fix=0
+if [[ -e /dev/uinput ]]; then
+  uinput_group="$(stat -c '%G' /dev/uinput 2>/dev/null || echo "")"
+  uinput_mode="$(stat -c '%a' /dev/uinput 2>/dev/null || echo "")"
+  if [[ "$uinput_group" != "input" || "$uinput_mode" != "660" ]]; then
+    uinput_needs_fix=1
+  fi
+fi
+if [[ ! -f "$UDEV_RULE_FILE" ]] || [[ "$uinput_needs_fix" -eq 1 ]]; then
+  echo "/dev/uinput is not accessible to the 'input' group (needed for pen/touch injection)."
+  if [[ "$SKIP_INSTALL" -eq 0 ]]; then
+    if [[ ! -f "$UDEV_RULE_FILE" ]]; then
+      echo "Installing udev rule: $UDEV_RULE_FILE"
+      if echo "$UDEV_RULE_LINE" | sudo tee "$UDEV_RULE_FILE" >/dev/null; then
+        sudo udevadm control --reload-rules 2>/dev/null || true
+        sudo udevadm trigger --name-match=uinput 2>/dev/null || true
+      else
+        echo "Could not write udev rule. Run manually:"
+        echo "  echo '$UDEV_RULE_LINE' | sudo tee $UDEV_RULE_FILE"
+        echo "  sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput"
+      fi
+    fi
+    # Apply immediately in case udev trigger didn't re-permission the live node.
+    sudo chgrp input /dev/uinput 2>/dev/null || true
+    sudo chmod 0660 /dev/uinput 2>/dev/null || true
+    if [[ "$(stat -c '%G:%a' /dev/uinput 2>/dev/null)" == "input:660" ]]; then
+      echo "/dev/uinput permissions fixed."
+    else
+      echo "Could not verify /dev/uinput permissions; a reboot may be required."
+      NEEDS_RESTART=1
+    fi
+  else
+    echo "Run manually:"
+    echo "  echo '$UDEV_RULE_LINE' | sudo tee $UDEV_RULE_FILE"
+    echo "  sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput"
+  fi
+  echo
+fi
+
+# --- Log out / restart popup ----------------------------------------------
+# Only shown when *this run* actually changed group membership or installed
+# a driver that needs a new session/reboot to take effect — not on every
+# launch, since those fixes are idempotent and usually only needed once.
+if [[ "$NEEDS_RELOGIN" -eq 1 || "$NEEDS_RESTART" -eq 1 ]]; then
+  if [[ "$NEEDS_RESTART" -eq 1 ]]; then
+    popup_msg="DrawSplay updated system permissions/drivers needed for pen and touch input.\n\nPlease RESTART your computer now for pen/touch input to work correctly."
+    title="Restart required"
+  else
+    popup_msg="DrawSplay added your user to required groups for pen and touch input.\n\nPlease LOG OUT and back in (or restart) for pen/touch input to work correctly."
+    title="Log out required"
+  fi
+  echo "$title: $popup_msg"
+  if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+    if command -v zenity >/dev/null 2>&1; then
+      zenity --warning --title="$title" --text="$popup_msg" 2>/dev/null &
+    elif command -v kdialog >/dev/null 2>&1; then
+      kdialog --title "$title" --sorry "$popup_msg" 2>/dev/null &
+    elif command -v xmessage >/dev/null 2>&1; then
+      xmessage -center "$popup_msg" 2>/dev/null &
+    elif command -v notify-send >/dev/null 2>&1; then
+      notify-send -u critical "$title" "$popup_msg" 2>/dev/null || true
+    fi
+  fi
+fi
+
+echo "Starting DrawSplay host..."
+exec "$HOST_BIN" "${HOST_ARGS[@]}"

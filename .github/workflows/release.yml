@@ -1,0 +1,239 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-android:
+    runs-on: windows-latest
+    env:
+      DRAWSPLAY_REQUIRE_SIGNING: "1"
+      DRAWSPLAY_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+      DRAWSPLAY_WINDOWS_SIGNING_TIMESTAMP_URL: ${{ secrets.WINDOWS_SIGNING_TIMESTAMP_URL }}
+      DRAWSPLAY_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      DRAWSPLAY_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      DRAWSPLAY_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: host/go.mod
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Prepare signing materials
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_PFX_BASE64)) {
+            throw "Missing secret WINDOWS_SIGNING_PFX_BASE64"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:DRAWSPLAY_WINDOWS_SIGNING_PFX_PASSWORD)) {
+            throw "Missing secret WINDOWS_SIGNING_PFX_PASSWORD"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:ANDROID_KEYSTORE_BASE64)) {
+            throw "Missing secret ANDROID_KEYSTORE_BASE64"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:DRAWSPLAY_ANDROID_KEYSTORE_PASSWORD)) {
+            throw "Missing secret ANDROID_KEYSTORE_PASSWORD"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:DRAWSPLAY_ANDROID_KEY_ALIAS)) {
+            throw "Missing secret ANDROID_KEY_ALIAS"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:DRAWSPLAY_ANDROID_KEY_PASSWORD)) {
+            throw "Missing secret ANDROID_KEY_PASSWORD"
+          }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP "drawsplay-signing-cert.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64))
+          "DRAWSPLAY_WINDOWS_SIGNING_PFX_PATH=$pfxPath" >> $env:GITHUB_ENV
+
+          $keystorePath = Join-Path $env:RUNNER_TEMP "drawsplay-android-release.keystore"
+          [IO.File]::WriteAllBytes($keystorePath, [Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64))
+          "DRAWSPLAY_ANDROID_KEYSTORE_FILE=$keystorePath" >> $env:GITHUB_ENV
+
+      - name: Build Windows host and Android APK
+        shell: pwsh
+        run: .\scripts\build-release.ps1
+
+      - name: Upload Windows and Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-android-release
+          if-no-files-found: error
+          path: |
+            release/DrawSplay.exe
+            release/DrawSplay.APK
+            release/DrawSplay-host-windows.zip
+            release/DrawSplay-android-release.zip
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: host/go.mod
+
+      - name: Build Linux host
+        working-directory: host
+        run: |
+          mkdir -p ../release
+          go build -trimpath -o ../release/drawsplay-host-linux-amd64 .
+          chmod +x ../release/drawsplay-host-linux-amd64
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          if-no-files-found: error
+          path: |
+            release/drawsplay-host-linux-amd64
+            release/launch-drawsplay-host.sh
+
+  publish-release:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: drawsplay-release-publication
+      cancel-in-progress: false
+    needs:
+      - build-windows-android
+      - build-linux
+    steps:
+      - name: Checkout release commit and tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            git fetch origin --tags
+            python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+
+          tags = subprocess.check_output(["git", "tag", "--list"], text=True).splitlines()
+          versions = [
+              tuple(map(int, match.groups()))
+              for tag in tags
+              if (match := re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", tag))
+          ]
+          major, minor, patch = max(versions, default=(0, 0, 0))
+          tag = f"v{major}.{minor}.{patch + 1}"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"tag={tag}\n")
+          print(f"Next release tag: {tag}")
+          PY
+          else
+            echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download Windows and Android artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-android-release
+          path: release
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release
+          path: release
+
+      - name: Generate SHA-256 checksums
+        working-directory: release
+        run: |
+          sha256sum \
+            DrawSplay.exe \
+            DrawSplay.APK \
+            DrawSplay-host-windows.zip \
+            DrawSplay-android-release.zip \
+            drawsplay-host-linux-amd64 \
+            launch-drawsplay-host.sh > SHA256SUMS.txt
+
+      - name: Generate release patch notes
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          tag = os.environ["RELEASE_TAG"]
+          commit = os.environ["GITHUB_SHA"]
+          tags = subprocess.check_output(
+              ["git", "tag", "--merged", commit], text=True
+          ).splitlines()
+          versions = [
+              (tuple(map(int, match.groups())), candidate)
+              for candidate in tags
+              if candidate != tag
+              and (match := re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", candidate))
+          ]
+          current = re.fullmatch(r"v([0-9]+)\.([0-9]+)\.([0-9]+)", tag)
+          if current:
+              versions = [
+                  item for item in versions
+                  if item[0] < tuple(map(int, current.groups()))
+              ]
+          previous = max(versions)[1] if versions else None
+          revision = f"{previous}..{commit}" if previous else commit
+          changes = subprocess.check_output(
+              ["git", "log", "--reverse", "--format=- %s (%h)", revision],
+              text=True,
+          ).strip()
+          repository = os.environ["GITHUB_REPOSITORY"]
+          notes = f"# DrawSplay {tag}\n\n## Changes\n\n"
+          notes += changes or "No new commits since the previous release."
+          if previous:
+              notes += f"\n\n[Full changelog](https://github.com/{repository}/compare/{previous}...{tag})"
+          notes += (
+              "\n\n## Downloads\n\n"
+              "- **Windows:** `DrawSplay.exe`\n"
+              "- **Android:** `DrawSplay.APK`\n"
+              "- **Linux (amd64):** `drawsplay-host-linux-amd64` and `launch-drawsplay-host.sh`\n"
+              "\nUse `SHA256SUMS.txt` to verify your downloads.\n"
+          )
+          Path("release/PATCH_NOTES.md").write_text(notes, encoding="utf-8")
+          PY
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          body_path: release/PATCH_NOTES.md
+          files: |
+            release/DrawSplay.exe
+            release/DrawSplay.APK
+            release/DrawSplay-host-windows.zip
+            release/DrawSplay-android-release.zip
+            release/drawsplay-host-linux-amd64
+            release/launch-drawsplay-host.sh
+            release/SHA256SUMS.txt

@@ -1,0 +1,482 @@
+﻿package com.drawsplay.tablet
+
+import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.os.Bundle
+import android.util.Log
+import android.view.Display
+import android.graphics.ImageFormat
+import android.view.KeyEvent
+import android.view.Surface
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import android.view.WindowManager
+import android.widget.FrameLayout
+import android.widget.TextView
+import android.media.ImageReader
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
+import com.drawsplay.tablet.input.InputChannel
+import com.drawsplay.tablet.input.InputPadView
+import com.drawsplay.tablet.input.HostCursorView
+import com.drawsplay.tablet.transport.HostEndpointSelector
+import com.drawsplay.tablet.transport.WiFiDiscoveryManager
+import com.drawsplay.tablet.video.VideoChannel
+
+/**
+ * Single fullscreen activity. Zero-configuration by design: both channels
+ * connect automatically, retry until the host appears, and reconnect after
+ * drops â€” there are no connect/disconnect controls.
+ *
+ * View stack (back to front):
+ *  1. [SurfaceView]   â€” hardware-decoded host video.
+ *  2. [InputPadView]  â€” transparent, captures touch/stylus over the video so
+ *                       input coordinates map 1:1 onto displayed host pixels.
+ *  3. Status text     â€” only visible while waiting for the host.
+ *
+ * Channel lifecycles:
+ *  - By default, input runs from onStart to onStop and video tracks the
+ *    foreground surface.
+ *  - When the host enables keepAliveOnBackground, input stays connected and
+ *    video switches to a tiny headless sink when the foreground surface is
+ *    destroyed, keeping the host monitor session alive while the app is
+ *    backgrounded.
+ */
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var videoSurface: SurfaceView
+    private lateinit var statusOverlay: FrameLayout
+    private lateinit var statusText: TextView
+    private lateinit var inputPad: InputPadView
+    private lateinit var hostCursor: HostCursorView
+
+    private lateinit var inputChannel: InputChannel
+    private lateinit var videoChannel: VideoChannel
+    private val endpointSelector = HostEndpointSelector()
+    private lateinit var wifiDiscoveryManager: WiFiDiscoveryManager
+    private var backgroundSink: ImageReader? = null
+    @Volatile
+    private var pendingForegroundSurface: Surface? = null
+
+    @Volatile
+    private var keepAliveOnBackground = false
+    @Volatile
+    private var wifiPolicyEnabled = false
+    @Volatile
+    private var wifiPolicyAuthToken = ""
+    @Volatile
+    private var wifiPolicyTlsRequired = false
+    @Volatile
+    private var wifiPolicyTlsFingerprint = ""
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        videoSurface = findViewById(R.id.videoSurface)
+        statusOverlay = findViewById(R.id.statusOverlay)
+        statusText = findViewById(R.id.statusText)
+        inputPad = findViewById(R.id.inputPad)
+        hostCursor = findViewById(R.id.hostCursor)
+
+        Log.i(TAG, "Android runtime profile: sdk=${AndroidCompat.sdkInt}, " +
+            "windowMetrics=${AndroidCompat.supportsWindowMetrics}, " +
+            "frameRateHint=${AndroidCompat.supportsSurfaceFrameRateHint}, " +
+            "lowLatencyHint=${AndroidCompat.supportsLowLatencyDecoderHint}")
+
+        enterImmersiveMode()
+        requestHighRefreshMode()
+        // A monitor must not sleep while in use.
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        restoreKnownHostPolicy()
+
+        inputChannel = InputChannel(object : InputChannel.InputChannelListener {
+            override fun onConnected() {
+                runOnUiThread { updateStatus() }
+            }
+
+            override fun onWaitingForHost(reason: String?) {
+                runOnUiThread { updateStatus() }
+            }
+
+            override fun onHostCursor(x: Float, y: Float, visible: Boolean) {
+                runOnUiThread { hostCursor.updateCursor(x, y, visible) }
+            }
+
+            override fun onHostDisplayMode(width: Int, height: Int) {
+                storeDisplayModePreference(width, height)
+            }
+
+            override fun onClearHostDisplayModePreference() {
+                clearDisplayModePreference()
+            }
+
+            override fun onSessionPolicy(
+                keepAliveOnBackground: Boolean,
+                wifiEnabled: Boolean,
+                wifiAuthToken: String,
+                wifiTlsRequired: Boolean,
+                wifiTlsFingerprint: String
+            ) {
+                applySessionPolicy(
+                    keepAliveOnBackground,
+                    wifiEnabled,
+                    wifiAuthToken,
+                    wifiTlsRequired,
+                    wifiTlsFingerprint
+                )
+                runOnUiThread { updateWiFiDiscoveryState() }
+            }
+        }, endpointSelector, appVersionName())
+        inputChannel.displayInfo = buildDisplayInfo()
+
+        videoChannel = VideoChannel(object : VideoChannel.VideoChannelListener {
+            override fun onStreamStarted(encoder: String, fps: Int) {
+                streamUp = true
+                runOnUiThread { updateStatus() }
+            }
+
+            override fun onWaitingForHost(reason: String?) {
+                streamUp = false
+                runOnUiThread { updateStatus() }
+            }
+        }, endpointSelector)
+        wifiDiscoveryManager = WiFiDiscoveryManager(
+            this,
+            endpointSelector,
+            { wifiPolicyAuthToken },
+            { wifiPolicyTlsRequired },
+            { wifiPolicyTlsFingerprint }
+        )
+
+        inputPad.onInputBatch = { events -> inputChannel.send(events) }
+
+        videoSurface.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                pendingForegroundSurface = holder.surface
+                releaseBackgroundVideoSink()
+                maybeStartForegroundVideo()
+            }
+
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                // Decoder output size is stream-driven; nothing to do here.
+            }
+
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                pendingForegroundSurface = null
+                if (keepAliveOnBackground && !isFinishing) {
+                    val sink = ensureBackgroundVideoSink()
+                    if (sink != null) {
+                        videoChannel.start(sink.surface)
+                        return
+                    }
+                }
+                videoChannel.stop()
+            }
+        })
+    }
+
+    override fun onStart() {
+        super.onStart()
+        updateWiFiDiscoveryState()
+        inputChannel.start()
+    }
+
+    override fun onStop() {
+        if (!keepAliveOnBackground || isFinishing) {
+            inputChannel.stop()
+        }
+        wifiDiscoveryManager.stop()
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        releaseBackgroundVideoSink()
+        videoChannel.stop()
+        inputChannel.shutdown()
+        super.onDestroy()
+    }
+
+    @Volatile
+    private var streamUp = false
+
+    // --- Host display mode (resolution matching) ---
+    //
+    // The hello reports the panel's native resolution (landscape-normalized)
+    // so the host sizes its virtual display to match by default, plus the
+    // stored preferred mode. When the user changes the resolution in the
+    // Windows display settings, the host pushes it back and it is persisted
+    // here â€” the app is the durable store for the user's choice.
+
+    private val displayPrefs by lazy { getSharedPreferences("display", MODE_PRIVATE) }
+    private val knownHostPrefs by lazy { knownHostPreferences() }
+
+    private fun buildDisplayInfo(): InputChannel.DisplayInfo {
+        val mode = currentDisplay()?.mode
+        val fallbackBounds =
+            if (AndroidCompat.supportsWindowMetrics) {
+                windowManager.maximumWindowMetrics.bounds
+            } else {
+                @Suppress("DEPRECATION")
+                resources.displayMetrics.run { android.graphics.Rect(0, 0, widthPixels, heightPixels) }
+            }
+        val physicalWidth = mode?.physicalWidth ?: fallbackBounds.width()
+        val physicalHeight = mode?.physicalHeight ?: fallbackBounds.height()
+        val nativeW = maxOf(physicalWidth, physicalHeight)
+        val nativeH = minOf(physicalWidth, physicalHeight)
+        return InputChannel.DisplayInfo(
+            nativeWidth = nativeW,
+            nativeHeight = nativeH,
+            prefWidth = displayPrefs.getInt("prefWidth", 0),
+            prefHeight = displayPrefs.getInt("prefHeight", 0)
+        )
+    }
+
+    private fun storeDisplayModePreference(width: Int, height: Int) {
+        val saved = displayPrefs.edit()
+            .putInt("prefWidth", width)
+            .putInt("prefHeight", height)
+            .commit()
+        val currentInfo = inputChannel.displayInfo
+        inputChannel.displayInfo =
+            if (currentInfo != null) {
+                currentInfo.copy(prefWidth = width, prefHeight = height)
+            } else {
+                buildDisplayInfo()
+            }
+        if (!saved) {
+            Log.w(TAG, "Failed to persist preferred display mode ${width}x${height}")
+        }
+    }
+
+    private fun clearDisplayModePreference() {
+        val saved = displayPrefs.edit()
+            .remove("prefWidth")
+            .remove("prefHeight")
+            .commit()
+        val currentInfo = inputChannel.displayInfo
+        inputChannel.displayInfo =
+            if (currentInfo != null) {
+                currentInfo.copy(prefWidth = 0, prefHeight = 0)
+            } else {
+                buildDisplayInfo()
+            }
+        if (!saved) {
+            Log.w(TAG, "Failed to clear preferred display mode")
+        }
+    }
+
+    // --- Keyboard passthrough (M5) ---
+    //
+    // Physical keyboards attached to the tablet type on the host. Key
+    // events are forwarded and consumed here so the tablet UI never reacts
+    // to them; device-local keys (back, volume, power) stay local.
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (isLocalKey(event.keyCode)) return super.dispatchKeyEvent(event)
+        val action = when (event.action) {
+            KeyEvent.ACTION_DOWN -> "down"
+            KeyEvent.ACTION_UP -> "up"
+            else -> return super.dispatchKeyEvent(event)
+        }
+        val chars = event.unicodeChar.takeIf { it != 0 }
+            ?.let { String(Character.toChars(it and Int.MAX_VALUE)) }
+        inputChannel.sendKey(action, event.keyCode, event.metaState, chars)
+        return true
+    }
+
+    private fun isLocalKey(keyCode: Int): Boolean = when (keyCode) {
+        KeyEvent.KEYCODE_BACK,
+        KeyEvent.KEYCODE_HOME,
+        KeyEvent.KEYCODE_APP_SWITCH,
+        KeyEvent.KEYCODE_POWER,
+        KeyEvent.KEYCODE_VOLUME_UP,
+        KeyEvent.KEYCODE_VOLUME_DOWN,
+        KeyEvent.KEYCODE_VOLUME_MUTE -> true
+        else -> false
+    }
+
+    /**
+     * Shows the opaque waiting overlay until video is flowing; hides it
+     * after. Opaque so a stale last frame never lingers when the host
+     * disconnects.
+     */
+    private fun updateStatus() {
+        if (streamUp) {
+            statusOverlay.visibility = FrameLayout.GONE
+        } else {
+            statusOverlay.visibility = FrameLayout.VISIBLE
+            statusText.text = getString(R.string.status_waiting_for_host)
+        }
+    }
+
+    /**
+     * Holds the tablet panel at its highest mode while DrawSplay is active.
+     *
+     * Some adaptive-refresh Android builds (notably Samsung/MediaTek) apply
+     * an "idle" override that drops a SurfaceView to 30 Hz even when the
+     * surface explicitly votes for a fixed 60 fps source. The decoder still
+     * reports 60 rendered frames per second in that state, but SurfaceFlinger
+     * presents only half of them, which feels like a transport regression.
+     * A window-level mode request is stronger than the surface hint and also
+     * keeps pen/touch presentation latency low.
+     */
+    private fun requestHighRefreshMode() {
+        val bestMode = currentDisplay()?.supportedModes?.maxByOrNull { it.refreshRate } ?: return
+        val attrs = window.attributes
+        attrs.preferredDisplayModeId = bestMode.modeId
+        attrs.preferredRefreshRate = bestMode.refreshRate
+        window.attributes = attrs
+        Log.i(TAG, "Requested display mode ${bestMode.modeId} at ${bestMode.refreshRate} Hz")
+    }
+
+    private fun currentDisplay(): Display? =
+        if (AndroidCompat.supportsWindowMetrics) {
+            display
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay
+        }
+
+    private fun ensureBackgroundVideoSink(): ImageReader? {
+        val existing = backgroundSink
+        if (existing != null) return existing
+        return try {
+            val created = ImageReader.newInstance(16, 16, ImageFormat.PRIVATE, 2)
+            backgroundSink = created
+            created
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed creating background video sink", e)
+            null
+        }
+    }
+
+    private fun releaseBackgroundVideoSink() {
+        backgroundSink?.close()
+        backgroundSink = null
+    }
+
+    private fun applySessionPolicy(
+        keepAliveOnBackground: Boolean,
+        wifiEnabled: Boolean,
+        wifiAuthToken: String,
+        wifiTlsRequired: Boolean,
+        wifiTlsFingerprint: String
+    ) {
+        this.keepAliveOnBackground = keepAliveOnBackground
+        this.wifiPolicyEnabled = wifiEnabled
+        this.wifiPolicyTlsRequired = wifiTlsRequired
+        val authToken = wifiAuthToken.trim()
+        if (authToken.isNotEmpty()) {
+            this.wifiPolicyAuthToken = authToken
+        }
+        val tlsFingerprint = wifiTlsFingerprint.trim()
+        if (tlsFingerprint.isNotEmpty()) {
+            this.wifiPolicyTlsFingerprint = tlsFingerprint
+        }
+        persistKnownHostPolicy()
+        if (this.wifiPolicyEnabled && !hasKnownHostTrust()) {
+            Log.w(TAG, "Host enabled Wi-Fi without complete known-host trust material")
+        }
+    }
+
+    private fun restoreKnownHostPolicy() {
+        wifiPolicyEnabled = knownHostPrefs.getBoolean(KEY_WIFI_ENABLED, false)
+        wifiPolicyAuthToken = knownHostPrefs.getString(KEY_WIFI_AUTH_TOKEN, "")?.trim().orEmpty()
+        wifiPolicyTlsRequired = knownHostPrefs.getBoolean(KEY_WIFI_TLS_REQUIRED, false)
+        wifiPolicyTlsFingerprint =
+            knownHostPrefs.getString(KEY_WIFI_TLS_FINGERPRINT, "")?.trim().orEmpty()
+        if (wifiPolicyEnabled && !hasKnownHostTrust()) {
+            Log.w(TAG, "Known-host trust was incomplete; waiting for fresh host policy")
+            wifiPolicyEnabled = false
+        }
+    }
+
+    private fun persistKnownHostPolicy() {
+        val saved = knownHostPrefs.edit()
+            .putBoolean(KEY_WIFI_ENABLED, wifiPolicyEnabled)
+            .putString(KEY_WIFI_AUTH_TOKEN, wifiPolicyAuthToken)
+            .putBoolean(KEY_WIFI_TLS_REQUIRED, wifiPolicyTlsRequired)
+            .putString(KEY_WIFI_TLS_FINGERPRINT, wifiPolicyTlsFingerprint)
+            .commit()
+        if (!saved) {
+            Log.w(TAG, "Failed to persist known-host Wi-Fi policy")
+        }
+    }
+
+    private fun hasKnownHostTrust(): Boolean {
+        if (wifiPolicyAuthToken.isBlank()) return false
+        if (wifiPolicyTlsRequired && wifiPolicyTlsFingerprint.isBlank()) return false
+        return true
+    }
+
+    private fun updateWiFiDiscoveryState() {
+        if (wifiPolicyEnabled && hasKnownHostTrust()) {
+            wifiDiscoveryManager.start()
+        } else {
+            wifiDiscoveryManager.stop()
+        }
+    }
+
+    private fun maybeStartForegroundVideo() {
+        val surface = pendingForegroundSurface ?: return
+        videoChannel.start(surface)
+    }
+
+    private fun knownHostPreferences(): SharedPreferences {
+        return try {
+            val masterKey = MasterKey.Builder(this)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                this,
+                "known-host",
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Encrypted known-host preferences unavailable; falling back to MODE_PRIVATE", e)
+            getSharedPreferences("known-host", MODE_PRIVATE)
+        }
+    }
+
+    /** Hides system bars: a monitor shows only the host's pixels. */
+    private fun enterImmersiveMode() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    }
+
+    companion object {
+        private const val TAG = "MainActivity"
+        private const val KEY_WIFI_ENABLED = "wifiEnabled"
+        private const val KEY_WIFI_AUTH_TOKEN = "wifiAuthToken"
+        private const val KEY_WIFI_TLS_REQUIRED = "wifiTlsRequired"
+        private const val KEY_WIFI_TLS_FINGERPRINT = "wifiTlsFingerprint"
+    }
+
+    private fun appVersionName(): String {
+        return try {
+            val pkgInfo =
+                if (AndroidCompat.supportsPackageInfoFlagsApi) {
+                    packageManager.getPackageInfo(
+                        packageName,
+                        PackageManager.PackageInfoFlags.of(0)
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    packageManager.getPackageInfo(packageName, 0)
+                }
+            pkgInfo.versionName ?: "unknown"
+        } catch (_: Exception) {
+            "unknown"
+        }
+    }
+}

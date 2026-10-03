@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the badge background of resources/Drawsplay Icon.png so the
+         adaptive foreground blends seamlessly. -->
+    <color name="ic_launcher_background">#0B0E26</color>
+</resources>

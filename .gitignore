@@ -1,33 +1,68 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Environment/secrets
+.env
+.env.*
+
+# Logs and temporary files
+*.log
+*.tmp
+*.cache
+
+# Go build/test artifacts
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-
-# Test binary, built with `go test -c`
 *.test
-
-# Code coverage profiles and other test artifacts
 *.out
 coverage.*
-!coverage.go
 *.coverprofile
 profile.cov
-
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
 go.work
 go.work.sum
 
-# env file
-.env
+# Host local binaries
+host/host
+host/host.exe
+host/host.exe~
+
+# Android/Gradle local artifacts
+android/.gradle/
+android/.idea/
+android/local.properties
+android/captures/
+android/*.iml
+android/**/build/
+android/**/.cxx/
+android/**/externalNativeBuild/
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# Private documentation and AI-agent context.
+# README.md is the only documentation file intended for the public repository.
+*.md
+*.mdx
+*.rst
+*.adoc
+*.txt
+AGENTS.md
+.github/instructions/
+.github/copilot-instructions.md
+.github/prompts/
+ai-docs/
+AI-Docs/
+AI-DOCS/
+AI_Docs/
+AI Docs/
+docs/
+wiki/
+research/
+!release/SHA256SUMS.txt
+!/README.md
