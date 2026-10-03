@@ -4,7 +4,8 @@ Use your Android tablet as a touch- and pen-enabled extension of your computer's
 
 Download the latest [DrawSplay release](https://github.com/SolfenTheDragon/Drawsplay/releases/latest). This guide covers installing and using its packaged app and host:
 
-- **Host:** `DrawSplay.exe`
+- **Windows host:** `DrawSplay.exe`
+- **Linux host (x86-64/amd64):** `drawsplay-host-linux-amd64` and `launch-drawsplay-host.sh`
 - **Android app:** `DrawSplay.APK`
 
 No source build is required.
@@ -22,9 +23,17 @@ No source build is required.
 1. Android device with Developer Options enabled
 2. USB debugging enabled
 
+### Linux host PC
+
+Use the Linux amd64 download on an x86-64 computer. **Ubuntu 22.04+ with GNOME Wayland** supports an extended desktop on the tablet; **X11 sessions** use desktop mirroring instead. Other Wayland desktops are not supported for full-desktop capture: the fallback may show only XWayland applications.
+
+Linux needs ADB, ffmpeg, and (for GNOME Wayland extended display) GStreamer with its PipeWire plugin. Touch and pen input require access to `/dev/uinput`. See the Linux setup below.
+
 ---
 
 ## Install the host and app
+
+### Prepare Windows files
 
 Place the binaries somewhere easy to find, for example:
 
@@ -42,7 +51,7 @@ Optional prebundled runtime files (recommended for offline setup):
 
 ---
 
-### Install the Android app
+### Install the Android app on Windows
 
 Connect the tablet over USB, then run:
 
@@ -55,7 +64,7 @@ If prompted on the tablet, allow USB debugging for this computer.
 
 ---
 
-### Start the host
+### Start the Windows host
 
 In PowerShell:
 
@@ -73,6 +82,42 @@ What happens on first run:
    - Otherwise use PATH / known install locations
    - Otherwise auto-download and install bundled runtime copies beside `DrawSplay.exe`
 4. On Windows, if Parsec VDD is missing and auto-install is enabled, the host may attempt a driver install (UAC prompt may appear).
+
+---
+
+### Install and start on Linux
+
+Download `drawsplay-host-linux-amd64`, `launch-drawsplay-host.sh`, and `DrawSplay.APK` into the same folder. Open a terminal in that folder:
+
+```bash
+chmod +x drawsplay-host-linux-amd64 launch-drawsplay-host.sh
+./launch-drawsplay-host.sh
+```
+
+Run the launcher as your normal desktop user, not with `sudo`. On Ubuntu/Debian, it attempts to install missing tools and set up USB/input permissions, asking for your sudo password when needed. These changes can require logging out and back in or restarting. To keep system changes manual, run `./launch-drawsplay-host.sh --no-install-deps` instead.
+
+For manual Ubuntu setup:
+
+```bash
+sudo apt install android-sdk-platform-tools android-sdk-platform-tools-common ffmpeg \
+  gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+  gstreamer1.0-plugins-ugly gstreamer1.0-pipewire
+echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | sudo tee /etc/udev/rules.d/99-drawsplay-uinput.rules
+sudo usermod -aG input,plugdev "$USER"
+```
+
+Restart after setting up permissions. On other distributions, install the equivalent packages using your package manager; the launcher's automatic package installation requires `apt-get`.
+
+Connect the tablet by USB, accept its USB debugging prompt, then install the app from a second terminal in the download folder:
+
+```bash
+adb devices
+adb install -r ./DrawSplay.APK
+```
+
+Keep the host running and open DrawSplay on the tablet. On GNOME Wayland, map **DrawSplay Pen** to the tablet's display in **Settings > Wacom Tablet > Map to Monitor**.
+
+For smoother streaming, install your GPU's VA-API encoding driver. On Ubuntu, use `intel-media-va-driver-non-free` for supported Intel graphics or `mesa-va-drivers` for AMD, plus `vainfo`. Without hardware encoding, software encoding can reduce performance.
 
 ---
 
@@ -112,12 +157,14 @@ Video-setting changes restart the active stream automatically.
 
 On **Windows with the Android app connected**, resolution and refresh rate are controlled from **Windows Display Settings** (not from DrawSplay web settings).
 
+On **GNOME Wayland**, change the tablet's resolution in **Settings > Displays**. Frame rate remains configurable in DrawSplay's settings panel.
+
 ---
 
 ## Daily use
 
 1. Connect tablet over USB
-2. Start `DrawSplay.exe`
+2. Start `DrawSplay.exe` on Windows or `./launch-drawsplay-host.sh` on Linux
 3. Launch DrawSplay app on tablet
 
 That is the full daily startup sequence.
@@ -143,6 +190,16 @@ C:\DrawSplay\runtime\adb\adb.exe devices
 ```
 
 Then reconnect USB and confirm USB debugging prompt is accepted.
+
+### Linux USB or pen input does not work
+
+If `adb devices` reports `no permissions`, check that Android USB rules are installed and your user belongs to `plugdev`. If the desktop appears but touch or pen does not work, check the `/dev/uinput` rule and `input` group membership. Log out and back in after changing groups; restart after adding the input rule if permissions are still incorrect.
+
+On GNOME Wayland, also check the pen-to-monitor mapping in Wacom Tablet settings. Occasionally Linux may show two cursors after switching between mouse and pen input; this is a known GNOME/Mutter limitation.
+
+### Linux shows a mirror instead of an extra display
+
+Extended display requires GNOME Wayland and working GStreamer/PipeWire tools. Check the warnings in DrawSplay's settings panel. X11 sessions mirror the existing desktop; on other Wayland desktops, the fallback may capture only XWayland windows.
 
 ### Black screen or no video
 
