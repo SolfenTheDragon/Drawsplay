@@ -4,19 +4,24 @@ package main
 
 import "time"
 
-// PipeWire step-down damping.
+// Linux step-down damping.
 //
-// Restarting the encode subprocess is the only congestion relief the Mutter
-// virtual-monitor path has: no Linux pipelineSpec sets SupportsTemporalDrop,
+// Restarting the encode subprocess is the only congestion relief the Linux
+// capture backends have: no Linux pipelineSpec sets SupportsTemporalDrop,
 // and temporal layering is switched off outright for Android clients
 // (handleVideoSession in video.go), so nothing absorbs a congestion report
 // ahead of the bitrate ladder.
 //
-// The restart itself is cheap on this backend — mutterDisplay.Refresh() is a
-// no-op, so the ScreenCast session, the virtual monitor, its PipeWire node
-// and the client's video socket all survive, and only gst-launch-1.0 is
-// respawned against the same node — but it is not free, so a lone stats
-// sample that happened to catch a deep decode queue should not cause one.
+// A restart is never free. On the Mutter virtual-monitor path only
+// gst-launch-1.0 is respawned against the same PipeWire node
+// (mutterDisplay.Refresh() is a no-op, so the ScreenCast session, the virtual
+// monitor and the client's video socket all survive); on x11grab the whole
+// ffmpeg capture and encode process starts over. Either way the picture
+// holds until the new encoder's first keyframe, so a lone report should not
+// cause one: a stats sample that caught a deep decode queue, or one slow
+// write while Wi-Fi roamed between access points, describes a stall that is
+// already over, and restarting for it only adds a second freeze straight
+// after the first.
 //
 // The client reports every 250 ms (VideoChannel.STATS_INTERVAL_MS), so
 // requiring two reports inside 2 s delays the first step down by one stats
@@ -24,17 +29,13 @@ import "time"
 // steps are paced by stepDownCooldown (1.5 s), which dominates, so the rate
 // at which the ladder descends is unchanged.
 const (
-	pipewireCongestionConfirmations = 2
-	pipewireCongestionWindow        = 2 * time.Second
+	linuxCongestionConfirmations = 2
+	linuxCongestionWindow        = 2 * time.Second
 )
 
 // newSessionCongestionGate returns the ladder step-down damping for a capture
-// backend. x11grab keeps the immediate response it has always had; its
-// pathological restart storms came from over-*rate* capture, which the fps
-// clamp in capture_fps_policy_other.go removed at the source.
-func newSessionCongestionGate(target captureTarget) *congestionGate {
-	if target.Kind == capturePipeWire {
-		return newCongestionGate(pipewireCongestionConfirmations, pipewireCongestionWindow)
-	}
-	return newCongestionGate(1, 0)
+// backend. Every Linux backend restarts its encoder to step down, so all of
+// them share the same confirmation.
+func newSessionCongestionGate(captureTarget) *congestionGate {
+	return newCongestionGate(linuxCongestionConfirmations, linuxCongestionWindow)
 }

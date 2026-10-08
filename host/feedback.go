@@ -42,9 +42,10 @@ const (
 // sessionMonitor aggregates congestion and liveness signals for one video
 // session. All fields are goroutine-safe (reader goroutine + session loop).
 type sessionMonitor struct {
-	congested  atomic.Bool
-	clientGone atomic.Bool
-	lastStats  atomic.Pointer[clientStatsMsg]
+	congested   atomic.Bool
+	clientGone  atomic.Bool
+	lastStats   atomic.Pointer[clientStatsMsg]
+	staleFrames atomic.Int64 // client stale-frame skips not yet logged
 }
 
 var latestClientVideoStats = struct {
@@ -64,11 +65,29 @@ func (m *sessionMonitor) runStatsReader(conn net.Conn) {
 		}
 		m.lastStats.Store(&stats)
 		publishLatestClientVideoStats(&stats)
-		if stats.QueuedFrames >= congestQueueDepth || stats.FrameDrops > 0 {
+		if stats.StaleFrames > 0 {
+			m.staleFrames.Add(stats.StaleFrames)
+		}
+		if decodeQueueCongested(&stats) || stats.FrameDrops > 0 {
 			m.congested.Store(true)
 		}
 	}
 	m.clientGone.Store(true)
+}
+
+// decodeQueueCongested reports whether a client's decode queue says frames
+// arrive faster than it can decode them. A deep queue while the client is
+// skipping stale frames is the backlog of a stall that already ended
+// (a Wi-Fi roam, a USB hiccup) being drained in one burst: a lower bitrate
+// would not have prevented it, and restarting the encoder for it would
+// only add a second freeze.
+func decodeQueueCongested(stats *clientStatsMsg) bool {
+	return stats.QueuedFrames >= congestQueueDepth && stats.StaleFrames == 0
+}
+
+// takeStaleFrames returns the client's stale-frame skips since the last call.
+func (m *sessionMonitor) takeStaleFrames() int64 {
+	return m.staleFrames.Swap(0)
 }
 
 // consumeCongestion returns true at most once per congestion episode.

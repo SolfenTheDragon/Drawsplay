@@ -9,7 +9,8 @@ package main
 // Data flow per session:
 //
 //	ffmpeg stdout (Annex-B byte stream)
-//	  -> splitAnnexB (reassemble into complete NAL units)
+//	  -> splitAnnexB (reassemble into complete NAL units; accessUnitTracker
+//	     sends a frame's last unit as soon as the frame's last write is read)
 //	  -> writeVideoPacket (type+length framing, see protocol.go)
 //	  -> TCP -> adb reverse -> tablet MediaCodec
 
@@ -46,6 +47,10 @@ const (
 	// Keep this comfortably above frame cadence/jitter so we don't emit
 	// partial NAL units on active streams (which corrupts decoder input).
 	nalTailFlushInterval = 120 * time.Millisecond
+	// pipelineReadSize is the pipeline stdout read size. Boundary proofs
+	// (see preparePipeWriteBoundaries) cover only reads shorter than it, and
+	// it bounds a chunk queued between the reader and the sender.
+	pipelineReadSize = 64 * 1024
 	// videoHandoffWaitTimeout is how long a new connection waits for an
 	// existing session to tear down before this connection is rejected.
 	// Teardown includes stopping the pipeline process and removing the
@@ -441,7 +446,7 @@ const (
 	// treated as startup failures so the next candidate can be tried in the
 	// same session instead of triggering a reconnect loop.
 	pipelineStartupFailureWindow = 2 * time.Second
-	displayRecoveryMaxAttempts  = 2
+	displayRecoveryMaxAttempts   = 2
 )
 
 type captureRecoveryState struct {
@@ -656,7 +661,7 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		for _, spec := range specs {
 			pipelineStarted := time.Now()
 			produced, err := runEncodePipeline(ctx, writer, effOpts, spec, monitor, rc, temporal, blackout, gate)
-			if errors.Is(err, errRateChanged) {
+			if errors.Is(err, errRateChanged) || errors.Is(err, errAccessUnitResync) {
 				if produced {
 					goodSpecs[spec.Name] = true
 				}
@@ -949,16 +954,23 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 	type readChunk struct {
 		data []byte
 		err  error
+		// writeBoundary: the read provably ended where a write ended.
+		writeBoundary bool
+	}
+	tracker := accessUnitTrackerFor(spec, pipeline.fullPipeBound)
+	if tracker != nil {
+		log.Printf("Pipeline %s: early frame emission on (pipe bound %d bytes)", spec.Name, pipeline.fullPipeBound)
 	}
 	chunks := make(chan readChunk, 16)
 	go func() {
-		read := make([]byte, 64*1024)
+		read := make([]byte, pipelineReadSize)
+		proofs := boundaryReads{fullPipe: pipeline.fullPipeBound}
 		for {
 			n, rerr := pipeline.stdout.Read(read)
 			if n > 0 {
 				out := make([]byte, n)
 				copy(out, read[:n])
-				chunks <- readChunk{data: out}
+				chunks <- readChunk{data: out, writeBoundary: proofs.next(n, len(read))}
 			}
 			if rerr != nil {
 				chunks <- readChunk{err: rerr}
@@ -990,11 +1002,14 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 					}
 					buf = buf[:0]
 					lastChunkAt = time.Time{}
+					if tracker != nil {
+						tracker.forget()
+					}
 				}
 			}
 			if now := time.Now(); now.After(nextSummary) {
 				nextSummary = now.Add(sessionSummaryInterval)
-				logSessionSummary(spec.Name, opts.Bitrate, sentNALs, sentBytes, monitor.stats())
+				logSessionSummary(spec.Name, opts.Bitrate, sentNALs, sentBytes, monitor.stats(), monitor.takeStaleFrames())
 			}
 			continue
 		case chunk, ok := <-chunks:
@@ -1013,7 +1028,19 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 				lastChunkAt = time.Now()
 				telemetry.addBytes(len(chunk.data))
 				buf = append(buf, chunk.data...)
-				units, rest := splitAnnexB(buf)
+				var units [][]byte
+				var rest []byte
+				if tracker != nil {
+					var splitErr error
+					units, rest, splitErr = tracker.split(buf, len(chunk.data), chunk.writeBoundary)
+					if splitErr != nil {
+						auEarlyFlushDisabled.Store(true)
+						log.Printf("Pipeline %s output broke the access-unit write pattern; early frame emission disabled, restarting pipeline", spec.Name)
+						return produced.Load(), splitErr
+					}
+				} else {
+					units, rest = splitAnnexB(buf)
+				}
 				telemetry.addUnits(len(units))
 				for _, unit := range units {
 					if err := emitUnit(unit); err != nil {
@@ -1040,7 +1067,7 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 				}
 				if now := time.Now(); now.After(nextSummary) {
 					nextSummary = now.Add(sessionSummaryInterval)
-					logSessionSummary(spec.Name, opts.Bitrate, sentNALs, sentBytes, monitor.stats())
+					logSessionSummary(spec.Name, opts.Bitrate, sentNALs, sentBytes, monitor.stats(), monitor.takeStaleFrames())
 				}
 			}
 			if chunk.err != nil {
@@ -1061,8 +1088,13 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 	}
 }
 
-// logSessionSummary emits the periodic throughput/health line.
-func logSessionSummary(specName, bitrate string, nals, bytes int64, stats *clientStatsMsg) {
+// logSessionSummary emits the periodic throughput/health line. stale is the
+// client's stale-frame skips since the previous summary.
+func logSessionSummary(specName, bitrate string, nals, bytes int64, stats *clientStatsMsg, stale int64) {
+	if stale > 0 {
+		log.Printf("Video [%s @ %s]: client skipped %d stale frames since the last summary (it fell behind after a link or decoder stall and jumped to the newest picture)",
+			specName, bitrate, stale)
+	}
 	if stats != nil {
 		log.Printf("Video [%s @ %s]: sent %d NALs / %.1f MB; client: recv=%d rend=%d drop=%d decode=%.1fms present=%.1fms queue=%d mode=%s guardrail=%t refresh=%.1fHz (%s) (last %dms)",
 			specName, bitrate, nals, float64(bytes)/1e6,

@@ -298,6 +298,10 @@ type clientStatsMsg struct {
 	RefreshHz       float64 `json:"refreshHz,omitempty"`
 	RenderMode      string  `json:"renderMode,omitempty"`
 	PacingGuardrail bool    `json:"pacingGuardrail,omitempty"`
+	// StaleFrames counts frames the client decoded but never showed, or
+	// dropped before decoding, because newer ones were already queued: it
+	// was catching up after a stall rather than keeping pace.
+	StaleFrames int64 `json:"staleFrames,omitempty"`
 }
 
 // videoAuthMsg is an optional first upstream line on Wi-Fi video sessions.

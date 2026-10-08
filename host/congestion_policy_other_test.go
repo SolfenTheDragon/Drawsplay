@@ -49,22 +49,41 @@ func TestPipeWireIsolatedBlipDoesNotRestart(t *testing.T) {
 		if action := adaptToLinkFeedback(congestedMonitor(), rc, nil, gate, spec); action != congestionActionNone {
 			t.Fatalf("blip %d: action = %v, want none", i, action)
 		}
-		clock.advance(pipewireCongestionWindow + time.Second)
-		rcClock.advance(pipewireCongestionWindow + time.Second)
+		clock.advance(linuxCongestionWindow + time.Second)
+		rcClock.advance(linuxCongestionWindow + time.Second)
 	}
 	if rc.idx != 0 {
 		t.Fatalf("ladder idx = %d, want 0 (isolated blips must not walk the ladder)", rc.idx)
 	}
 }
 
-// TestX11GrabKeepsImmediateStepDown pins the unchanged behaviour of the
-// other Linux backend: only the PipeWire path gains damping.
-func TestX11GrabKeepsImmediateStepDown(t *testing.T) {
+// TestX11GrabStepsDownOnlyOnSustainedCongestion: x11grab used to restart
+// ffmpeg on the first report, so the deep decode queue a client reports
+// while draining the backlog of a Wi-Fi roam cost a second freeze and a
+// bitrate step right after the first. It now needs the same confirmation as
+// PipeWire, and sustained congestion still steps down.
+func TestX11GrabStepsDownOnlyOnSustainedCongestion(t *testing.T) {
 	gate := newSessionCongestionGate(captureTarget{Kind: captureX11Grab})
-	rc, _ := newTestRC("24M")
+	clock := &testClock{t: time.Unix(1_700_000_000, 0)}
+	gate.now = clock.now
+	rc, rcClock := newTestRC("24M")
+	spec := pipelineSpec{Name: "h264_vaapi"}
 
-	if action := adaptToLinkFeedback(congestedMonitor(), rc, nil, gate, pipelineSpec{Name: "h264_vaapi"}); action != congestionActionRestart {
-		t.Fatalf("action = %v, want restart", action)
+	if action := adaptToLinkFeedback(congestedMonitor(), rc, nil, gate, spec); action != congestionActionNone {
+		t.Fatalf("lone report: action = %v, want none", action)
+	}
+	clock.advance(linuxCongestionWindow + time.Second)
+	rcClock.advance(linuxCongestionWindow + time.Second)
+	if action := adaptToLinkFeedback(congestedMonitor(), rc, nil, gate, spec); action != congestionActionNone {
+		t.Fatalf("second isolated report: action = %v, want none", action)
+	}
+	if rc.idx != 0 {
+		t.Fatalf("ladder idx = %d, want 0 after isolated reports", rc.idx)
+	}
+
+	clock.advance(250 * time.Millisecond)
+	if action := adaptToLinkFeedback(congestedMonitor(), rc, nil, gate, spec); action != congestionActionRestart {
+		t.Fatalf("sustained congestion: action = %v, want restart", action)
 	}
 	if rc.idx != 1 {
 		t.Fatalf("ladder idx = %d, want 1", rc.idx)
