@@ -33,6 +33,13 @@ import java.util.concurrent.atomic.AtomicLong
  * slot has already passed resyncs and renders immediately, so a paused
  * desktop or a stalled link never delays fresh content.
  *
+ * Stall recovery: after a stall upstream of the decoder, the frames held up
+ * behind it arrive and decode in a burst. In latency mode a frame that newer
+ * pictures are already queued behind is decoded but not rendered
+ * ([StaleFrameTracker]), and a keyframe arriving behind a backlog drops the
+ * pictures queued ahead of it, so the picture jumps to the newest frame
+ * instead of replaying the stall in fast forward.
+ *
  * Threading: all methods must be called from a single thread (the video
  * channel's reader thread). Output draining is asynchronous via MediaCodec's
  * callback thread.
@@ -96,10 +103,12 @@ class VideoDecoder(private val surface: Surface) {
     // Decode statistics (M4): written on the reader and codec callback
     // threads, harvested periodically by the stats reporter.
     private val framesReceived = AtomicLong(0)
+    private val framesDecoded = AtomicLong(0)
     private val framesRendered = AtomicLong(0)
     private val decodeLatencyUsSum = AtomicLong(0)
     private val presentLatencyUsSum = AtomicLong(0)
     private val frameDrops = AtomicLong(0)
+    private val staleFrames = AtomicLong(0)
 
     /** One harvested statistics interval (all values are deltas). */
     data class Stats(
@@ -108,14 +117,18 @@ class VideoDecoder(private val surface: Surface) {
         val avgDecodeMs: Double,
         val avgPresentMs: Double,
         val frameDrops: Long,
-        val queuedFrames: Int
+        val queuedFrames: Int,
+        /** Frames never shown because newer ones were already queued. */
+        val staleFrames: Long
     )
 
     private var lastReceived = 0L
+    private var lastDecoded = 0L
     private var lastRendered = 0L
     private var lastLatencySum = 0L
     private var lastPresentLatencySum = 0L
     private var lastFrameDrops = 0L
+    private var lastStaleFrames = 0L
 
     /**
      * Returns decode statistics since the previous call. Called from the
@@ -123,24 +136,30 @@ class VideoDecoder(private val surface: Surface) {
      */
     fun snapshotStats(): Stats {
         val recv = framesReceived.get()
+        val dec = framesDecoded.get()
         val rend = framesRendered.get()
         val latSum = decodeLatencyUsSum.get()
         val dRecv = recv - lastReceived
+        val dDec = dec - lastDecoded
         val dRend = rend - lastRendered
         val dLat = latSum - lastLatencySum
         val presentSum = presentLatencyUsSum.get()
         val drops = frameDrops.get()
+        val stale = staleFrames.get()
         val dPresent = presentSum - lastPresentLatencySum
         val dDrops = drops - lastFrameDrops
+        val dStale = stale - lastStaleFrames
         lastReceived = recv
+        lastDecoded = dec
         lastRendered = rend
         lastLatencySum = latSum
         lastPresentLatencySum = presentSum
         lastFrameDrops = drops
-        val avgMs = if (dRend > 0) dLat / 1000.0 / dRend else 0.0
+        lastStaleFrames = stale
+        val avgMs = if (dDec > 0) dLat / 1000.0 / dDec else 0.0
         val avgPresentMs = if (dRend > 0) dPresent / 1000.0 / dRend else 0.0
         val queued = synchronized(pendingLock) { pending.size }
-        return Stats(dRecv, dRend, avgMs, avgPresentMs, dDrops, queued)
+        return Stats(dRecv, dRend, avgMs, avgPresentMs, dDrops, queued, dStale)
     }
 
     /** True once the decoder is configured and accepting picture NALs. */
@@ -331,15 +350,33 @@ class VideoDecoder(private val surface: Surface) {
     private val freeInputs = ArrayDeque<Int>()
     private var awaitingRandomAccess = false
 
+    // Picture starts waiting in [pending]: with the pictures already queued
+    // to the codec they tell a decoded frame whether newer ones are coming.
+    private var pendingPictureStarts = 0
+    private val staleFrameTracker = StaleFrameTracker()
+
+    // Input timestamps are kept strictly increasing so the tracker can match
+    // each decoded frame to the picture it came from.
+    private var lastInputPtsUs = 0L
+
     private fun enqueuePendingLocked(nal: ByteArray) {
         val info = DecoderBacklogPolicy.inspect(nal, streamCodec)
         if (awaitingRandomAccess) {
-            if (!info.isRandomAccessStart) return
+            if (!info.isRandomAccessStart) {
+                if (info.startsPicture) staleFrames.incrementAndGet()
+                return
+            }
             enqueueRecoveryParameterSetsLocked()
             awaitingRandomAccess = false
         }
 
         pending.addLast(nal)
+        if (info.startsPicture) pendingPictureStarts++
+        if (info.isCleanRandomAccessStart &&
+            pendingPictureStarts - 1 >= KEYFRAME_SKIP_MIN_STALE_PICTURES
+        ) {
+            skipToKeyframeLocked()
+        }
         if (pending.size <= MAX_PENDING_NALS) return
 
         val result = DecoderBacklogPolicy.trim(
@@ -349,10 +386,28 @@ class VideoDecoder(private val surface: Surface) {
         )
         pending.clear()
         result.retained.forEach(pending::addLast)
+        val retainedPictures = DecoderBacklogPolicy.countPictureStarts(pending, streamCodec)
+        staleFrames.addAndGet((pendingPictureStarts - retainedPictures).coerceAtLeast(0).toLong())
+        pendingPictureStarts = retainedPictures
         awaitingRandomAccess = result.awaitRandomAccess
         if (awaitingRandomAccess) {
             Log.w(TAG, "Decoder backlog dropped; waiting for next random-access frame")
         }
+    }
+
+    /**
+     * A keyframe just arrived behind pictures still waiting for decode: those
+     * are older than the keyframe and nothing after it needs them, so they
+     * are dropped instead of being decoded only to be thrown away.
+     */
+    private fun skipToKeyframeLocked() {
+        val result = DecoderBacklogPolicy.skipToCleanRandomAccess(pending.toList(), streamCodec)
+            ?: return
+        pending.clear()
+        result.retained.forEach(pending::addLast)
+        pendingPictureStarts = DecoderBacklogPolicy.countPictureStarts(pending, streamCodec)
+        staleFrames.addAndGet(result.droppedPictures.toLong())
+        Log.i(TAG, "Skipped ${result.droppedPictures} stale pictures to a queued keyframe")
     }
 
     private fun enqueueRecoveryParameterSetsLocked() {
@@ -367,6 +422,8 @@ class VideoDecoder(private val surface: Surface) {
         while (pending.isNotEmpty() && freeInputs.isNotEmpty()) {
             val index = freeInputs.removeFirst()
             val nal = pending.removeFirst()
+            val startsPicture = DecoderBacklogPolicy.startsPicture(nal, streamCodec)
+            if (startsPicture && pendingPictureStarts > 0) pendingPictureStarts--
             try {
                 val buffer = c.getInputBuffer(index) ?: continue
                 if (buffer.capacity() < nal.size) {
@@ -378,7 +435,10 @@ class VideoDecoder(private val surface: Surface) {
                 }
                 buffer.clear()
                 buffer.put(nal)
-                c.queueInputBuffer(index, 0, nal.size, System.nanoTime() / 1000, 0)
+                val ptsUs = maxOf(System.nanoTime() / 1000, lastInputPtsUs + 1)
+                lastInputPtsUs = ptsUs
+                c.queueInputBuffer(index, 0, nal.size, ptsUs, 0)
+                if (startsPicture) staleFrameTracker.onPictureQueued(ptsUs)
             } catch (e: Exception) {
                 Log.w(TAG, "queueInputBuffer failed", e)
                 return
@@ -401,27 +461,37 @@ class VideoDecoder(private val surface: Surface) {
         ) {
             // presentationTimeUs carries the queue-time clock (see
             // drainPendingLocked), so now - pts = in-codec decode latency.
-            val latencyUs = System.nanoTime() / 1000 - info.presentationTimeUs
+            val nowNs = System.nanoTime()
+            val latencyUs = nowNs / 1000 - info.presentationTimeUs
             if (latencyUs in 0..10_000_000) {
                 decodeLatencyUsSum.addAndGet(latencyUs)
             }
-            framesRendered.incrementAndGet()
+            val decoded = framesDecoded.incrementAndGet()
             // A hardware decoder that sustains a couple of seconds of output
             // is healthy: clear the shared failure count so a one-off glitch
             // long ago doesn't consign future sessions to software decoding.
-            if (!usingSoftwareDecoder && !hwMarkedHealthy &&
-                framesRendered.get() >= HW_HEALTHY_FRAMES
-            ) {
+            if (!usingSoftwareDecoder && !hwMarkedHealthy && decoded >= HW_HEALTHY_FRAMES) {
                 hwMarkedHealthy = true
                 consecutiveHwFailures = 0
             }
+            val fps = streamFps
+            // Asked for every output so the tracker stays matched to the
+            // codec; only latency mode acts on the answer.
+            val current = synchronized(pendingLock) {
+                staleFrameTracker.shouldRender(
+                    outputPtsUs = info.presentationTimeUs,
+                    pendingPictures = pendingPictureStarts,
+                    frameIntervalNs = if (fps > 0) 1_000_000_000L / fps else 0L,
+                    nowNs = nowNs
+                )
+            }
             try {
-                val fps = streamFps
                 if (fps > 0 && renderMode == "smooth") {
                     // Paced release: keep an even presentation cadence at the
                     // stream interval, at most one interval ahead of now.
                     // Late or first frames resync to "now" (rendered at the
                     // next vsync), so pacing never adds unbounded latency.
+                    framesRendered.incrementAndGet()
                     val intervalNs = 1_000_000_000L / fps
                     val now = System.nanoTime()
                     var renderAt = nextRenderNs
@@ -435,10 +505,16 @@ class VideoDecoder(private val surface: Surface) {
                     val presentDelayUs = (renderAt - now).coerceAtLeast(0L) / 1000L
                     presentLatencyUsSum.addAndGet(presentDelayUs)
                     codec.releaseOutputBuffer(index, renderAt)
-                } else {
+                } else if (current) {
                     // Latency mode (default): present immediately.
+                    framesRendered.incrementAndGet()
                     presentLatencyUsSum.addAndGet(0L)
                     codec.releaseOutputBuffer(index, System.nanoTime())
+                } else {
+                    // Newer frames are already queued behind this one after a
+                    // stall: showing it would replay the stall in fast forward.
+                    staleFrames.incrementAndGet()
+                    codec.releaseOutputBuffer(index, false)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "releaseOutputBuffer failed", e)
@@ -476,13 +552,20 @@ class VideoDecoder(private val surface: Surface) {
         private const val HEVC_NAL_PPS = 34
         private const val MAX_PENDING_NALS = 128
 
+        /**
+         * Pictures waiting ahead of a newly arrived keyframe before they are
+         * dropped for it: deeper than ordinary arrival jitter, so only a
+         * backlog from a stall skips straight to the keyframe.
+         */
+        private const val KEYFRAME_SKIP_MIN_STALE_PICTURES = 3
+
         /** 4 MB input buffers: covers the largest IDR at the 60 Mbps cap. */
         private const val MAX_INPUT_BUFFER_SIZE = 4 * 1024 * 1024
 
         /** Hardware codec errors before falling back to software decoding. */
         private const val MAX_HW_FAILURES = 3
 
-        /** Rendered frames after which a hardware decoder is deemed healthy. */
+        /** Decoded frames after which a hardware decoder is deemed healthy. */
         private const val HW_HEALTHY_FRAMES = 120L
 
         /**

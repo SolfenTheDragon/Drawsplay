@@ -92,6 +92,74 @@ class DecoderBacklogPolicyTest {
         )
     }
 
+    @Test
+    fun marksPictureStartsAndCleanRandomAccess() {
+        fun avc(type: Int, first: Int) = DecoderBacklogPolicy.inspect(avcNal(type, first), "h264")
+        fun hevc(type: Int, first: Int) = DecoderBacklogPolicy.inspect(hevcNal(type, first), "hevc")
+
+        assertTrue(avc(1, 0x80).startsPicture)
+        assertFalse(avc(1, 0x80).isCleanRandomAccessStart)
+        assertFalse("later slice of the same picture", avc(1, 0x00).startsPicture)
+        assertTrue(avc(2, 0x80).startsPicture)
+        assertTrue(avc(5, 0x80).startsPicture)
+        assertTrue(avc(5, 0x80).isCleanRandomAccessStart)
+        assertFalse(avc(5, 0x00).isCleanRandomAccessStart)
+        assertFalse("SEI", avc(6, 0x80).startsPicture)
+        assertFalse("SPS", avc(7, 0x80).startsPicture)
+
+        assertTrue(hevc(1, 0x80).startsPicture)
+        assertFalse(hevc(1, 0x00).startsPicture)
+        assertTrue("IDR_W_RADL", hevc(19, 0x80).isCleanRandomAccessStart)
+        assertTrue("BLA_W_LP", hevc(16, 0x80).isCleanRandomAccessStart)
+        assertTrue("CRA is a random-access point", hevc(21, 0x80).isRandomAccessStart)
+        assertFalse("CRA leading pictures may need older frames", hevc(21, 0x80).isCleanRandomAccessStart)
+        assertFalse("VPS", hevc(32, 0x80).startsPicture)
+        assertFalse("prefix SEI", hevc(39, 0x80).startsPicture)
+
+        assertTrue(DecoderBacklogPolicy.startsPicture(avcNal(1, 0x80), "h264"))
+        assertFalse(DecoderBacklogPolicy.startsPicture(avcNal(8, 0x80), "h264"))
+    }
+
+    @Test
+    fun skipsBacklogToNewestKeyframeWithLatestParameterSets() {
+        val oldSps = avcNal(7, 0x01)
+        val oldPps = avcNal(8, 0x01)
+        val newSps = avcNal(7, 0x02)
+        val newPps = avcNal(8, 0x02)
+        val idr = avcNal(5, 0x80)
+        val idrSecondSlice = avcNal(5, 0x00)
+        val next = avcNal(1, 0x80)
+        val pending = listOf(
+            avcNal(1, 0x80),
+            avcNal(1, 0x80),
+            oldSps,
+            oldPps,
+            avcNal(5, 0x80),
+            avcNal(1, 0x80),
+            avcNal(1, 0x00),
+            newSps,
+            newPps,
+            idr,
+            idrSecondSlice,
+            next
+        )
+
+        val result = DecoderBacklogPolicy.skipToCleanRandomAccess(pending, "h264")!!
+
+        assertNalListEquals(listOf(newSps, newPps, idr, idrSecondSlice, next), result.retained)
+        assertEquals(4, result.droppedPictures)
+        assertEquals(2, DecoderBacklogPolicy.countPictureStarts(result.retained, "h264"))
+    }
+
+    @Test
+    fun keyframeSkipNeedsACleanRandomAccessPicture() {
+        val avc = List(4) { avcNal(1, 0x80) }
+        assertEquals(null, DecoderBacklogPolicy.skipToCleanRandomAccess(avc, "h264"))
+
+        val hevcCraOnly = listOf(hevcNal(1, 0x80), hevcNal(21, 0x80), hevcNal(1, 0x80))
+        assertEquals(null, DecoderBacklogPolicy.skipToCleanRandomAccess(hevcCraOnly, "hevc"))
+    }
+
     private fun avcNal(type: Int, firstPayloadByte: Int): ByteArray =
         byteArrayOf(0, 0, 0, 1, type.toByte(), firstPayloadByte.toByte())
 

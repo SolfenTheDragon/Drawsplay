@@ -208,6 +208,7 @@ class VideoChannel(
                         put("avgPresentMs", s.avgPresentMs)
                         put("frameDrops", s.frameDrops)
                         put("queuedFrames", s.queuedFrames)
+                        put("staleFrames", s.staleFrames)
                         put("refreshHz", decoder.displayRefreshHz())
                         put("renderMode", decoder.renderMode)
                         put("pacingGuardrail", decoder.pacingGuardrailApplied)
