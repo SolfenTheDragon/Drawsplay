@@ -247,6 +247,9 @@ vkms_load_configured() {
 }
 configure_vkms_autoload() {
   local modules_load_file="/etc/modules-load.d/drawsplay-vkms.conf"
+  if [[ -d /sys/module/vkms/parameters ]] && ! grep -Rqs 'create_default_dev' /etc/modprobe.d 2>/dev/null; then
+    printf 'options vkms create_default_dev=1\n' | sudo tee /etc/modprobe.d/drawsplay-vkms.conf >/dev/null || true
+  fi
   if vkms_load_configured; then
     echo "vkms is already configured to load automatically at boot."
   elif printf 'vkms\n' | sudo tee -a "$modules_load_file" >/dev/null; then
@@ -283,8 +286,8 @@ if [[ "$WAYLAND_CAPTURE" -eq 0 ]] && [[ -z "${DRAWSPLAY_X11_OUTPUT:-}" ]] &&
     load_vkms=0
     reply=""
     if [[ "$SKIP_INSTALL" -eq 0 && -t 0 ]]; then
-      if read -r -p "Load vkms now and at boot (sudo modprobe vkms)? [Y/n] " reply; then
-        [[ -z "$reply" || "$reply" =~ ^[Yy] ]] && load_vkms=1
+      if read -r -p "Load vkms now and at boot (sudo modprobe vkms)? Type 'yes' to confirm [y/N] " reply; then
+        [[ "$reply" =~ ^[Yy]([Ee][Ss])?$ ]] && load_vkms=1
       fi
     else
       echo "To enable it now, run: sudo modprobe vkms"
@@ -292,7 +295,9 @@ if [[ "$WAYLAND_CAPTURE" -eq 0 ]] && [[ -z "${DRAWSPLAY_X11_OUTPUT:-}" ]] &&
       echo "  echo vkms | sudo tee /etc/modules-load.d/drawsplay-vkms.conf"
     fi
     if [[ "$load_vkms" -eq 1 ]]; then
-      if sudo modprobe vkms; then
+      # Newer kernels create no virtual device unless create_default_dev=1; older
+      # kernels reject that parameter, so fall back to a plain load.
+      if sudo modprobe vkms create_default_dev=1 2>/dev/null || sudo modprobe vkms; then
         configure_vkms_autoload
         vkms_output=""
         for _ in 1 2 3 4 5 6 7 8 9 10; do
