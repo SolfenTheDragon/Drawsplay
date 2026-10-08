@@ -30,6 +30,8 @@ if [[ "${XDG_SESSION_TYPE:-}" == "x11" ]] || {
 fi
 if [[ "$WAYLAND_CAPTURE" -eq 1 ]]; then
   commands+=(gst-launch-1.0 gst-inspect-1.0)
+else
+  commands+=(xrandr)
 fi
 for cmd in "${commands[@]}"; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -43,7 +45,16 @@ if [[ ${#missing[@]} -gt 0 ]]; then
   echo "  sudo apt install android-sdk-platform-tools android-sdk-platform-tools-common ffmpeg"
   if [[ "$WAYLAND_CAPTURE" -eq 1 ]]; then
     echo "  sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-pipewire"
+  else
+    echo "  sudo apt install x11-xserver-utils"
   fi
+  echo
+fi
+
+if [[ "$WAYLAND_CAPTURE" -eq 0 ]] && [[ ! -d /sys/module/vkms ]]; then
+  echo "X11 extended display: load the vkms kernel module so the tablet becomes a second monitor"
+  echo "instead of mirroring the desktop (save your work first; it stays loaded until reboot):"
+  echo "  sudo modprobe vkms"
   echo
 fi
 

@@ -25,9 +25,9 @@ No source build is required.
 
 ### Linux host PC
 
-Use the Linux amd64 download on an x86-64 computer. **Ubuntu 22.04+ with GNOME Wayland** supports an extended desktop on the tablet. **X11 sessions, including Ubuntu Cinnamon/Linux Mint Cinnamon, are supported in desktop-mirror mode**; they show the existing desktop rather than creating a separate monitor. Other Wayland desktops are not supported for full-desktop capture: the fallback may show only XWayland applications.
+Use the Linux amd64 download on an x86-64 computer. **X11 is the recommended Linux session**: Wayland support is available on GNOME, but may have performance issues. **Ubuntu 22.04+ with GNOME Wayland** supports an extended desktop on the tablet. **X11 sessions, including Ubuntu Cinnamon/Linux Mint Cinnamon, MATE and Xfce, support an extended desktop once the `vkms` kernel module is loaded** (see [X11 extended display](#x11-extended-display-vkms)); without it they mirror the existing desktop. Other Wayland desktops are not supported for full-desktop capture: the fallback may show only XWayland applications.
 
-Linux needs ADB, ffmpeg, and access to the active X11 display for X11 mirror mode. GStreamer with its PipeWire plugin is needed only for GNOME Wayland extended display. Touch and pen input require access to `/dev/uinput`. See the Linux setup below.
+Linux needs ADB, ffmpeg, and access to the active X11 display for X11 sessions, plus `xrandr` for the X11 extended display. GStreamer with its PipeWire plugin is needed only for GNOME Wayland extended display. Touch and pen input require access to `/dev/uinput`. See the Linux setup below.
 
 ---
 
@@ -111,6 +111,8 @@ sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugi
   gstreamer1.0-plugins-ugly gstreamer1.0-pipewire
 ```
 
+For an X11 desktop (Cinnamon, MATE, Xfce), install `xrandr` instead (`sudo apt install x11-xserver-utils`) and see [X11 extended display](#x11-extended-display-vkms).
+
 Restart after setting up permissions. On other distributions, install the equivalent packages using your package manager; the launcher's automatic package installation requires `apt-get`.
 
 Connect the tablet by USB, accept its USB debugging prompt, then install the app from a second terminal in the download folder:
@@ -120,9 +122,21 @@ adb devices
 adb install -r ./DrawSplay.APK
 ```
 
-Keep the host running and open DrawSplay on the tablet. On GNOME Wayland, map **DrawSplay Pen** to the tablet's display in **Settings > Wacom Tablet > Map to Monitor**.
+Keep the host running and open DrawSplay on the tablet. On GNOME Wayland, map **DrawSplay Pen** to the tablet's display in **Settings > Wacom Tablet > Map to Monitor**. On X11, DrawSplay maps the pen to the tablet's display itself.
 
 For smoother streaming, install your GPU's VA-API encoding driver. On Ubuntu, use `intel-media-va-driver-non-free` for supported Intel graphics or `mesa-va-drivers` for AMD, plus `vainfo`. Without hardware encoding, software encoding can reduce performance.
+
+#### X11 extended display (vkms)
+
+X11 desktops cannot create virtual monitors, so DrawSplay extends the desktop onto a virtual display output provided by the `vkms` kernel module, included in Ubuntu's kernels:
+
+```bash
+sudo modprobe vkms
+```
+
+The launcher offers to run this for you on X11. Save your work first: the X server reconfigures its displays when the module loads. The module stays loaded until you restart the computer; load it again after a restart.
+
+Once the module is loaded, every tablet connection switches the virtual display (`Virtual-1-1`) on at the configured resolution, to the right of your other monitors, and DrawSplay streams only that display. Arrange it or change its resolution in your desktop's display settings (Cinnamon: **System Settings > Display**); DrawSplay follows the change and remembers the resolution. Touch and pen input are mapped to the tablet's display automatically: through Cinnamon's or GNOME's tablet settings when one of those desktops runs, otherwise by DrawSplay itself. The virtual display is switched off a few seconds after the tablet disconnects and when the host exits; if you had made it your primary or only display, your monitor is made primary (and switched back on) instead. To use a different output, such as a DisplayLink adapter's, set `DRAWSPLAY_X11_OUTPUT` to its name in `xrandr` before starting the host.
 
 ---
 
@@ -162,7 +176,7 @@ Video-setting changes restart the active stream automatically.
 
 On **Windows with the Android app connected**, resolution and refresh rate are controlled from **Windows Display Settings** (not from DrawSplay web settings).
 
-On **GNOME Wayland**, change the tablet's resolution in **Settings > Displays**. Frame rate remains configurable in DrawSplay's settings panel.
+On **GNOME Wayland**, change the tablet's resolution in **Settings > Displays**; on an **X11 extended display**, in your desktop's display settings (the `Virtual-1-1` display). Frame rate remains configurable in DrawSplay's settings panel.
 
 ---
 
@@ -200,11 +214,11 @@ Then reconnect USB and confirm USB debugging prompt is accepted.
 
 If `adb devices` reports `no permissions`, check that Android USB rules are installed and your user belongs to `plugdev`. If the desktop appears but touch or pen does not work, check the `/dev/uinput` rule and `input` group membership. Log out and back in after changing groups; restart after adding the input rule if permissions are still incorrect.
 
-On GNOME Wayland, also check the pen-to-monitor mapping in Wacom Tablet settings. Occasionally Linux may show two cursors after switching between mouse and pen input; this is a known GNOME/Mutter limitation.
+On GNOME Wayland, also check the pen-to-monitor mapping in Wacom Tablet settings. Occasionally Linux may show two cursors after switching between mouse and pen input; this is a known GNOME/Mutter limitation. On an X11 extended display, the host log reports where the pen was mapped (`Mapped Drawsplay Pen ...`); if touch lands on another monitor, check that the tablet's **Map to Monitor** setting in Cinnamon's or GNOME's tablet settings points at the virtual display.
 
 ### Linux shows a mirror instead of an extra display
 
-Extended display requires GNOME Wayland and working GStreamer/PipeWire tools. Check the warnings in DrawSplay's settings panel. X11 sessions mirror the existing desktop; on other Wayland desktops, the fallback may capture only XWayland windows.
+On Wayland, extended display requires GNOME and working GStreamer/PipeWire tools; on other Wayland desktops, the fallback may capture only XWayland windows. On X11, load the `vkms` kernel module (`sudo modprobe vkms`) and reconnect the tablet; see [X11 extended display](#x11-extended-display-vkms). If the module is loaded but `xrandr` lists no `Virtual-1-1` output, log out and back in. The host log explains why it fell back to mirroring (`X11 extended display unavailable ...`). Check the warnings in DrawSplay's settings panel.
 
 ### Black screen or no video
 

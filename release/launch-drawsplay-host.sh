@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Launches the DrawSplay host service (Linux) from the release folder.
 # Checks runtime dependencies and, if missing, offers to install them via apt.
-# GStreamer/PipeWire is checked only for Wayland capture sessions.
+# GStreamer/PipeWire is checked only for Wayland capture sessions; on X11 the
+# script offers to load the vkms kernel module for an extended desktop.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -83,6 +84,9 @@ if [[ "$WAYLAND_CAPTURE" -eq 1 ]]; then
     check_gst_element vaapih264enc "gstreamer1.0-vaapi"
     check_gst_element x264enc "gstreamer1.0-plugins-ugly"
   fi
+else
+  # The X11 extended display is configured with xrandr.
+  check_cmd xrandr "x11-xserver-utils"
 fi
 
 # De-duplicate the package list while preserving order.
@@ -222,6 +226,60 @@ if [[ ! -f "$UDEV_RULE_FILE" ]] || [[ "$uinput_needs_fix" -eq 1 ]]; then
     echo "Run manually:"
     echo "  echo '$UDEV_RULE_LINE' | sudo tee $UDEV_RULE_FILE"
     echo "  sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput"
+  fi
+  echo
+fi
+
+# --- X11 extended display (vkms) -------------------------------------------
+# X11 desktops have no virtual-monitor API, so the host extends the desktop
+# onto an output of the vkms kernel module (a virtual display that is always
+# "connected"). Without such an output the tablet mirrors the desktop.
+# vkms is loaded for the running system only, never at boot.
+x11_virtual_output() {
+  xrandr --current 2>/dev/null | awk '
+    ($1 ~ /^Virtual-[0-9]+-[0-9]+$/ && $2 == "connected") || $1 ~ /^VIRTUAL[0-9]+$/ { print $1; exit }'
+}
+if [[ "$WAYLAND_CAPTURE" -eq 0 ]] && [[ -z "${DRAWSPLAY_X11_OUTPUT:-}" ]] &&
+  command -v xrandr >/dev/null 2>&1 && [[ -z "$(x11_virtual_output)" ]]; then
+  if [[ -d /sys/module/vkms ]]; then
+    echo "The vkms module is loaded, but the X server shows no virtual output for it,"
+    echo "so the tablet will mirror the desktop. Log out and back in to reload the displays."
+  elif PATH="$PATH:/usr/sbin:/sbin" modinfo vkms >/dev/null 2>&1; then
+    echo "X11 session: the tablet mirrors the desktop unless a virtual display exists."
+    echo "Loading the vkms kernel module adds one, making the tablet a real second monitor."
+    echo "The X server reconfigures its displays when vkms loads: save your work first."
+    load_vkms=0
+    reply=""
+    if [[ "$SKIP_INSTALL" -eq 0 && -t 0 ]]; then
+      read -r -p "Load vkms now (sudo modprobe vkms)? [y/N] " reply
+      [[ "$reply" =~ ^[Yy] ]] && load_vkms=1
+    else
+      echo "To enable it, run: sudo modprobe vkms (then restart DrawSplay)"
+    fi
+    if [[ "$load_vkms" -eq 1 ]]; then
+      if sudo modprobe vkms; then
+        vkms_output=""
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+          vkms_output="$(x11_virtual_output)"
+          [[ -n "$vkms_output" ]] && break
+          sleep 0.5
+        done
+        if [[ -n "$vkms_output" ]]; then
+          # The window manager may switch the new output on by itself; the
+          # host switches it on only while the tablet is connected.
+          sleep 2
+          xrandr --output "$vkms_output" --off 2>/dev/null || true
+          echo "Virtual display $vkms_output is ready."
+        else
+          echo "vkms is loaded, but the X server shows no virtual output yet."
+          echo "If the tablet still mirrors the desktop, log out and back in."
+        fi
+      else
+        echo "Could not load vkms; the tablet will mirror the desktop."
+      fi
+    fi
+  else
+    echo "This kernel has no vkms module; the tablet will mirror the desktop on X11."
   fi
   echo
 fi
