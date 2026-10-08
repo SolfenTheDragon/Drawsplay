@@ -53,8 +53,10 @@ fi
 
 if [[ "$WAYLAND_CAPTURE" -eq 0 ]] && [[ ! -d /sys/module/vkms ]]; then
   echo "X11 extended display: load the vkms kernel module so the tablet becomes a second monitor"
-  echo "instead of mirroring the desktop (save your work first; it stays loaded until reboot):"
+  echo "instead of mirroring the desktop (save your work first; this reconfigures X11):"
   echo "  sudo modprobe vkms"
+  echo "To load it automatically at boot:"
+  echo "  echo vkms | sudo tee /etc/modules-load.d/drawsplay-vkms.conf"
   echo
 fi
 

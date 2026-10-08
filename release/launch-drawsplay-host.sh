@@ -2,7 +2,7 @@
 # Launches the DrawSplay host service (Linux) from the release folder.
 # Checks runtime dependencies and, if missing, offers to install them via apt.
 # GStreamer/PipeWire is checked only for Wayland capture sessions; on X11 the
-# script offers to load the vkms kernel module for an extended desktop.
+# script offers to load the vkms kernel module and configure it for boot.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -234,11 +234,42 @@ fi
 # X11 desktops have no virtual-monitor API, so the host extends the desktop
 # onto an output of the vkms kernel module (a virtual display that is always
 # "connected"). Without such an output the tablet mirrors the desktop.
-# vkms is loaded for the running system only, never at boot.
+# Loading vkms reconfigures the current X screen. After the user agrees to
+# that change, the launcher also configures the module to load before X at
+# future boots, so the virtual output is ready without repeating setup.
 x11_virtual_output() {
   xrandr --current 2>/dev/null | awk '
     ($1 ~ /^Virtual-[0-9]+-[0-9]+$/ && $2 == "connected") || $1 ~ /^VIRTUAL[0-9]+$/ { print $1; exit }'
 }
+vkms_load_configured() {
+  grep -RqsE '^[[:space:]]*vkms([[:space:]]|$)' \
+    /etc/modules-load.d /run/modules-load.d /usr/lib/modules-load.d /lib/modules-load.d 2>/dev/null
+}
+configure_vkms_autoload() {
+  local modules_load_file="/etc/modules-load.d/drawsplay-vkms.conf"
+  if vkms_load_configured; then
+    echo "vkms is already configured to load automatically at boot."
+  elif printf 'vkms\n' | sudo tee -a "$modules_load_file" >/dev/null; then
+    echo "Configured vkms to load automatically at boot."
+  else
+    echo "Could not configure vkms to load at boot."
+    echo "Run manually: echo vkms | sudo tee $modules_load_file"
+  fi
+}
+if [[ "$WAYLAND_CAPTURE" -eq 0 ]] && [[ -d /sys/module/vkms ]] && ! vkms_load_configured; then
+  echo "vkms is loaded for this session but may not load after a restart."
+  if [[ "$SKIP_INSTALL" -eq 0 && -t 0 ]]; then
+    if read -r -p "Configure vkms to load automatically at boot? [Y/n] " reply; then
+      if [[ -z "$reply" || "$reply" =~ ^[Yy] ]]; then
+        configure_vkms_autoload
+      fi
+    fi
+  else
+    echo "To keep the extended display after restarts, run:"
+    echo "  echo vkms | sudo tee /etc/modules-load.d/drawsplay-vkms.conf"
+  fi
+  echo
+fi
 if [[ "$WAYLAND_CAPTURE" -eq 0 ]] && [[ -z "${DRAWSPLAY_X11_OUTPUT:-}" ]] &&
   command -v xrandr >/dev/null 2>&1 && [[ -z "$(x11_virtual_output)" ]]; then
   if [[ -d /sys/module/vkms ]]; then
@@ -246,18 +277,23 @@ if [[ "$WAYLAND_CAPTURE" -eq 0 ]] && [[ -z "${DRAWSPLAY_X11_OUTPUT:-}" ]] &&
     echo "so the tablet will mirror the desktop. Log out and back in to reload the displays."
   elif PATH="$PATH:/usr/sbin:/sbin" modinfo vkms >/dev/null 2>&1; then
     echo "X11 session: the tablet mirrors the desktop unless a virtual display exists."
-    echo "Loading the vkms kernel module adds one, making the tablet a real second monitor."
+    echo "Loading vkms adds one, making the tablet a real second monitor."
     echo "The X server reconfigures its displays when vkms loads: save your work first."
+    echo "If you agree, DrawSplay will also configure vkms to load automatically at boot."
     load_vkms=0
     reply=""
     if [[ "$SKIP_INSTALL" -eq 0 && -t 0 ]]; then
-      read -r -p "Load vkms now (sudo modprobe vkms)? [y/N] " reply
-      [[ "$reply" =~ ^[Yy] ]] && load_vkms=1
+      if read -r -p "Load vkms now and at boot (sudo modprobe vkms)? [Y/n] " reply; then
+        [[ -z "$reply" || "$reply" =~ ^[Yy] ]] && load_vkms=1
+      fi
     else
-      echo "To enable it, run: sudo modprobe vkms (then restart DrawSplay)"
+      echo "To enable it now, run: sudo modprobe vkms"
+      echo "To load it automatically at boot, run:"
+      echo "  echo vkms | sudo tee /etc/modules-load.d/drawsplay-vkms.conf"
     fi
     if [[ "$load_vkms" -eq 1 ]]; then
       if sudo modprobe vkms; then
+        configure_vkms_autoload
         vkms_output=""
         for _ in 1 2 3 4 5 6 7 8 9 10; do
           vkms_output="$(x11_virtual_output)"
