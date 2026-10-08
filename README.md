@@ -25,9 +25,9 @@ No source build is required.
 
 ### Linux host PC
 
-Use the Linux amd64 download on an x86-64 computer. **Ubuntu 22.04+ with GNOME Wayland** supports an extended desktop on the tablet; **X11 sessions** use desktop mirroring instead. Other Wayland desktops are not supported for full-desktop capture: the fallback may show only XWayland applications.
+Use the Linux amd64 download on an x86-64 computer. **Ubuntu 22.04+ with GNOME Wayland** supports an extended desktop on the tablet. **X11 sessions, including Ubuntu Cinnamon/Linux Mint Cinnamon, are supported in desktop-mirror mode**; they show the existing desktop rather than creating a separate monitor. Other Wayland desktops are not supported for full-desktop capture: the fallback may show only XWayland applications.
 
-Linux needs ADB, ffmpeg, and (for GNOME Wayland extended display) GStreamer with its PipeWire plugin. Touch and pen input require access to `/dev/uinput`. See the Linux setup below.
+Linux needs ADB, ffmpeg, and access to the active X11 display for X11 mirror mode. GStreamer with its PipeWire plugin is needed only for GNOME Wayland extended display. Touch and pen input require access to `/dev/uinput`. See the Linux setup below.
 
 ---
 
@@ -99,11 +99,16 @@ Run the launcher as your normal desktop user, not with `sudo`. On Ubuntu/Debian,
 For manual Ubuntu setup:
 
 ```bash
-sudo apt install android-sdk-platform-tools android-sdk-platform-tools-common ffmpeg \
-  gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
-  gstreamer1.0-plugins-ugly gstreamer1.0-pipewire
+sudo apt install android-sdk-platform-tools android-sdk-platform-tools-common ffmpeg
 echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | sudo tee /etc/udev/rules.d/99-drawsplay-uinput.rules
 sudo usermod -aG input,plugdev "$USER"
+```
+
+For GNOME Wayland extended display, also install the PipeWire capture packages:
+
+```bash
+sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+  gstreamer1.0-plugins-ugly gstreamer1.0-pipewire
 ```
 
 Restart after setting up permissions. On other distributions, install the equivalent packages using your package manager; the launcher's automatic package installation requires `apt-get`.

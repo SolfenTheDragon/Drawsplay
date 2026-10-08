@@ -14,6 +14,10 @@ import (
 	"strings"
 )
 
+// ffmpegAVIOBufferSize is libavformat's IO_BUFFER_SIZE, the write size of an
+// ffmpeg pipe:1 output.
+const ffmpegAVIOBufferSize = 32768
+
 // pipelineSpec is one runnable capture/encode candidate.
 type pipelineSpec struct {
 	// Name identifies the encoder for logs and the client config packet
@@ -29,6 +33,13 @@ type pipelineSpec struct {
 	Cmd string
 	// Args is the full argument list. Stdout must be Annex-B H.264.
 	Args []string
+	// AUWriteChunk, when > 0, declares that the process writes nothing to
+	// stdout but H.264 access units, each as write(2) calls of exactly
+	// AUWriteChunk bytes followed by one shorter final call (ffmpeg's raw
+	// muxer flushing its AVIO buffer under -flush_packets 1). It lets
+	// runEncodePipeline emit a frame's last NAL as soon as that final write
+	// has been read (see accessUnitTracker). Zero keeps the hold-back.
+	AUWriteChunk int
 }
 
 // parseBitrateKbps converts an ffmpeg-style bitrate string ("8M", "2500k",
@@ -63,6 +74,11 @@ func parseBitrateKbps(bitrate string) int {
 // the encoder emit multi-frame bursts that queue up in transit, and the
 // default 32 KB avio buffer can hold frames back for tens of milliseconds
 // (hundreds after an adaptive-bitrate step-down).
+//
+// With -flush_packets 1 the raw muxer also gives stdout a fixed shape: each
+// packet (one access unit) passes through the empty avio buffer and leaves as
+// write(2) calls of ffmpegAVIOBufferSize bytes plus one shorter final call
+// (see pipelineSpec.AUWriteChunk).
 func rateControlArgs(opts videoOptions) []string {
 	kbps := parseBitrateKbps(opts.Bitrate)
 	vbvKbits := kbps / 8

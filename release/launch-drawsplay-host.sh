@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Launches the DrawSplay host service (Linux) from the release folder.
-# Checks for required runtime dependencies (adb, ffmpeg, GStreamer plugins)
-# and, if missing, offers to install them via apt before starting the host.
+# Checks runtime dependencies and, if missing, offers to install them via apt.
+# GStreamer/PipeWire is checked only for Wayland capture sessions.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,6 +31,14 @@ fi
 # cmd_pkgs / elem_pkgs map a required command or GStreamer element to the
 # apt package(s) that provide it, so we only install what's actually missing.
 missing_pkgs=()
+WAYLAND_CAPTURE=1
+if [[ "${XDG_SESSION_TYPE:-}" == "x11" ]] || {
+  [[ -z "${XDG_SESSION_TYPE:-}" ]] &&
+    [[ -n "${DISPLAY:-}" ]] &&
+    [[ -z "${WAYLAND_DISPLAY:-}" ]]
+}; then
+  WAYLAND_CAPTURE=0
+fi
 
 check_cmd() {
   local cmd="$1" pkgs="$2"
@@ -58,22 +66,23 @@ check_gst_element() {
 # Commands (checked every run, regardless of what was missing last time).
 check_cmd adb "android-sdk-platform-tools android-sdk-platform-tools-common"
 check_cmd ffmpeg "ffmpeg"
-check_cmd gst-launch-1.0 "gstreamer1.0-tools"
-check_cmd gst-inspect-1.0 "gstreamer1.0-tools"
 check_cmd vainfo "vainfo"
 
-# GStreamer elements the capture pipeline can use, from base/core up through
-# every hardware-encoder fallback the host tries (see host/pipeline_linux.go).
-# All are probed every run so a partially-fixed system still gets flagged.
-if command -v gst-inspect-1.0 >/dev/null 2>&1; then
-  check_gst_element pipewiresrc "gstreamer1.0-pipewire"
-  check_gst_element videoconvert "gstreamer1.0-plugins-base"
-  check_gst_element videoscale "gstreamer1.0-plugins-base"
-  check_gst_element videorate "gstreamer1.0-plugins-good"
-  check_gst_element h264parse "gstreamer1.0-plugins-bad"
-  check_gst_element vah264enc "gstreamer1.0-plugins-bad"
-  check_gst_element vaapih264enc "gstreamer1.0-vaapi"
-  check_gst_element x264enc "gstreamer1.0-plugins-ugly"
+if [[ "$WAYLAND_CAPTURE" -eq 1 ]]; then
+  check_cmd gst-launch-1.0 "gstreamer1.0-tools"
+  check_cmd gst-inspect-1.0 "gstreamer1.0-tools"
+
+  # GStreamer elements used by the PipeWire capture pipeline.
+  if command -v gst-inspect-1.0 >/dev/null 2>&1; then
+    check_gst_element pipewiresrc "gstreamer1.0-pipewire"
+    check_gst_element videoconvert "gstreamer1.0-plugins-base"
+    check_gst_element videoscale "gstreamer1.0-plugins-base"
+    check_gst_element videorate "gstreamer1.0-plugins-good"
+    check_gst_element h264parse "gstreamer1.0-plugins-bad"
+    check_gst_element vah264enc "gstreamer1.0-plugins-bad"
+    check_gst_element vaapih264enc "gstreamer1.0-vaapi"
+    check_gst_element x264enc "gstreamer1.0-plugins-ugly"
+  fi
 fi
 
 # De-duplicate the package list while preserving order.

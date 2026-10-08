@@ -31,13 +31,17 @@ package main
 //
 // X11 targets reuse the ffmpeg x11grab mirror path from M1, with an
 // h264_vaapi candidate inserted ahead of the software encoder (see
-// vaapiX11Spec).
+// vaapiX11Spec), libx264 frame threads sized to the X screen (see
+// x264FrameThreads) and the ffmpeg write pattern declared so each frame's
+// last NAL unit is sent without waiting for the next frame (see
+// withAccessUnitWrites).
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -128,10 +132,106 @@ func buildCapturePipelines(target captureTarget, opts videoOptions) ([]pipelineS
 		if err != nil {
 			return nil, err
 		}
-		return withVAAPICandidate(specs, opts, capture), nil
+		width, height := x11CaptureSize(target, display)
+		specs = withX264FrameThreads(specs, opts, capture, x264FrameThreads(width, height, opts.FPS))
+		specs = withVAAPICandidate(specs, opts, capture)
+		return withAccessUnitWrites(specs, opts), nil
 	default:
 		return nil, fmt.Errorf("unsupported capture kind on Linux: %s", target.Kind)
 	}
+}
+
+// maxX264FrameThreads bounds libx264's frame threads on the x11grab path.
+// Every frame thread keeps one more frame in flight, so the bound is also a
+// latency ceiling: three extra frames, 50 ms at 60 fps.
+const maxX264FrameThreads = 4
+
+// x264PicosPerPixel is the planning cost of one libx264 frame thread
+// (ultrafast, zerolatency, sliced-threads=0), about twice the measured one:
+// a single thread encoded 137.6 fps of busy 1080p test content on a 4-core
+// Comet Lake-U, ~3.6 ns per pixel including source generation and colour
+// conversion. The margin covers slower cores and harder content, because an
+// encoder that falls behind queues frames inside ffmpeg, which costs more
+// latency than one extra frame thread does.
+const x264PicosPerPixel = 7000
+
+// x264FrameThreads returns the libx264 frame-thread count for x11grab.
+//
+// ffmpeg's default (threads=auto) gives libx264 1.5 frame threads per logical
+// CPU, and since the tablet requires sliced-threads=0 each one adds a frame of
+// encoder delay: 12 threads on an 8-thread laptop measured 188 ms from capture
+// to stdout at 1080p60, against 14.4 ms with the single thread that sustained
+// the same 60 fps. Like videoconvertThreads, the count is the smallest one
+// whose estimated cost fits the frame period.
+func x264FrameThreads(width, height, fps int) int {
+	return x264FrameThreadsFor(width, height, fps, runtime.NumCPU())
+}
+
+func x264FrameThreadsFor(width, height, fps, cpus int) int {
+	limit := cpus / 2
+	if limit > maxX264FrameThreads {
+		limit = maxX264FrameThreads
+	}
+	if limit < 1 {
+		return 1
+	}
+	if width <= 0 || height <= 0 || fps <= 0 {
+		// Unknown frame size: favour throughput, still far below auto.
+		return limit
+	}
+	cost := int64(width) * int64(height) * x264PicosPerPixel * int64(fps)
+	threads := int((cost + 1e12 - 1) / 1e12)
+	if threads < 1 {
+		return 1
+	}
+	if threads > limit {
+		return limit
+	}
+	return threads
+}
+
+// withX264FrameThreads rebuilds the libx264 specs with an explicit thread
+// count (other encoders ignore -threads for their frame pipeline).
+func withX264FrameThreads(specs []pipelineSpec, opts videoOptions, captureArgs []string, threads int) []pipelineSpec {
+	for i, spec := range specs {
+		if spec.BaseEncoder != "libx264" {
+			continue
+		}
+		encArgs := append(encoderArgs("libx264", opts.FPS), "-threads", strconv.Itoa(threads))
+		rebuilt := buildFFmpegSpec(opts, captureArgs, "libx264", encArgs)
+		rebuilt.Name = spec.Name
+		specs[i] = rebuilt
+	}
+	return specs
+}
+
+// x11CaptureSize is the frame size x11grab will record: the target's when it
+// carries one, otherwise the X screen's, or 0x0 when that is unknown.
+//
+// The size is deliberately not stored on the mirror target: a target size
+// rescales the session bitrate and is pushed to the tablet as a mode change.
+func x11CaptureSize(target captureTarget, display string) (int, int) {
+	if target.Width > 0 && target.Height > 0 {
+		return target.Width, target.Height
+	}
+	width, height, ok := x11RootSizeProbe(display)
+	if !ok {
+		return 0, 0
+	}
+	return width, height
+}
+
+// withAccessUnitWrites marks ffmpeg H.264 specs as writing the access-unit
+// pattern described on pipelineSpec.AUWriteChunk, which lets the read loop
+// send each frame's last NAL unit without waiting for the next frame.
+func withAccessUnitWrites(specs []pipelineSpec, opts videoOptions) []pipelineSpec {
+	if strings.EqualFold(opts.Codec, "hevc") || strings.EqualFold(opts.Codec, "h265") {
+		return specs
+	}
+	for i := range specs {
+		specs[i].AUWriteChunk = ffmpegAVIOBufferSize
+	}
+	return specs
 }
 
 // gstPipeWireSpecs builds gst-launch-1.0 command lines that pull the virtual
@@ -368,7 +468,19 @@ func vaapiEncoderArgs(device string, fps int) []string {
 		// probeVAAPISupport refuses to offer this candidate unless the build's
 		// scale_vaapi actually has the option.
 		"-vf", "hwupload," + vaapiScaleFilter + "=format=nv12:out_range=tv",
-		"-rc_mode", "CBR",
+		// One frame in flight instead of the default two. Depth 2 keeps a
+		// finished frame queued behind the next submission, so every frame
+		// leaves one frame period late: x11grab capture to last byte on
+		// stdout fell from 20.6 to 9.9 ms (p50, 1080p60, Intel UHD/iHD)
+		// while unpaced throughput only dropped 2-4 % (still ~180 fps at
+		// 1080p, three times the 60 fps x11grab is clamped to).
+		"-async_depth", "1",
+		// VBR capped by the shared -maxrate/-bufsize (rateControlArgs). CBR
+		// made the driver pad every frame up to the bitrate budget: a static
+		// desktop cost 48.8 KB per frame at 24M versus 2.4 KB with VBR, and
+		// busy content 50.0 versus 19.2 KB at equal quality (PSNR within
+		// 0.1 dB). Padding is pure link and decoder load.
+		"-rc_mode", "VBR",
 		"-bf", "0",
 		"-g", fmt.Sprintf("%d", gopFrames),
 	}

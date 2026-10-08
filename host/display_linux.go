@@ -41,6 +41,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -126,6 +127,14 @@ func virtualMonitorModes(defaultWidth, defaultHeight int) []map[string]dbus.Vari
 // ("all capture pipelines failed"). Skipping it up front makes the fallback
 // deterministic and the reason observable in the log.
 func newVirtualDisplay(opts videoOptions) (virtualDisplay, error) {
+	if currentLinuxSessionBackend() == "x11" {
+		display := os.Getenv("DISPLAY")
+		if display == "" {
+			return nil, fmt.Errorf("no X11 DISPLAY; cannot capture")
+		}
+		return &x11MirrorDisplay{display: display}, nil
+	}
+
 	toolingErr := cachedGstPipeWireCaptureSupport()
 	if toolingErr != nil {
 		log.Printf("PipeWire capture tooling unavailable (%v); skipping Mutter virtual monitor", toolingErr)
@@ -145,6 +154,30 @@ func newVirtualDisplay(opts videoOptions) (virtualDisplay, error) {
 		log.Printf("Warning: using x11grab under a Wayland session; only XWayland windows are captured (native Wayland windows appear black). Install the GStreamer PipeWire tooling for full capture (see README).")
 	}
 	return &x11MirrorDisplay{display: display}, nil
+}
+
+func linuxSessionBackend(sessionType, display, waylandDisplay string) string {
+	switch strings.ToLower(strings.TrimSpace(sessionType)) {
+	case "x11":
+		return "x11"
+	case "wayland":
+		return "wayland"
+	}
+	if strings.TrimSpace(waylandDisplay) != "" {
+		return "wayland"
+	}
+	if strings.TrimSpace(display) != "" {
+		return "x11"
+	}
+	return "unknown"
+}
+
+func currentLinuxSessionBackend() string {
+	return linuxSessionBackend(
+		os.Getenv("XDG_SESSION_TYPE"),
+		os.Getenv("DISPLAY"),
+		os.Getenv("WAYLAND_DISPLAY"),
+	)
 }
 
 // gstPipeWireCaptureSupport reports why GStreamer-based PipeWire capture

@@ -51,6 +51,9 @@ type capturePipeline struct {
 	stdout   io.ReadCloser
 	stderr   *boundedBuffer
 	stopOnce sync.Once
+	// fullPipeBound is stdout's bound for access-unit early emission (see
+	// preparePipeWriteBoundaries); 0 when off.
+	fullPipeBound int
 }
 
 // startCapturePipeline launches the spec's command and returns a handle
@@ -67,6 +70,8 @@ func startCapturePipeline(ctx context.Context, spec pipelineSpec) (*capturePipel
 		cancel()
 		return nil, err
 	}
+	// Before Start: the pipe may only be prepared while it has no writer.
+	fullPipeBound := fullPipeBoundFor(spec, stdout)
 	stderr := &boundedBuffer{max: 8 * 1024}
 	cmd.Stderr = stderr
 
@@ -75,7 +80,7 @@ func startCapturePipeline(ctx context.Context, spec pipelineSpec) (*capturePipel
 		return nil, fmt.Errorf("%s start: %w", spec.Cmd, err)
 	}
 	applyCaptureProcessPriorityPostStart(cmd)
-	return &capturePipeline{cmd: cmd, cancel: cancel, stdout: stdout, stderr: stderr}, nil
+	return &capturePipeline{cmd: cmd, cancel: cancel, stdout: stdout, stderr: stderr, fullPipeBound: fullPipeBound}, nil
 }
 
 // stop terminates the process and reaps it. Safe to call from any
@@ -200,7 +205,12 @@ func isPermanentEncoderInitError(err error) bool {
 	text := strings.ToLower(err.Error())
 	markers := []string{
 		"cannot load nvcuda.dll",
+		// Linux counterparts: ffmpeg lists h264_nvenc whenever it was built
+		// with NVENC support, so every non-NVIDIA machine fails here.
+		"cannot load libcuda.so",
+		"cannot load libnvidia-encode.so",
 		"dll amfrt64.dll failed to open",
+		"dll libamfrt64.so.1 failed to open",
 		"error initializing an internal mfx session",
 		"error creating a mfx session",
 	}

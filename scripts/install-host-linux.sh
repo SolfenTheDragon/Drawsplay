@@ -19,7 +19,19 @@ echo "Installed host to $TARGET_BIN"
 echo
 
 missing=()
-for cmd in adb ffmpeg gst-launch-1.0 gst-inspect-1.0; do
+commands=(adb ffmpeg)
+WAYLAND_CAPTURE=1
+if [[ "${XDG_SESSION_TYPE:-}" == "x11" ]] || {
+  [[ -z "${XDG_SESSION_TYPE:-}" ]] &&
+    [[ -n "${DISPLAY:-}" ]] &&
+    [[ -z "${WAYLAND_DISPLAY:-}" ]]
+}; then
+  WAYLAND_CAPTURE=0
+fi
+if [[ "$WAYLAND_CAPTURE" -eq 1 ]]; then
+  commands+=(gst-launch-1.0 gst-inspect-1.0)
+fi
+for cmd in "${commands[@]}"; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     missing+=("$cmd")
   fi
@@ -27,8 +39,11 @@ done
 
 if [[ ${#missing[@]} -gt 0 ]]; then
   echo "Missing Linux runtime tools: ${missing[*]}"
-  echo "Ubuntu install command:"
-  echo "  sudo apt install android-sdk-platform-tools android-sdk-platform-tools-common ffmpeg gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-pipewire"
+  echo "Install the missing tools with your package manager. On Ubuntu/Debian:"
+  echo "  sudo apt install android-sdk-platform-tools android-sdk-platform-tools-common ffmpeg"
+  if [[ "$WAYLAND_CAPTURE" -eq 1 ]]; then
+    echo "  sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-pipewire"
+  fi
   echo
 fi
 

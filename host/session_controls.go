@@ -78,37 +78,38 @@ func currentSetupChecklist() setupChecklist {
 		},
 	}
 	if hostOS == "linux" && video.Streaming {
-		ok := video.DisplayMode != "mirror"
-		detail := "Extend mode"
-		if !ok {
-			detail = detailOrDefault(video.Display, "Mirror fallback is active")
+		detail := "Extended desktop"
+		action := ""
+		if video.DisplayMode == "mirror" {
+			detail = detailOrDefault(video.Display, "Desktop mirror mode")
+			action = "X11/Cinnamon sessions are supported in mirror mode; GNOME Wayland is required for an extended desktop."
 		}
 		items = append(items, setupCheckItem{
-			Key:    "linux-extend-mode",
-			Label:  "Extended display mode",
-			OK:     ok,
+			Key:    "linux-display-mode",
+			Label:  "Display mode",
+			OK:     true,
 			Detail: detail,
-			Action: "Use GNOME Wayland with Mutter ScreenCast virtual-monitor support. X11/non-GNOME sessions fall back to mirror mode.",
+			Action: action,
 		})
 	}
 	if hostOS == "linux" {
-		items = append(items,
-			setupCheckItem{
-				Key:    "linux-uinput",
-				Label:  "uinput injection access",
-				OK:     !containsWarning(warnings, "uinput"),
-				Detail: warningDetail(warnings, "uinput", "Ready"),
-				Action: `Create /etc/udev/rules.d/99-drawsplay-uinput.rules with: KERNEL=="uinput", MODE="0660", GROUP="input"; add user to input group; reload udev; then reconnect.`,
-			},
-			setupCheckItem{
+		items = append(items, setupCheckItem{
+			Key:    "linux-uinput",
+			Label:  "uinput injection access",
+			OK:     !containsWarning(warnings, "uinput"),
+			Detail: warningDetail(warnings, "uinput", "Ready"),
+			Action: `Create /etc/udev/rules.d/99-drawsplay-uinput.rules with: KERNEL=="uinput", MODE="0660", GROUP="input"; add user to input group; reload udev; then reconnect.`,
+		})
+		if containsWarning(warnings, "gstreamer") || containsWarning(warnings, "pipewire") {
+			items = append(items, setupCheckItem{
 				Key:   "linux-wayland-capture",
 				Label: "Wayland capture dependencies",
 				OK: !containsWarning(warnings, "gstreamer") &&
 					!containsWarning(warnings, "pipewire"),
 				Detail: firstWarningDetail(warnings, []string{"pipewire", "gstreamer"}, "Ready"),
 				Action: "Install capture packages: sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-pipewire.",
-			},
-		)
+			})
+		}
 	}
 
 	allReady := true

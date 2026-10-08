@@ -309,7 +309,8 @@ func TestX11GrabVAAPISpecUsesGPUColourConversion(t *testing.T) {
 	for _, want := range []string{
 		"-vaapi_device /dev/dri/renderD128",
 		"-vf hwupload,scale_vaapi=format=nv12:out_range=tv",
-		"-rc_mode CBR",
+		"-async_depth 1",
+		"-rc_mode VBR",
 		"-bf 0",
 		"-g 120",
 		"-f h264 pipe:1",
@@ -321,6 +322,152 @@ func TestX11GrabVAAPISpecUsesGPUColourConversion(t *testing.T) {
 	// A software output pixel format would defeat the hardware upload.
 	if strings.Contains(joined, "-pix_fmt") {
 		t.Errorf("h264_vaapi must not force a software pixel format: %s", joined)
+	}
+}
+
+func TestX264FrameThreadsFitTheFrameCost(t *testing.T) {
+	cases := []struct{ width, height, fps, cpus, want int }{
+		{1920, 1080, 60, 8, 1},
+		{1920, 1200, 60, 8, 1},
+		{2560, 1440, 60, 8, 2},
+		{3840, 1080, 60, 8, 2},
+		{3840, 2160, 60, 8, 4},
+		{3840, 2160, 30, 8, 2},
+		{3840, 2160, 60, 4, 2},  // at most half the CPUs
+		{3840, 2160, 60, 32, 4}, // at most maxX264FrameThreads
+		{1920, 1080, 60, 1, 1},
+		{0, 0, 60, 8, 4}, // unknown size: the cap
+		{0, 0, 60, 2, 1},
+	}
+	for _, c := range cases {
+		if got := x264FrameThreadsFor(c.width, c.height, c.fps, c.cpus); got != c.want {
+			t.Errorf("x264FrameThreadsFor(%d, %d, %d, %d) = %d, want %d", c.width, c.height, c.fps, c.cpus, got, c.want)
+		}
+	}
+}
+
+// argValues returns the value after every occurrence of flag.
+func argValues(args []string, flag string) []string {
+	var values []string
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag {
+			values = append(values, args[i+1])
+		}
+	}
+	return values
+}
+
+func specByName(t *testing.T, specs []pipelineSpec, name string) pipelineSpec {
+	t.Helper()
+	for _, spec := range specs {
+		if spec.Name == name {
+			return spec
+		}
+	}
+	t.Fatalf("no %s candidate in %v", name, specNames(specs))
+	return pipelineSpec{}
+}
+
+func TestX11GrabLibx264UsesSizedFrameThreads(t *testing.T) {
+	// threads=auto gives libx264 12 frame threads on an 8-thread laptop,
+	// each a frame of delay (188 ms measured); one thread holds 1080p60.
+	ffmpeg := withFakeFFmpegEncoders(t, "ffmpeg-x11-x264-threads", " V..... h264_nvenc \n V..... libx264 \n")
+	withFakeVAAPIProbe(t, "", false)
+	withFakeX11RootSize(t, 0, 0, false)
+
+	opts := videoOptions{FPS: 60, Bitrate: "24M", Codec: "h264", FFmpeg: ffmpeg}
+	specs, err := buildCapturePipelines(x11TestTarget(), opts)
+	if err != nil {
+		t.Fatalf("buildCapturePipelines: %v", err)
+	}
+	x264 := specByName(t, specs, "libx264")
+	if got := argValues(x264.Args, "-threads"); !reflect.DeepEqual(got, []string{"1"}) {
+		t.Errorf("libx264 -threads = %v, want [1] at 1080p60: %v", got, x264.Args)
+	}
+	if x264.BaseEncoder != "libx264" || x264.Cmd != ffmpeg {
+		t.Errorf("rebuilt libx264 spec lost its identity: %+v", x264)
+	}
+	joined := strings.Join(x264.Args, " ")
+	for _, want := range []string{"-f x11grab", "-x264-params sliced-threads=0", "-f h264 pipe:1"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("libx264 args missing %q: %s", want, joined)
+		}
+	}
+	if got := argValues(specByName(t, specs, "h264_nvenc").Args, "-threads"); got != nil {
+		t.Errorf("h264_nvenc got -threads %v", got)
+	}
+}
+
+func TestX11GrabSizesLibx264ThreadsFromTheXScreen(t *testing.T) {
+	ffmpeg := withFakeFFmpegEncoders(t, "ffmpeg-x11-x264-screen", " V..... libx264 \n")
+	withFakeVAAPIProbe(t, "", false)
+	t.Setenv("DISPLAY", ":7")
+	opts := videoOptions{FPS: 60, Bitrate: "24M", Codec: "h264", FFmpeg: ffmpeg}
+	mirror := captureTarget{Kind: captureX11Grab}
+
+	displays := withFakeX11RootSize(t, 3840, 2160, true)
+	specs, err := buildCapturePipelines(mirror, opts)
+	if err != nil {
+		t.Fatalf("buildCapturePipelines: %v", err)
+	}
+	want := fmt.Sprint(x264FrameThreads(3840, 2160, 60))
+	if got := argValues(specByName(t, specs, "libx264").Args, "-threads"); !reflect.DeepEqual(got, []string{want}) {
+		t.Errorf("libx264 -threads on a 4K screen = %v, want [%s]", got, want)
+	}
+	if !reflect.DeepEqual(*displays, []string{":7"}) {
+		t.Errorf("probed displays %v, want [:7]", *displays)
+	}
+
+	withFakeX11RootSize(t, 0, 0, false)
+	specs, err = buildCapturePipelines(mirror, opts)
+	if err != nil {
+		t.Fatalf("buildCapturePipelines: %v", err)
+	}
+	want = fmt.Sprint(x264FrameThreads(0, 0, 60))
+	if got := argValues(specByName(t, specs, "libx264").Args, "-threads"); !reflect.DeepEqual(got, []string{want}) {
+		t.Errorf("libx264 -threads on an unknown screen = %v, want [%s]", got, want)
+	}
+}
+
+func TestX11GrabSpecsDeclareAccessUnitWrites(t *testing.T) {
+	ffmpeg := withFakeFFmpegEncoders(t, "ffmpeg-x11-au-writes",
+		" V..... h264_nvenc \n V..... h264_vaapi \n V..... libx264 \n")
+	withFakeVAAPIProbe(t, "/dev/dri/renderD128", true)
+
+	opts := videoOptions{FPS: 60, Bitrate: "24M", Codec: "h264", FFmpeg: ffmpeg}
+	specs, err := buildCapturePipelines(x11TestTarget(), opts)
+	if err != nil {
+		t.Fatalf("buildCapturePipelines: %v", err)
+	}
+	for _, spec := range specs {
+		if spec.AUWriteChunk != ffmpegAVIOBufferSize {
+			t.Errorf("%s AUWriteChunk = %d, want %d", spec.Name, spec.AUWriteChunk, ffmpegAVIOBufferSize)
+		}
+		// The declared write pattern rests on these output options.
+		joined := strings.Join(spec.Args, " ")
+		if !strings.HasSuffix(joined, "-flush_packets 1 -f h264 pipe:1") {
+			t.Errorf("%s output no longer flushes raw packets to a pipe: %s", spec.Name, joined)
+		}
+	}
+}
+
+func TestOnlyX11GrabH264SpecsDeclareAccessUnitWrites(t *testing.T) {
+	ffmpeg := withFakeFFmpegEncoders(t, "ffmpeg-x11-au-hevc", " V..... libx265 \n")
+	withFakeVAAPIProbe(t, "", false)
+	specs, err := buildCapturePipelines(x11TestTarget(), videoOptions{FPS: 60, Bitrate: "24M", Codec: "hevc", FFmpeg: ffmpeg})
+	if err != nil || len(specs) == 0 {
+		t.Fatalf("buildCapturePipelines: %d specs, %v", len(specs), err)
+	}
+	for _, spec := range specs {
+		if spec.AUWriteChunk != 0 {
+			t.Errorf("hevc %s declares H.264 access-unit writes", spec.Name)
+		}
+	}
+	target, opts := pipeWireTestOpts()
+	for _, spec := range gstPipeWireSpecs(target, opts) {
+		if spec.AUWriteChunk != 0 {
+			t.Errorf("gst %s declares ffmpeg's write pattern", spec.Name)
+		}
 	}
 }
 

@@ -18,6 +18,11 @@ func TestPermanentEncoderInitErrorClassification(t *testing.T) {
 		"[h264_nvenc] Cannot load nvcuda.dll",
 		"[h264_amf] DLL amfrt64.dll failed to open",
 		"[h264_qsv] Error initializing an internal MFX session: unsupported (-3)",
+		// Linux builds list h264_nvenc/h264_amf on machines without the
+		// vendor runtime; these must not be retried on every session start.
+		"[h264_nvenc @ 0x5a7b6ebb22c0] Cannot load libcuda.so.1",
+		"[h264_nvenc @ 0x5a7b6ebb22c0] Cannot load libnvidia-encode.so.1",
+		"[h264_amf @ 0x5a7b6ebb22c0] DLL libamfrt64.so.1 failed to open",
 	} {
 		if !isPermanentEncoderInitError(errors.New(message)) {
 			t.Fatalf("did not classify %q as permanent encoder init error", message)
