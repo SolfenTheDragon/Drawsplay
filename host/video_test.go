@@ -266,6 +266,8 @@ func TestDisplayModeFromTarget(t *testing.T) {
 		{target: captureTarget{Kind: captureDDAGrab}, mode: "extend", kind: "ddagrab"},
 		{target: captureTarget{Kind: capturePipeWire}, mode: "extend", kind: "pipewire"},
 		{target: captureTarget{Kind: captureX11Grab}, mode: "mirror", kind: "x11grab"},
+		{target: captureTarget{Kind: captureX11Grab, Rect: displayRect{X: 1920, W: 1920, H: 1080}}, mode: "extend", kind: "x11grab"},
+		{target: captureTarget{Kind: captureX11Grab, Rect: displayRect{W: 1920, H: 1080}, Mirrored: true}, mode: "mirror", kind: "x11grab"},
 		{target: captureTarget{Kind: captureKind("other")}, mode: "unknown", kind: "other"},
 	}
 	for _, tc := range cases {

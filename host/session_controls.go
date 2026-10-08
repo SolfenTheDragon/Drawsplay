@@ -82,7 +82,7 @@ func currentSetupChecklist() setupChecklist {
 		action := ""
 		if video.DisplayMode == "mirror" {
 			detail = detailOrDefault(video.Display, "Desktop mirror mode")
-			action = "X11/Cinnamon sessions are supported in mirror mode; GNOME Wayland is required for an extended desktop."
+			action = "For an extended desktop on X11 (Cinnamon, MATE, Xfce), load the vkms kernel module (sudo modprobe vkms) and reconnect; GNOME Wayland extends natively."
 		}
 		items = append(items, setupCheckItem{
 			Key:    "linux-display-mode",

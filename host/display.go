@@ -10,9 +10,11 @@ package main
 // Per-OS implementations (each also provides a mirror fallback so video
 // still works when the virtual-display mechanism is unavailable):
 //
-//	display_windows.go — Parsec VDD driver (IddCx) controlled via IOCTLs.
-//	display_linux.go   — GNOME Mutter ScreenCast RecordVirtual (Wayland),
-//	                     x11grab mirror fallback for X11 sessions.
+//	display_windows.go   — Parsec VDD driver (IddCx) controlled via IOCTLs.
+//	display_linux.go     — GNOME Mutter ScreenCast RecordVirtual (Wayland),
+//	                       x11grab mirror fallback when X11 extend is unavailable.
+//	x11_extend_linux.go  — X11 sessions: a virtual RandR output (vkms)
+//	                       switched on with xrandr and captured by region.
 //
 // The captureTarget returned by a display tells the platform pipeline
 // builder (pipeline_windows.go / pipeline_linux.go) what to record.
@@ -30,7 +32,9 @@ const (
 	captureDDAGrab captureKind = "ddagrab"
 	// capturePipeWire: Linux PipeWire stream node (Mutter screen cast).
 	capturePipeWire captureKind = "pipewire"
-	// captureX11Grab: Linux X11 root capture (mirror fallback).
+	// captureX11Grab: Linux X11 capture of the whole root screen (mirror
+	// fallback) or, when Rect is set, of one output's rectangle of it (X11
+	// extended display).
 	captureX11Grab captureKind = "x11grab"
 )
 
@@ -51,10 +55,28 @@ type captureTarget struct {
 	Height int
 
 	// Desktop-space rectangle of the display (virtual desktop coordinates
-	// on Windows; logical layout coordinates on Linux). Input injection
-	// (M3) maps normalized tablet coordinates into this rectangle. Zero
-	// Rect means "unknown" — injectors then target the primary display.
+	// on Windows; X screen coordinates for the X11 extended display). Input
+	// injection (M3) maps normalized tablet coordinates into this
+	// rectangle. Zero Rect means "unknown" — injectors then target the
+	// primary display.
 	Rect displayRect
+
+	// Size of the X screen that Rect lies in (X11 extended display only).
+	// The X server spreads an absolute input device over the whole screen,
+	// so the injector needs it to aim at Rect.
+	DesktopWidth  int
+	DesktopHeight int
+
+	// TabletMapped: under Muffin or Mutter, the compositor maps the tablet
+	// input device itself onto this display (see x11_tablet_linux.go), so the
+	// injector sends plain tablet coordinates instead of aiming at Rect
+	// within the whole X screen.
+	TabletMapped bool
+
+	// Mirrored: the X11 extended display shares its area of the X screen
+	// with another display (e.g. "Mirror displays" in the display
+	// settings), so it shows that display's picture.
+	Mirrored bool
 
 	// GDI device name of the display (Windows, e.g. `\\.\DISPLAY5`).
 	// Lets the injector re-resolve Rect live when the display mode or

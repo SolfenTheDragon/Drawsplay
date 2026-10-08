@@ -171,10 +171,13 @@ func main() {
 	}()
 
 	if runBackgroundTrayController(*background, ctx, cancel, store) {
+		releaseVirtualDisplaysOnExit()
 		log.Println("Shutting down")
 		return
 	}
-	if err := runHostRuntime(ctx, store, cancel); err != nil {
+	err := runHostRuntime(ctx, store, cancel)
+	releaseVirtualDisplaysOnExit()
+	if err != nil {
 		log.Fatalf("%v", err)
 	}
 	log.Println("Shutting down")

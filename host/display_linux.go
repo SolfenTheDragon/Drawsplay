@@ -2,8 +2,8 @@
 
 package main
 
-// Linux virtual display: GNOME Mutter ScreenCast virtual monitor (Wayland)
-// with an X11 mirror fallback.
+// Linux virtual display: GNOME Mutter ScreenCast virtual monitor (Wayland),
+// a virtual RandR output on X11, and an X11 mirror fallback.
 //
 // Extend-mode flow (GNOME Wayland, Ubuntu 22.04+):
 //
@@ -29,9 +29,12 @@ package main
 // Settings while a session is running, restarting the session so the
 // reconnecting client picks up the new mode.
 //
-// Fallback: on X11 sessions (or when Mutter's API is unavailable, e.g.
-// non-GNOME desktops) the primary X11 screen is mirrored via ffmpeg x11grab
-// — same behavior as M1 — so video always works.
+// X11 sessions extend the desktop onto a virtual RandR output instead (see
+// x11_extend_linux.go).
+//
+// Fallback: when neither is available (X11 without a virtual output, or
+// Mutter's API missing, e.g. non-GNOME Wayland desktops) the X11 screen is
+// mirrored via ffmpeg x11grab — same behavior as M1 — so video always works.
 
 import (
 	"bytes"
@@ -119,7 +122,8 @@ func virtualMonitorModes(defaultWidth, defaultHeight int) []map[string]dbus.Vari
 }
 
 // newVirtualDisplay creates the session display: a Mutter virtual monitor on
-// GNOME Wayland, otherwise an x11grab mirror of the primary screen.
+// GNOME Wayland, a virtual RandR output on X11, otherwise an x11grab mirror
+// of the X screen.
 //
 // The Mutter path is only taken when the GStreamer PipeWire consumer tooling
 // is actually runnable: creating the virtual monitor without a way to consume
@@ -132,6 +136,11 @@ func newVirtualDisplay(opts videoOptions) (virtualDisplay, error) {
 		if display == "" {
 			return nil, fmt.Errorf("no X11 DISPLAY; cannot capture")
 		}
+		d, err := newX11ExtendedDisplay(opts, display)
+		if err == nil {
+			return d, nil
+		}
+		throttledLog("x11-extend-unavailable", "X11 extended display unavailable (%v); mirroring the desktop instead", err)
 		return &x11MirrorDisplay{display: display}, nil
 	}
 

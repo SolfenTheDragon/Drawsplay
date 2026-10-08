@@ -29,11 +29,13 @@ package main
 // source caps on pipewiresrc, which can fail format negotiation on some
 // Mutter/PipeWire stacks and trigger reconnect loops.
 //
-// X11 targets reuse the ffmpeg x11grab mirror path from M1, with an
-// h264_vaapi candidate inserted ahead of the software encoder (see
-// vaapiX11Spec), libx264 frame threads sized to the X screen (see
-// x264FrameThreads) and the ffmpeg write pattern declared so each frame's
-// last NAL unit is sent without waiting for the next frame (see
+// X11 targets reuse the ffmpeg x11grab mirror path from M1, recording only
+// the output's rectangle for the X11 extended display (see
+// x11GrabCaptureArgs), with an h264_vaapi candidate inserted ahead of the
+// software encoder (see vaapiX11Spec), libx264 frame threads sized to the
+// captured area (see x264FrameThreads), a VBV that holds a keyframe (see
+// withX11VBV) and the ffmpeg write pattern declared so each frame's last NAL
+// unit is sent without waiting for the next frame (see
 // withAccessUnitWrites).
 
 import (
@@ -123,11 +125,7 @@ func buildCapturePipelines(target captureTarget, opts videoOptions) ([]pipelineS
 		if display == "" {
 			display = ":0"
 		}
-		capture := []string{
-			"-f", "x11grab",
-			"-framerate", fmt.Sprintf("%d", opts.FPS),
-			"-i", display,
-		}
+		capture := x11GrabCaptureArgs(target, display, opts.FPS)
 		specs, err := ffmpegSpecs(opts, capture)
 		if err != nil {
 			return nil, err
@@ -135,6 +133,7 @@ func buildCapturePipelines(target captureTarget, opts videoOptions) ([]pipelineS
 		width, height := x11CaptureSize(target, display)
 		specs = withX264FrameThreads(specs, opts, capture, x264FrameThreads(width, height, opts.FPS))
 		specs = withVAAPICandidate(specs, opts, capture)
+		specs = withX11VBV(specs, opts)
 		return withAccessUnitWrites(specs, opts), nil
 	default:
 		return nil, fmt.Errorf("unsupported capture kind on Linux: %s", target.Kind)
@@ -219,6 +218,49 @@ func x11CaptureSize(target captureTarget, display string) (int, int) {
 		return 0, 0
 	}
 	return width, height
+}
+
+// x11GrabCaptureArgs records the whole X screen for a mirror target, or only
+// the target's rectangle of it for the X11 extended display.
+func x11GrabCaptureArgs(target captureTarget, display string, fps int) []string {
+	args := []string{"-f", "x11grab", "-framerate", fmt.Sprintf("%d", fps)}
+	if target.Rect.empty() {
+		return append(args, "-i", display)
+	}
+	// Encoders need even dimensions; an odd last row or column is dropped.
+	return append(args,
+		"-video_size", fmt.Sprintf("%dx%d", target.Rect.W&^1, target.Rect.H&^1),
+		"-i", fmt.Sprintf("%s+%d,%d", display, target.Rect.X, target.Rect.Y),
+	)
+}
+
+// x11VBVKbits is the x11grab VBV size: 125 ms of stream at the given bitrate.
+//
+// rateControlArgs sizes the VBV at ~1.25 frames, which caps every frame near
+// the average frame budget. That starves the periodic IDR frames (one every
+// two seconds): coded as full intra pictures they came out heavily
+// quantized, so the picture visibly smeared every two seconds until
+// P-frames refined it. The PipeWire path never showed this because its
+// GStreamer encoders keep their default buffers (600 ms and more). 125 ms
+// (7.5 frames at 60 fps) lets a keyframe keep its quality while still
+// bounding the burst the link has to absorb.
+func x11VBVKbits(bitrate string) int {
+	return max(parseBitrateKbps(bitrate)/8, 100)
+}
+
+// withX11VBV replaces the -bufsize of every spec with x11VBVKbits.
+func withX11VBV(specs []pipelineSpec, opts videoOptions) []pipelineSpec {
+	vbv := fmt.Sprintf("%dk", x11VBVKbits(opts.Bitrate))
+	for i := range specs {
+		args := append([]string(nil), specs[i].Args...)
+		for j := 0; j+1 < len(args); j++ {
+			if args[j] == "-bufsize" {
+				args[j+1] = vbv
+			}
+		}
+		specs[i].Args = args
+	}
+	return specs
 }
 
 // withAccessUnitWrites marks ffmpeg H.264 specs as writing the access-unit

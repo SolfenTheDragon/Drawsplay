@@ -38,7 +38,10 @@ package main
 // connector vendor/product/serial; the host keeps this in sync automatically
 // (see remapTabletInputToVirtualMonitor in display_linux.go) so touch/pen
 // input follows the Drawsplay virtual monitor across reconnects without the
-// user needing to redo it in Settings each session.
+// user needing to redo it in Settings each session. The X11 extended display
+// does the same through Muffin's/Mutter's tablet settings, and aims at the
+// output's rectangle of the X screen itself where no compositor maps the
+// device (see x11_tablet_linux.go and tabletAbsCoords).
 //
 // Requires write access to /dev/uinput: either run via sudo or add a udev
 // rule granting the user access (see README).
@@ -303,8 +306,9 @@ func (l *linuxInjector) inject(msg *packet) {
 
 	// Position, pressure, tilt always accompany the event.
 	if msg.Width > 0 && msg.Height > 0 {
-		abs(absX, int32(clampF(float64(msg.X)/float64(msg.Width))*absRange))
-		abs(absY, int32(clampF(float64(msg.Y)/float64(msg.Height))*absRange))
+		x, y := tabletAbsCoords(float64(msg.X)/float64(msg.Width), float64(msg.Y)/float64(msg.Height), activeTarget())
+		abs(absX, x)
+		abs(absY, y)
 	}
 	abs(absPressure, pressureValue(msg))
 	tx, ty := tiltValues(msg)
@@ -413,6 +417,32 @@ func clampF(v float64) float64 {
 		return 1
 	}
 	return v
+}
+
+// tabletAbsCoords converts a normalized tablet position into absolute axis
+// values. The axes normally span the display the device is mapped to. On an
+// X11 extended display that nothing maps the device to (see
+// x11_tablet_linux.go), the X server spreads them across the whole X screen,
+// so the position is aimed at the display's rectangle within the screen; the
+// tablet's edges land on the centers of the display's edge pixels, keeping
+// input on the display.
+func tabletAbsCoords(nx, ny float64, t *captureTarget) (int32, int32) {
+	nx, ny = clampF(nx), clampF(ny)
+	if t == nil || t.Kind != captureX11Grab || t.Rect.empty() || t.TabletMapped ||
+		t.DesktopWidth <= 0 || t.DesktopHeight <= 0 {
+		return int32(nx * absRange), int32(ny * absRange)
+	}
+	return x11ScreenAbs(t.Rect.X, t.Rect.W, t.DesktopWidth, nx),
+		x11ScreenAbs(t.Rect.Y, t.Rect.H, t.DesktopHeight, ny)
+}
+
+// x11ScreenAbs returns the axis value the X server places at pixel
+// offset+n*(size-1) of a screen axis of the given length: it scales a value v
+// to v*length/(absRange+1).
+func x11ScreenAbs(offset, size, length int, n float64) int32 {
+	pixel := float64(offset) + n*float64(size-1) + 0.5
+	v := math.Round(pixel * (absRange + 1) / float64(length))
+	return int32(min(max(v, 0), absRange))
 }
 
 func boolTo(b bool) int32 {

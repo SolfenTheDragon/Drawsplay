@@ -423,6 +423,12 @@ func displayModeFromTarget(target captureTarget) (mode, captureKind string) {
 	case captureDDAGrab, capturePipeWire:
 		return "extend", captureKind
 	case captureX11Grab:
+		// A rectangle is one output of the X screen: the X11 extended
+		// display, unless it mirrors another display. Without one the whole
+		// screen is mirrored.
+		if !target.Rect.empty() && !target.Mirrored {
+			return "extend", captureKind
+		}
 		return "mirror", captureKind
 	default:
 		return "unknown", captureKind
