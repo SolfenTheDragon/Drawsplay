@@ -1,3 +1,0 @@
-6cf74d00c35af4d7a8d1386c1d3c4ae1dc4edbf1dfd6153c3b8dce607e545d5b *release/DrawSplay.APK
-4b26c03c92740db10a63c1eabdf062f491c59dac28a25aa77ec5ca8fda1f5077 *release/DrawSplay-android-release.zip
-f1d6f03a5034c3c1cf026b635ce4b5156611d5628ccadfe818758dd91028fa96 *release/drawsplay-host-linux-amd64

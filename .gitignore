@@ -26,6 +26,9 @@ profile.cov
 go.work
 go.work.sum
 
+# Release artifacts
+release/
+
 # Host local binaries
 host/host
 host/host.exe
@@ -64,5 +67,4 @@ AI Docs/
 docs/
 wiki/
 research/
-!release/SHA256SUMS.txt
 !/README.md

@@ -100,6 +100,15 @@ func currentSetupChecklist() setupChecklist {
 			Detail: warningDetail(warnings, "uinput", "Ready"),
 			Action: `Create /etc/udev/rules.d/99-drawsplay-uinput.rules with: KERNEL=="uinput", MODE="0660", GROUP="input"; add user to input group; reload udev; then reconnect.`,
 		})
+		if x11SessionActive() {
+			items = append(items, setupCheckItem{
+				Key:    "linux-x11-vkms",
+				Label:  "X11 virtual display (vkms)",
+				OK:     !containsWarning(warnings, "vkms"),
+				Detail: warningDetail(warnings, "vkms", "Ready"),
+				Action: "Run sudo modprobe vkms create_default_dev=1 (the X server reconfigures displays; save your work), then reconnect. To load it at boot: echo vkms | sudo tee /etc/modules-load.d/drawsplay-vkms.conf and echo 'options vkms create_default_dev=1' | sudo tee /etc/modprobe.d/drawsplay-vkms.conf.",
+			})
+		}
 		if containsWarning(warnings, "gstreamer") || containsWarning(warnings, "pipewire") {
 			items = append(items, setupCheckItem{
 				Key:   "linux-wayland-capture",

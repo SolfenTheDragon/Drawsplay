@@ -78,7 +78,7 @@ func runDependencyPreflight(s settings) {
 	} else {
 		setOperationalWarning("ffmpeg", "")
 	}
-	for _, key := range []string{"gstreamer", "pipewire-gst", "gst-x264enc", "uinput"} {
+	for _, key := range []string{"gstreamer", "pipewire-gst", "gst-x264enc", "uinput", "vkms"} {
 		setOperationalWarning(key, "")
 	}
 	for key, warning := range platformDependencyWarnings() {
