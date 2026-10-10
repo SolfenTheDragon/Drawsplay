@@ -1,7 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 let autostartOn = false;
-let toggleBusy = false;
+let serviceBusy = false;
 let csrfToken = "";
 let csrfPromise = null;
 let debugConsoleEnabled = false;
@@ -398,10 +398,11 @@ async function refreshStatus() {
     $("autostart-state").textContent = st.autostartError
       ? `Unavailable: ${st.autostartError}`
       : (autostartOn ? "Enabled" : "Disabled");
-    const toggle = $("autostart-toggle");
-    toggle.disabled = !!st.autostartError || toggleBusy;
-    // Don't fight an in-flight change from the toggle handler.
-    if (!toggleBusy) toggle.checked = autostartOn;
+    $("autostart-implementation").textContent =
+      st.autostartImplementation || "Platform login service";
+    const serviceButton = $("autostart-toggle");
+    serviceButton.disabled = !!st.autostartError || serviceBusy;
+    serviceButton.textContent = autostartOn ? "Disable service" : "Enable service";
     const activeDevice = String(st.activeInputDevice || "").trim();
     if (activeDevice !== currentCalibrationDevice) {
       currentCalibrationDevice = activeDevice;
@@ -448,15 +449,66 @@ function showMsg(text, ok) {
 function renderSetupChecklist(setup) {
   const el = $("setup-checklist");
   const items = Array.isArray(setup?.items) ? setup.items : [];
+  el.replaceChildren();
   if (items.length === 0) {
     el.textContent = "No setup data yet.";
     return;
   }
-  const lines = items.map((item) => {
-    if (item.ok) return `✓ ${item.label}: ${item.detail}`;
-    return `• ${item.label}: ${item.detail}${item.action ? `\n  → ${item.action}` : ""}`;
-  });
-  el.textContent = lines.join("\n");
+  for (const item of items) {
+    const row = document.createElement("section");
+    row.className = `setup-item${item.ok ? " ready" : " needs-attention"}`;
+
+    const heading = document.createElement("div");
+    heading.className = "setup-item-heading";
+    const indicator = document.createElement("span");
+    indicator.className = "setup-item-indicator";
+    indicator.setAttribute("aria-hidden", "true");
+    indicator.textContent = item.ok ? "✓" : "!";
+    const label = document.createElement("strong");
+    label.textContent = item.label || "Setup check";
+    const state = document.createElement("span");
+    state.className = "setup-item-state";
+    state.textContent = item.ok ? "Ready" : "Action needed";
+    heading.append(indicator, label, state);
+    row.appendChild(heading);
+
+    const detail = document.createElement("div");
+    detail.className = "setup-item-detail";
+    detail.textContent = item.detail || "";
+    row.appendChild(detail);
+
+    if (!item.ok && item.action) {
+      const instructions = document.createElement("div");
+      instructions.className = "setup-item-action-text";
+      instructions.textContent = item.action;
+      row.appendChild(instructions);
+    }
+
+    if (!item.ok && item.command) {
+      const command = document.createElement("code");
+      command.className = "setup-item-command";
+      command.textContent = item.command;
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "setup-copy-button";
+      copy.textContent = "Copy";
+      copy.setAttribute("aria-label", `Copy instructions for ${item.label || "setup check"}`);
+      copy.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(item.command);
+          copy.textContent = "Copied";
+          window.setTimeout(() => { copy.textContent = "Copy"; }, 1400);
+        } catch (e) {
+          showMsg(`Could not copy command: ${e.message}`, false);
+        }
+      });
+      const commandRow = document.createElement("div");
+      commandRow.className = "setup-item-command-row";
+      commandRow.append(command, copy);
+      row.appendChild(commandRow);
+    }
+    el.appendChild(row);
+  }
 }
 
 function renderMetrics(metrics, video, clientVideoStats) {
@@ -662,11 +714,12 @@ if (themeToggle) {
   });
 }
 
-$("autostart-toggle").addEventListener("change", async (ev) => {
-  const toggle = ev.target;
-  const want = toggle.checked;
-  toggleBusy = true;
-  toggle.disabled = true;
+$("autostart-toggle").addEventListener("click", async () => {
+  const want = !autostartOn;
+  const button = $("autostart-toggle");
+  serviceBusy = true;
+  button.disabled = true;
+  button.textContent = want ? "Enabling…" : "Disabling…";
   try {
     await api("/api/autostart", {
       method: "POST",
@@ -675,9 +728,8 @@ $("autostart-toggle").addEventListener("change", async (ev) => {
     });
   } catch (e) {
     showMsg(e.message, false);
-    toggle.checked = !want; // revert on failure
   } finally {
-    toggleBusy = false;
+    serviceBusy = false;
     await refreshStatus();
   }
 });

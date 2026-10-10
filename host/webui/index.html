@@ -10,7 +10,10 @@
 <body>
 <main>
   <div class="header">
-    <h1><img src="icon.png" alt="">DrawSplay Settings</h1>
+    <div class="brand">
+      <h1><img src="icon.png" alt="">DrawSplay</h1>
+      <div class="header-caption">HOST CONTROL CENTER</div>
+    </div>
     <div class="theme-toggle">
       <span id="theme-label">Dark mode</span>
       <label class="switch">
@@ -21,14 +24,26 @@
   </div>
 
   <div class="panel status-panel">
-    <div class="status-line"><span id="dot" class="dot"></span><span id="status">Checking status…</span></div>
+    <div class="status-overview">
+      <div>
+        <div class="eyebrow">HOST OVERVIEW</div>
+        <div class="status-line"><span id="dot" class="dot"></span><span id="status">Checking status…</span></div>
+      </div>
+      <div class="status-meta">USB / LAN stream monitor</div>
+    </div>
     <div id="warnings" class="hint" hidden></div>
     <div id="metrics-summary" class="hint"></div>
   </div>
 
   <div class="column column-left">
     <div class="panel settings-panel">
-      <form id="form">
+      <div class="panel-heading">
+        <div class="eyebrow">CONFIGURATION</div>
+        <h2>Host settings</h2>
+        <div class="hint">Tune display, input, and connection behavior.</div>
+      </div>
+      <form id="form" class="configuration-grid">
+      <section class="display-settings">
       <div id="resolution-controls">
         <label for="resolution-preset">Display resolution</label>
         <select id="resolution-preset">
@@ -57,7 +72,8 @@
       <div id="resolution-policy-hint" class="hint" hidden>On Windows with an Android client, DrawSplay follows the resolution selected in Windows Display Settings.</div>
       <div id="resolution-policy-hint-linux" class="hint" hidden>On Linux, change the resolution from the desktop's display settings instead of here: Settings &gt; Displays on GNOME (search for "MetaVendor" if it isn't the tablet display already selected), or the "Virtual-1-1" display on X11 desktops such as Cinnamon (System Settings &gt; Display).</div>
       <div class="hint">1920×1080 at 120 fps is the default. Higher resolutions improve sharpness but may reduce framerate and responsiveness on slower links.</div>
-      <div class="input-options">
+      </section>
+      <section class="input-options monitor-input-options">
         <strong>Secondary monitor input</strong>
         <div class="hint">Choose which pointer types the tablet may send to this computer.</div>
         <div class="toggle-row">
@@ -74,7 +90,7 @@
             <span class="slider"></span>
           </label>
         </div>
-      </div>
+      </section>
       <details class="advanced">
         <summary>Advanced settings</summary>
         <div id="fps-control-row" class="row">
@@ -254,44 +270,78 @@
     </div>
   </div>
 
-  <div class="column column-right">
-    <div class="panel">
-      <strong>First-run checklist</strong>
+  <section class="column column-right action-section">
+    <div class="action-section-heading">
+      <div class="eyebrow">HOST CONTROLS</div>
+      <h2>Actions &amp; tools</h2>
+    </div>
+    <div class="action-grid">
+    <div class="action-stack">
+    <div class="panel dashboard-card setup-card">
+      <div class="eyebrow">SYSTEM HEALTH</div>
+      <h2>Setup checklist</h2>
       <div id="setup-checklist" class="hint">Checking setup…</div>
       <button id="run-setup-remediation-btn" type="button">Run setup repair checks</button>
     </div>
+    </div>
 
-    <div class="panel autostart-panel">
+    <div class="action-stack">
+    <div class="panel dashboard-card autostart-panel">
+      <div class="eyebrow">STARTUP</div>
+      <h2>Login service</h2>
       <div class="toggle-row">
         <div>
-          <strong>Start at login</strong>
           <div class="hint" id="autostart-state">…</div>
+          <div class="hint" id="autostart-implementation">Detecting platform and session…</div>
         </div>
-        <label class="switch">
-          <input id="autostart-toggle" type="checkbox" disabled>
-          <span class="slider"></span>
-        </label>
+        <button id="autostart-toggle" type="button" disabled>Enable service</button>
       </div>
     </div>
 
-    <div class="panel tablet-panel">
+    <div class="panel dashboard-card">
+      <div class="eyebrow">LIVE SESSION</div>
+      <h2>Session controls</h2>
+      <div class="hint">Manage the active client session without stopping the host.</div>
+      <div class="toggle-row">
+        <span>Lock client input</span>
+        <label class="switch">
+          <input id="input-lock-toggle" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <button id="pause-video-btn" type="button">Reconnect video stream</button>
+      <button id="disconnect-session-btn" type="button">Disconnect client session</button>
+    </div>
+
+    <div class="panel dashboard-card tablet-panel">
       <div class="toggle-row">
         <div>
-          <strong>Client display preference</strong>
+          <h2>Client display preference</h2>
           <div class="hint">Clears the connected client's saved resolution preference. The default resolution is used on the next reconnect.</div>
         </div>
         <button id="clear-mode-btn" type="button">Clear</button>
       </div>
     </div>
 
-    <div class="panel" data-windows-only>
-      <strong>Parsec VDD custom resolutions</strong>
-      <div class="hint">If custom VDD resolutions fail because HKLM is protected, run this one-time admin setup and approve UAC once.</div>
-      <button id="vdd-custom-resolution-setup-btn" type="button">Enable custom-resolution registry access (Admin)</button>
+    <div class="panel dashboard-card">
+        <div class="eyebrow">SUPPORT</div>
+        <h2>Diagnostics</h2>
+        <div class="hint">Download a JSON snapshot for troubleshooting and compatibility checks.</div>
+        <button id="download-diagnostics-btn" type="button">Download diagnostics</button>
     </div>
 
-    <div class="panel calibration-panel">
-      <strong>Per-device pen calibration</strong>
+    <div class="panel dashboard-card" data-windows-only>
+        <div class="eyebrow">WINDOWS</div>
+        <h2>Parsec VDD custom resolutions</h2>
+        <div class="hint">If custom VDD resolutions fail because HKLM is protected, run this one-time admin setup and approve UAC once.</div>
+        <button id="vdd-custom-resolution-setup-btn" type="button">Enable custom-resolution registry access (Admin)</button>
+    </div>
+    </div>
+
+    <div class="action-stack">
+    <div class="panel dashboard-card calibration-panel">
+      <div class="eyebrow">INPUT</div>
+      <h2>Pen calibration</h2>
       <div class="hint">Applies only to the currently connected client. Single-client mode is enforced on the host.</div>
       <label for="calibration-device">Connected client</label>
       <input id="calibration-device" type="text" readonly>
@@ -318,27 +368,7 @@
       <button id="save-calibration-btn" type="button">Save calibration</button>
     </div>
 
-    <div class="panel">
-      <strong>Session controls</strong>
-      <div class="hint">Manage the active client session without stopping the host.</div>
-      <div class="toggle-row">
-        <span>Lock client input</span>
-        <label class="switch">
-          <input id="input-lock-toggle" type="checkbox">
-          <span class="slider"></span>
-        </label>
-      </div>
-      <button id="pause-video-btn" type="button">Reconnect video stream</button>
-      <button id="disconnect-session-btn" type="button">Disconnect client session</button>
-    </div>
-
-    <div class="panel">
-      <strong>Diagnostics</strong>
-      <div class="hint">Download a JSON snapshot for troubleshooting and compatibility checks.</div>
-      <button id="download-diagnostics-btn" type="button">Download diagnostics</button>
-    </div>
-
-    <div class="panel stop-panel">
+    <div class="panel dashboard-card stop-panel">
       <div class="toggle-row">
         <div>
           <strong>Stop host</strong>
@@ -347,7 +377,9 @@
         <button id="stop-btn" type="button" class="danger">Stop</button>
       </div>
     </div>
-  </div>
+    </div>
+    </div>
+  </section>
 </main>
 <script src="app.js"></script>
 </body>

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 const unitName = "drawsplay-host.service"
@@ -76,30 +77,18 @@ WantedBy=graphical-session.target
 }
 
 func uninstallAutostart() error {
-	// Best-effort disable/stop before removing the unit file.
-	_ = systemctlUser("disable", "--now", unitName)
-	path, err := unitPath()
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("removing unit: %w", err)
-	}
-	return systemctlUser("daemon-reload")
+	// Disable future logins without stopping the currently running host.
+	return systemctlUser("disable", unitName)
 }
 
 func autostartEnabled() (bool, error) {
-	path, err := unitPath()
-	if err != nil {
-		return false, err
+	cmd := exec.Command("systemctl", "--user", "is-enabled", unitName)
+	out, err := cmd.CombinedOutput()
+	state := strings.TrimSpace(string(out))
+	if err != nil && state != "disabled" && state != "not-found" {
+		return false, fmt.Errorf("systemctl --user is-enabled %s: %v (%s)", unitName, err, state)
 	}
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
+	return state == "enabled" || state == "enabled-runtime", nil
 }
 
 // prepareBackground is a no-op on Linux: systemd runs the process without a

@@ -27,11 +27,12 @@ func sessionDisplayBlackout() bool {
 }
 
 type setupCheckItem struct {
-	Key    string `json:"key"`
-	Label  string `json:"label"`
-	OK     bool   `json:"ok"`
-	Detail string `json:"detail"`
-	Action string `json:"action,omitempty"`
+	Key     string `json:"key"`
+	Label   string `json:"label"`
+	OK      bool   `json:"ok"`
+	Detail  string `json:"detail"`
+	Action  string `json:"action,omitempty"`
+	Command string `json:"command,omitempty"`
 }
 
 type setupChecklist struct {
@@ -49,18 +50,20 @@ func currentSetupChecklist() setupChecklist {
 
 	items := []setupCheckItem{
 		{
-			Key:    "adb-ready",
-			Label:  "ADB is connected",
-			OK:     adb.Ready,
-			Detail: detailOrDefault(adb.Error, "Ready"),
-			Action: adbSetupAction(hostOS, adb.Error),
+			Key:     "adb-ready",
+			Label:   "ADB is connected",
+			OK:      adb.Ready,
+			Detail:  detailOrDefault(adb.Error, "Ready"),
+			Action:  adbSetupAction(hostOS, adb.Error),
+			Command: adbSetupCommand(hostOS),
 		},
 		{
-			Key:    "ffmpeg-ready",
-			Label:  "Video encoder available",
-			OK:     !containsWarning(warnings, "ffmpeg"),
-			Detail: warningDetail(warnings, "ffmpeg", "Ready"),
-			Action: ffmpegSetupAction(hostOS),
+			Key:     "ffmpeg-ready",
+			Label:   "Video encoder available",
+			OK:      !containsWarning(warnings, "ffmpeg"),
+			Detail:  warningDetail(warnings, "ffmpeg", "Ready"),
+			Action:  ffmpegSetupAction(hostOS),
+			Command: ffmpegSetupCommand(hostOS),
 		},
 		{
 			Key:    "device-connected",
@@ -79,17 +82,14 @@ func currentSetupChecklist() setupChecklist {
 	}
 	if hostOS == "linux" && video.Streaming {
 		detail := "Extended desktop"
-		action := ""
 		if video.DisplayMode == "mirror" {
 			detail = detailOrDefault(video.Display, "Desktop mirror mode")
-			action = "For an extended desktop on X11 (Cinnamon, MATE, Xfce), load the vkms kernel module (sudo modprobe vkms) and reconnect; GNOME Wayland extends natively."
 		}
 		items = append(items, setupCheckItem{
 			Key:    "linux-display-mode",
 			Label:  "Display mode",
 			OK:     true,
 			Detail: detail,
-			Action: action,
 		})
 	}
 	if hostOS == "linux" {
@@ -102,11 +102,12 @@ func currentSetupChecklist() setupChecklist {
 		})
 		if x11SessionActive() {
 			items = append(items, setupCheckItem{
-				Key:    "linux-x11-vkms",
-				Label:  "X11 virtual display (vkms)",
-				OK:     !containsWarning(warnings, "vkms"),
-				Detail: warningDetail(warnings, "vkms", "Ready"),
-				Action: "Run sudo modprobe vkms create_default_dev=1 (the X server reconfigures displays; save your work), then reconnect. To load it at boot: echo vkms | sudo tee /etc/modules-load.d/drawsplay-vkms.conf and echo 'options vkms create_default_dev=1' | sudo tee /etc/modprobe.d/drawsplay-vkms.conf.",
+				Key:     "linux-x11-vkms",
+				Label:   "X11 virtual display (vkms)",
+				OK:      !containsWarning(warnings, "vkms"),
+				Detail:  warningDetail(warnings, "vkms", "Ready"),
+				Action:  "The X server reconfigures displays when vkms loads; save your work first, then reconnect. To load it automatically at boot, configure the module and its options.",
+				Command: "sudo modprobe vkms create_default_dev=1",
 			})
 		}
 		if containsWarning(warnings, "gstreamer") || containsWarning(warnings, "pipewire") {
@@ -115,8 +116,9 @@ func currentSetupChecklist() setupChecklist {
 				Label: "Wayland capture dependencies",
 				OK: !containsWarning(warnings, "gstreamer") &&
 					!containsWarning(warnings, "pipewire"),
-				Detail: firstWarningDetail(warnings, []string{"pipewire", "gstreamer"}, "Ready"),
-				Action: "Install capture packages: sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-pipewire.",
+				Detail:  firstWarningDetail(warnings, []string{"pipewire", "gstreamer"}, "Ready"),
+				Action:  "Install the GStreamer and PipeWire capture dependencies.",
+				Command: "sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-pipewire",
 			})
 		}
 	}
@@ -168,21 +170,35 @@ func adbSetupAction(hostOS, detail string) string {
 	lower := strings.ToLower(detail)
 	if hostOS == "linux" {
 		if strings.Contains(lower, "not authorized") {
-			return "Unlock tablet, accept the USB-debugging prompt, then run: adb kill-server && adb start-server."
+			return "Unlock the tablet and accept the USB-debugging prompt, then restart ADB."
 		}
 		if strings.Contains(lower, "lacks usb permissions") || strings.Contains(lower, "no permissions") {
-			return "Install Android udev rules (e.g. android-sdk-platform-tools-common), add user to plugdev, reload udev, unplug/replug, then run: adb kill-server && adb start-server."
+			return "Install Android udev rules, add the user to plugdev, reload udev, unplug and reconnect the tablet, then restart ADB."
 		}
 		return "Confirm USB cable + debugging prompt; if still blocked, add Android udev rules and plugdev membership, then restart ADB."
 	}
 	return "Confirm USB cable and accept Android USB-debugging prompts."
 }
 
+func adbSetupCommand(hostOS string) string {
+	if hostOS == "linux" {
+		return "adb kill-server && adb start-server"
+	}
+	return ""
+}
+
 func ffmpegSetupAction(hostOS string) string {
 	if hostOS == "linux" {
-		return "Set a valid ffmpeg path or install ffmpeg (for Ubuntu: sudo apt install ffmpeg)."
+		return "Set a valid ffmpeg path or install ffmpeg."
 	}
 	return "Set a valid ffmpeg path or allow automatic tool install."
+}
+
+func ffmpegSetupCommand(hostOS string) string {
+	if hostOS == "linux" {
+		return "sudo apt install ffmpeg"
+	}
+	return ""
 }
 
 func containsFold(s, sub string) bool {

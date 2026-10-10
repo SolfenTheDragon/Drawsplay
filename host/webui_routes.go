@@ -133,18 +133,19 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	enabled, autostartErr := autostartEnabled()
 	status := map[string]any{
-		"video":             currentVideoStatus(),
-		"clientVideoStats":  currentClientVideoStats(),
-		"adb":               currentADBStatus(),
-		"warnings":          currentOperationalWarnings(),
-		"metrics":           currentOperationalMetrics(),
-		"setup":             currentSetupChecklist(),
-		"autostart":         enabled,
-		"hostOS":            runtime.GOOS,
-		"featureFlags":      map[string]bool{"wifi": wifiFeatureEnabled()},
-		"activeClient":      activeClientIdentity(),
-		"activeInputDevice": activeInputDevice(),
-		"inputLocked":       sessionInputLocked(),
+		"video":                   currentVideoStatus(),
+		"clientVideoStats":        currentClientVideoStats(),
+		"adb":                     currentADBStatus(),
+		"warnings":                currentOperationalWarnings(),
+		"metrics":                 currentOperationalMetrics(),
+		"setup":                   currentSetupChecklist(),
+		"autostart":               enabled,
+		"autostartImplementation": autostartImplementation(),
+		"hostOS":                  runtime.GOOS,
+		"featureFlags":            map[string]bool{"wifi": wifiFeatureEnabled()},
+		"activeClient":            activeClientIdentity(),
+		"activeInputDevice":       activeInputDevice(),
+		"inputLocked":             sessionInputLocked(),
 	}
 	if autostartErr != nil {
 		status["autostartError"] = autostartErr.Error()

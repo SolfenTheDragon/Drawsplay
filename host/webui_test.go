@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -240,14 +241,37 @@ func TestStatusAPIExposesWarningsAndMetrics(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"video", "adb", "warnings", "metrics", "autostart", "clientVideoStats", "activeClient"} {
+	for _, field := range []string{"video", "adb", "warnings", "metrics", "autostart", "autostartImplementation", "clientVideoStats", "activeClient"} {
 		if _, ok := body[field]; !ok {
 			t.Errorf("status response missing %q", field)
 		}
 	}
+	var implementation string
+	if err := json.Unmarshal(body["autostartImplementation"], &implementation); err != nil || implementation == "" {
+		t.Errorf("autostartImplementation = %q, decode error = %v", implementation, err)
+	}
 	for _, field := range []string{"setup", "inputLocked"} {
 		if _, ok := body[field]; !ok {
 			t.Errorf("status response missing %q", field)
+		}
+	}
+}
+
+func TestAutostartImplementationTracksLinuxSessionType(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("session-specific service implementation is Linux-only")
+	}
+	for _, tc := range []struct {
+		session string
+		want    string
+	}{
+		{session: "x11", want: "Linux X11 session: systemd user service"},
+		{session: "wayland", want: "Linux Wayland session: systemd user service"},
+		{session: "", want: "Linux desktop session: systemd user service"},
+	} {
+		t.Setenv("XDG_SESSION_TYPE", tc.session)
+		if got := autostartImplementation(); got != tc.want {
+			t.Errorf("autostartImplementation() for %q = %q, want %q", tc.session, got, tc.want)
 		}
 	}
 }

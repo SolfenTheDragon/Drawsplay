@@ -26,7 +26,27 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
+	"strings"
 )
+
+func autostartImplementation() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "Windows per-user startup entry (HKCU Run key)"
+	case "linux":
+		switch strings.ToLower(strings.TrimSpace(os.Getenv("XDG_SESSION_TYPE"))) {
+		case "x11":
+			return "Linux X11 session: systemd user service"
+		case "wayland":
+			return "Linux Wayland session: systemd user service"
+		default:
+			return "Linux desktop session: systemd user service"
+		}
+	default:
+		return runtime.GOOS + ": login service implementation"
+	}
+}
 
 // runServiceCommand executes `-service <cmd>` and returns the process exit
 // code.
