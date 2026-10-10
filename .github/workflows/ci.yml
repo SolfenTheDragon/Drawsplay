@@ -19,6 +19,7 @@ jobs:
 
       - name: Check shell script syntax
         run: |
+          shopt -s nullglob
           for script in scripts/*.sh release/*.sh; do
             bash -n "$script"
           done
