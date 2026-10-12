@@ -106,8 +106,17 @@ func currentSetupChecklist() setupChecklist {
 				Label:   "X11 virtual display (vkms)",
 				OK:      !containsWarning(warnings, "vkms"),
 				Detail:  warningDetail(warnings, "vkms", "Ready"),
-				Action:  "The X server reconfigures displays when vkms loads; save your work first, then reconnect. To load it automatically at boot, configure the module and its options.",
+				Action:  "The X server reconfigures displays when vkms loads; save your work first. After loading it, click Run setup repair checks to restart the stream onto the extended desktop. To load it automatically at boot, configure the module and its options.",
 				Command: "sudo modprobe vkms create_default_dev=1",
+			})
+		}
+		if waylandSessionActive() {
+			items = append(items, setupCheckItem{
+				Key:    "linux-wayland-virtual-display",
+				Label:  "Wayland virtual display",
+				OK:     !containsWarning(warnings, "XWayland"),
+				Detail: warningDetail(warnings, "XWayland", "Ready ("+waylandVirtualDisplayName()+")"),
+				Action: "Extending the desktop under Wayland needs GNOME, KDE Plasma, sway or Hyprland. Log into one of them, or into an X11 session (such as Cinnamon) and load vkms.",
 			})
 		}
 		if containsWarning(warnings, "gstreamer") || containsWarning(warnings, "pipewire") {

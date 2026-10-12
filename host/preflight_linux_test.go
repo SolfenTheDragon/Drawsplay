@@ -24,3 +24,17 @@ func TestX11VirtualDisplayWarningFor(t *testing.T) {
 		t.Fatalf("unavailable = %q", w)
 	}
 }
+
+func TestWaylandDesktopWarning(t *testing.T) {
+	if w := waylandDesktopWarning("X-Cinnamon"); !strings.Contains(w, "Cinnamon on Wayland") || !strings.Contains(w, "Cinnamon (X11) session") {
+		t.Fatalf("Cinnamon = %q", w)
+	}
+	w := waylandDesktopWarning("LXQt")
+	if !strings.Contains(w, "This Wayland desktop") || !strings.Contains(w, "X11 session (or GNOME, KDE Plasma, sway or Hyprland)") {
+		t.Fatalf("LXQt = %q", w)
+	}
+	// The setup checklist finds the warning by this word.
+	if !strings.Contains(w, "XWayland") {
+		t.Fatalf("warning lacks XWayland: %q", w)
+	}
+}

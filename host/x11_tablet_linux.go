@@ -12,8 +12,8 @@ package main
 // the tablet's "Map to Monitor" setting, keyed by the monitor's EDID
 // vendor/product/serial, and re-apply it whenever the monitor layout
 // changes. So the host points that setting at the extended display's output,
-// as remapTabletInputToVirtualMonitor does for the Wayland virtual monitor,
-// and the injector sends plain tablet coordinates.
+// as it does for the GNOME virtual monitor on Wayland (mapMutterTablet in
+// mutter_extend_linux.go), and the injector sends plain tablet coordinates.
 //
 // Under other window managers nothing maps the device, and the injector
 // aims at the output's rectangle within the whole screen instead (see
@@ -49,6 +49,15 @@ type x11TabletCompositor struct {
 	schemaPath string // prefix of the schema's per-device path
 }
 
+// mutterTabletCompositor is GNOME's Mutter, under Xorg or Wayland.
+var mutterTabletCompositor = x11TabletCompositor{
+	name:       "Mutter",
+	busName:    displayConfigBusName,
+	objectPath: displayConfigObjectPath,
+	schema:     "org.gnome.desktop.peripherals.tablet",
+	schemaPath: "/org/gnome/desktop/peripherals/tablets/",
+}
+
 var x11TabletCompositors = []x11TabletCompositor{
 	{
 		name:       "Muffin",
@@ -57,13 +66,7 @@ var x11TabletCompositors = []x11TabletCompositor{
 		schema:     "org.cinnamon.desktop.peripherals.tablet",
 		schemaPath: "/org/cinnamon/desktop/peripherals/tablets/",
 	},
-	{
-		name:       "Mutter",
-		busName:    displayConfigBusName,
-		objectPath: displayConfigObjectPath,
-		schema:     "org.gnome.desktop.peripherals.tablet",
-		schemaPath: "/org/gnome/desktop/peripherals/tablets/",
-	},
+	mutterTabletCompositor,
 }
 
 // monitorSpec identifies a monitor as DisplayConfig does: its connector and

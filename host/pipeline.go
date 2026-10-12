@@ -9,7 +9,9 @@ package main
 // ffmpeg.go (startCapturePipeline), which is command-agnostic.
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -40,6 +42,10 @@ type pipelineSpec struct {
 	// runEncodePipeline emit a frame's last NAL as soon as that final write
 	// has been read (see accessUnitTracker). Zero keeps the hold-back.
 	AUWriteChunk int
+	// Input, when set, feeds the process's standard input (raw frames for
+	// an ffmpeg "pipe:0" input) until ctx ends or it fails; its standard
+	// input then closes, which ends the process.
+	Input func(ctx context.Context, w io.Writer) error
 }
 
 // parseBitrateKbps converts an ffmpeg-style bitrate string ("8M", "2500k",

@@ -2,40 +2,77 @@
 
 package main
 
-// Linux login autostart: a systemd user unit. The host needs the user
-// session (Mutter ScreenCast D-Bus, user bus, Wayland), so a user unit —
-// not a system service — is the correct integration. journald captures
-// stdout/stderr, so -background needs no log redirection here.
+// Linux login autostart: an XDG autostart entry launches the host inside
+// the desktop session, where display capture and input injection are available.
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
-const unitName = "drawsplay-host.service"
+const (
+	unitName      = "drawsplay-host.service"
+	autostartName = "drawsplay-host.desktop"
+)
 
-func unitPath() (string, error) {
+func autostartPath() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(base, "systemd", "user")
+	dir := filepath.Join(base, "autostart")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, unitName), nil
+	return filepath.Join(dir, autostartName), nil
 }
 
-func systemctlUser(args ...string) error {
-	cmd := exec.Command("systemctl", append([]string{"--user"}, args...)...)
-	out, err := cmd.CombinedOutput()
+func systemctlUser(args ...string) ([]byte, error) {
+	return exec.Command("systemctl", append([]string{"--user"}, args...)...).CombinedOutput()
+}
+
+func legacyAutostartLinks() []string {
+	base, err := os.UserConfigDir()
 	if err != nil {
-		return fmt.Errorf("systemctl --user %v: %v (%s)", args, err, string(out))
+		return nil
+	}
+	paths := []string{filepath.Join(base, "systemd", "user", "graphical-session.target.wants", unitName)}
+	if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
+		paths = append(paths, filepath.Join(runtimeDir, "systemd", "user", "graphical-session.target.wants", unitName))
+	}
+	return paths
+}
+
+func legacyAutostartEnabled() bool {
+	for _, path := range legacyAutostartLinks() {
+		if _, err := os.Lstat(path); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func disableLegacyAutostart() error {
+	if !legacyAutostartEnabled() {
+		return nil
+	}
+	if out, err := systemctlUser("disable", unitName); err != nil {
+		return fmt.Errorf("disabling legacy systemd autostart: %v (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func desktopExecArg(s string) string {
+	// Escape Exec-field metacharacters, then escape those backslashes for
+	// the enclosing Desktop Entry key file.
+	s = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "$", `\$`, "`", "\\`").Replace(s)
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	return `"` + s + `"`
 }
 
 func installAutostart() error {
@@ -43,54 +80,72 @@ func installAutostart() error {
 	if err != nil {
 		return err
 	}
-	path, err := unitPath()
+	path, err := autostartPath()
 	if err != nil {
 		return err
 	}
-	unit := fmt.Sprintf(`[Unit]
-Description=DrawSplay host (tablet secondary display)
-After=graphical-session.target
-
-[Service]
-ExecStart=%s -background
-Restart=on-failure
-RestartSec=3
-# Raises the service's RLIMIT_NICE ceiling so the capture/encode subprocess
-# (spawned by this service and inheriting its limits) can actually renice
-# itself higher via setpriority(2); see applyCaptureProcessPriorityPostStart
-# in ffmpeg_priority_linux.go. Stock distro defaults cap unprivileged
-# processes at niceness 0, silently turning that renice into a no-op.
-# LimitNICE=40 maps to the full -20..19 niceness range (systemd encodes it as
-# 20 - niceness); this does not itself change any process's niceness.
-LimitNICE=40
-
-[Install]
-WantedBy=graphical-session.target
-`, exe)
-	if err := os.WriteFile(path, []byte(unit), 0o644); err != nil {
-		return fmt.Errorf("writing unit: %w", err)
+	entry := fmt.Sprintf(`[Desktop Entry]
+Type=Application
+Name=DrawSplay host
+Exec=%s -background
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+`, desktopExecArg(exe))
+	if err := os.WriteFile(path, []byte(entry), 0o644); err != nil {
+		return fmt.Errorf("writing autostart entry: %w", err)
 	}
-	if err := systemctlUser("daemon-reload"); err != nil {
-		return err
-	}
-	return systemctlUser("enable", unitName)
+	return disableLegacyAutostart()
 }
 
 func uninstallAutostart() error {
 	// Disable future logins without stopping the currently running host.
-	return systemctlUser("disable", unitName)
+	path, err := autostartPath()
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing autostart entry: %w", err)
+	}
+	return disableLegacyAutostart()
 }
 
 func autostartEnabled() (bool, error) {
-	cmd := exec.Command("systemctl", "--user", "is-enabled", unitName)
-	out, err := cmd.CombinedOutput()
-	state := strings.TrimSpace(string(out))
-	if err != nil && state != "disabled" && state != "not-found" {
-		return false, fmt.Errorf("systemctl --user is-enabled %s: %v (%s)", unitName, err, state)
+	path, err := autostartPath()
+	if err != nil {
+		return false, err
 	}
-	return state == "enabled" || state == "enabled-runtime", nil
+	_, err = os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if !os.IsNotExist(err) {
+		return false, err
+	}
+	// Preserve an existing opt-in during upgrade: the old unit's
+	// graphical-session.target dependency does not start in some X11 sessions.
+	if !legacyAutostartEnabled() {
+		return false, nil
+	}
+	if err := installAutostart(); err != nil {
+		return false, fmt.Errorf("migrating legacy autostart: %w", err)
+	}
+	return true, nil
 }
 
-// prepareBackground is a no-op on Linux: systemd runs the process without a
-// terminal and journald captures its logs.
-func prepareBackground() {}
+func prepareBackground() {
+	dir, err := configDir()
+	if err != nil {
+		log.Printf("-background: cannot locate the config directory: %v", err)
+		return
+	}
+	path := filepath.Join(dir, "host.log")
+	_ = os.Remove(path + ".old")
+	_ = os.Rename(path, path+".old")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		log.Printf("-background: cannot open log file: %v", err)
+		return
+	}
+	log.SetOutput(io.MultiWriter(f, &debugLogWriter{}))
+}

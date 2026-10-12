@@ -12,9 +12,22 @@ import (
 
 func x11SessionActive() bool { return currentLinuxSessionBackend() == "x11" }
 
+func waylandSessionActive() bool { return currentLinuxSessionBackend() == "wayland" }
+
 func platformDependencyWarnings() map[string]string {
 	warnings := make(map[string]string)
-	if currentLinuxSessionBackend() != "x11" {
+	// The GStreamer tooling records the GNOME and KDE Plasma virtual
+	// outputs; ffmpeg records sway's and Hyprland's.
+	pipeWire := true
+	if waylandSessionActive() {
+		if b := detectWlExtBackend(); b != nil {
+			pipeWire = wlExtNeedsPipeWire(b)
+		} else if ok, err := mutterScreenCastAvailable(); err == nil && !ok {
+			pipeWire = false
+			warnings["wayland-compositor"] = waylandDesktopWarning(os.Getenv("XDG_CURRENT_DESKTOP"))
+		}
+	}
+	if currentLinuxSessionBackend() != "x11" && pipeWire {
 		if _, err := exec.LookPath("gst-launch-1.0"); err != nil {
 			warnings["gstreamer"] = "gst-launch-1.0 is missing; Wayland virtual-display capture is unavailable (install gstreamer1.0-tools)"
 		} else {
@@ -37,6 +50,19 @@ func platformDependencyWarnings() map[string]string {
 	return warnings
 }
 
+// waylandDesktopWarning explains what a Wayland session without a virtual
+// output the host can create gives the tablet. desktop is
+// XDG_CURRENT_DESKTOP.
+func waylandDesktopWarning(desktop string) string {
+	name, session := "This Wayland desktop", "an X11 session (or GNOME, KDE Plasma, sway or Hyprland)"
+	for _, d := range strings.Split(desktop, ":") {
+		if strings.Contains(strings.ToLower(d), "cinnamon") {
+			name, session = "Cinnamon on Wayland", "the Cinnamon (X11) session"
+		}
+	}
+	return name + " has no virtual monitor the host can create, so the tablet mirrors XWayland's screen, where only X11 applications show (native Wayland windows appear black); log into " + session + " to extend the desktop (see README)"
+}
+
 // x11VirtualDisplayWarning reports why the tablet would mirror the desktop on
 // X11 instead of extending it, or "" when a virtual output is available (or
 // one is chosen explicitly through DRAWSPLAY_X11_OUTPUT).
@@ -49,6 +75,19 @@ func x11VirtualDisplayWarning() string {
 		return ""
 	}
 	return x11VirtualDisplayWarningFor(st, vkmsModuleLoaded(), vkmsModuleAvailable())
+}
+
+func x11VirtualDisplayReady() bool {
+	st, err := queryXrandr(os.Getenv("DISPLAY"))
+	if err != nil {
+		return false
+	}
+	_, err = pickX11VirtualOutput(st, strings.TrimSpace(os.Getenv(x11OutputEnv)))
+	return err == nil
+}
+
+func refreshX11VkmsWarning() {
+	setOperationalWarning("vkms", x11VirtualDisplayWarning())
 }
 
 func x11VirtualDisplayWarningFor(st xrandrState, loaded, available bool) string {
@@ -80,4 +119,17 @@ func vkmsModuleAvailable() bool {
 	cmd := exec.Command("modinfo", "vkms")
 	cmd.Env = append(os.Environ(), "PATH="+os.Getenv("PATH")+":/usr/sbin:/sbin")
 	return cmd.Run() == nil
+}
+
+// waylandVirtualDisplayName names the virtual output the host makes under
+// this Wayland session.
+func waylandVirtualDisplayName() string {
+	switch b := detectWlExtBackend(); {
+	case b == nil:
+		return "GNOME virtual monitor"
+	case wlExtNeedsPipeWire(b):
+		return "KDE Plasma virtual output"
+	default:
+		return b.Label() + " virtual output"
+	}
 }

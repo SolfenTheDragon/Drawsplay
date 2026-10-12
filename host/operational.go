@@ -65,6 +65,10 @@ func currentOperationalWarnings() []string {
 	return warnings
 }
 
+// runBackgroundPreflight re-runs runDependencyPreflight without waiting for
+// it, after a change that can affect it. A variable for tests.
+var runBackgroundPreflight = func(s settings) { go runDependencyPreflight(s) }
+
 // runDependencyPreflight records degraded-mode warnings without preventing
 // input-only operation when optional runtime dependencies are unavailable.
 func runDependencyPreflight(s settings) {
@@ -78,7 +82,7 @@ func runDependencyPreflight(s settings) {
 	} else {
 		setOperationalWarning("ffmpeg", "")
 	}
-	for _, key := range []string{"gstreamer", "pipewire-gst", "gst-x264enc", "uinput", "vkms"} {
+	for _, key := range []string{"gstreamer", "pipewire-gst", "gst-x264enc", "uinput", "vkms", "wayland-compositor"} {
 		setOperationalWarning(key, "")
 	}
 	for key, warning := range platformDependencyWarnings() {

@@ -14,8 +14,9 @@ import "time"
 //
 // A restart is never free. On the Mutter virtual-monitor path only
 // gst-launch-1.0 is respawned against the same PipeWire node
-// (mutterDisplay.Refresh() is a no-op, so the ScreenCast session, the virtual
-// monitor and the client's video socket all survive); on x11grab the whole
+// (mutterDisplay.Refresh() only re-reads the monitor's place in the desktop,
+// so the ScreenCast session, the virtual monitor and the client's video
+// socket all survive); on x11grab the whole
 // ffmpeg capture and encode process starts over. Either way the picture
 // holds until the new encoder's first keyframe, so a lone report should not
 // cause one: a stats sample that caught a deep decode queue, or one slow

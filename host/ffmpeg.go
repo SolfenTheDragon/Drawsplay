@@ -19,13 +19,16 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -54,6 +57,11 @@ type capturePipeline struct {
 	// fullPipeBound is stdout's bound for access-unit early emission (see
 	// preparePipeWriteBoundaries); 0 when off.
 	fullPipeBound int
+	// inputDone is closed once the spec's Input has returned (nil when the
+	// spec has none); inputErr is why it failed.
+	inputDone chan struct{}
+	inputMu   sync.Mutex
+	inputErr  error
 }
 
 // startCapturePipeline launches the spec's command and returns a handle
@@ -74,13 +82,36 @@ func startCapturePipeline(ctx context.Context, spec pipelineSpec) (*capturePipel
 	fullPipeBound := fullPipeBoundFor(spec, stdout)
 	stderr := &boundedBuffer{max: 8 * 1024}
 	cmd.Stderr = stderr
+	var stdin io.WriteCloser
+	if spec.Input != nil {
+		if stdin, err = cmd.StdinPipe(); err != nil {
+			cancel()
+			return nil, err
+		}
+	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("%s start: %w", spec.Cmd, err)
 	}
 	applyCaptureProcessPriorityPostStart(cmd)
-	return &capturePipeline{cmd: cmd, cancel: cancel, stdout: stdout, stderr: stderr, fullPipeBound: fullPipeBound}, nil
+	p := &capturePipeline{cmd: cmd, cancel: cancel, stdout: stdout, stderr: stderr, fullPipeBound: fullPipeBound}
+	if spec.Input != nil {
+		p.inputDone = make(chan struct{})
+		go func() {
+			defer close(p.inputDone)
+			err := spec.Input(cmdCtx, stdin)
+			// A broken pipe only means the process ended first.
+			if err != nil && cmdCtx.Err() == nil && !errors.Is(err, syscall.EPIPE) && !errors.Is(err, os.ErrClosed) {
+				log.Printf("Capture input [%s] ended: %v", spec.Name, err)
+				p.inputMu.Lock()
+				p.inputErr = err
+				p.inputMu.Unlock()
+			}
+			_ = stdin.Close()
+		}()
+	}
+	return p, nil
 }
 
 // stop terminates the process and reaps it. Safe to call from any
@@ -93,6 +124,7 @@ func (p *capturePipeline) stop() {
 		go func() {
 			waitDone <- p.cmd.Wait()
 		}()
+		defer p.waitInput()
 		select {
 		case <-waitDone:
 			return
@@ -111,9 +143,33 @@ func (p *capturePipeline) stop() {
 	})
 }
 
-// errorTail returns captured stderr for error reporting.
+// waitInput waits for the spec's Input to return; it does once its
+// context ends (stop cancels that).
+func (p *capturePipeline) waitInput() {
+	if p.inputDone == nil {
+		return
+	}
+	select {
+	case <-p.inputDone:
+	case <-time.After(pipelineKillWaitTimeout):
+		log.Printf("Capture input did not stop within %s", pipelineKillWaitTimeout)
+	}
+}
+
+// errorTail returns captured stderr, and why the capture input failed, for
+// error reporting.
 func (p *capturePipeline) errorTail() string {
-	return strings.TrimSpace(p.stderr.String())
+	tail := strings.TrimSpace(p.stderr.String())
+	p.inputMu.Lock()
+	inputErr := p.inputErr
+	p.inputMu.Unlock()
+	if inputErr != nil {
+		if tail != "" {
+			tail += "; "
+		}
+		tail += "capture: " + inputErr.Error()
+	}
+	return tail
 }
 
 // detectedHostVideoCodecs reports codecs the host can currently encode.

@@ -8,6 +8,9 @@ package main
 // clock, so anything above the desktop's 60 Hz refresh only risks failing caps
 // negotiation.
 //
+// screencopy: the compositor draws the output at its refresh rate, 60 Hz for
+// the outputs the host creates.
+//
 // x11grab: ffmpeg does not honour -framerate as a ceiling on this path. Asked
 // for 120 it free-ran at ~470-490 frames/s, which the client cannot render;
 // the resulting congestion walked the bitrate ladder down and produced 14
@@ -17,7 +20,7 @@ const linuxCaptureFPSCeiling = 60
 
 func effectiveCaptureFPS(target captureTarget, configuredFPS int) int {
 	switch target.Kind {
-	case capturePipeWire, captureX11Grab:
+	case capturePipeWire, captureX11Grab, captureScreencopy:
 		if configuredFPS > linuxCaptureFPSCeiling {
 			return linuxCaptureFPSCeiling
 		}

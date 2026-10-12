@@ -257,22 +257,12 @@ func TestStatusAPIExposesWarningsAndMetrics(t *testing.T) {
 	}
 }
 
-func TestAutostartImplementationTracksLinuxSessionType(t *testing.T) {
+func TestAutostartImplementationNamesLinuxXDGAutostart(t *testing.T) {
 	if runtime.GOOS != "linux" {
-		t.Skip("session-specific service implementation is Linux-only")
+		t.Skip("Linux autostart implementation is Linux-only")
 	}
-	for _, tc := range []struct {
-		session string
-		want    string
-	}{
-		{session: "x11", want: "Linux X11 session: systemd user service"},
-		{session: "wayland", want: "Linux Wayland session: systemd user service"},
-		{session: "", want: "Linux desktop session: systemd user service"},
-	} {
-		t.Setenv("XDG_SESSION_TYPE", tc.session)
-		if got := autostartImplementation(); got != tc.want {
-			t.Errorf("autostartImplementation() for %q = %q, want %q", tc.session, got, tc.want)
-		}
+	if got, want := autostartImplementation(), "Linux desktop session: XDG autostart"; got != want {
+		t.Errorf("autostartImplementation() = %q, want %q", got, want)
 	}
 }
 
@@ -371,6 +361,29 @@ func TestSessionReconnectVideoAndSetupRemediationAPIs(t *testing.T) {
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("POST /api/setup/remediate unknown status = %d", res.StatusCode)
+	}
+}
+
+func TestShouldRestartX11AfterSetupRepair(t *testing.T) {
+	tests := []struct {
+		name        string
+		x11         bool
+		video       videoStatusInfo
+		outputReady bool
+		want        bool
+	}{
+		{"new virtual output after repair", true, videoStatusInfo{Streaming: true, DisplayMode: "mirror"}, true, true},
+		{"no output", true, videoStatusInfo{Streaming: true, DisplayMode: "mirror"}, false, false},
+		{"not currently mirroring", true, videoStatusInfo{Streaming: true, DisplayMode: "extend"}, true, false},
+		{"no active stream", true, videoStatusInfo{DisplayMode: "mirror"}, true, false},
+		{"not X11", false, videoStatusInfo{Streaming: true, DisplayMode: "mirror"}, true, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldRestartX11AfterSetupRepair(tc.x11, tc.video, tc.outputReady); got != tc.want {
+				t.Fatalf("shouldRestartX11AfterSetupRepair() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

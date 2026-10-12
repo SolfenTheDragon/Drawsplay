@@ -11,8 +11,8 @@ package main
 //	Windows: HKCU\...\CurrentVersion\Run entry launching `host -background`
 //	         (-background respawns the process without a console window and
 //	         redirects logs to %APPDATA%\DrawSplay\host.log).
-//	Linux:   systemd user unit (~/.config/systemd/user/drawsplay-host.service),
-//	         enabled via `systemctl --user`; journald captures the logs.
+//	Linux:   XDG autostart entry (~/.config/autostart/drawsplay-host.desktop),
+//	         launched inside the desktop session.
 //
 // Platform implementations live in service_windows.go / service_linux.go:
 //
@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"strings"
 )
 
 func autostartImplementation() string {
@@ -35,14 +34,7 @@ func autostartImplementation() string {
 	case "windows":
 		return "Windows per-user startup entry (HKCU Run key)"
 	case "linux":
-		switch strings.ToLower(strings.TrimSpace(os.Getenv("XDG_SESSION_TYPE"))) {
-		case "x11":
-			return "Linux X11 session: systemd user service"
-		case "wayland":
-			return "Linux Wayland session: systemd user service"
-		default:
-			return "Linux desktop session: systemd user service"
-		}
+		return "Linux desktop session: XDG autostart"
 	default:
 		return runtime.GOOS + ": login service implementation"
 	}

@@ -385,6 +385,9 @@ type videoStatusInfo struct {
 	DisplayMode string `json:"displayMode,omitempty"` // extend | mirror | unknown
 	CaptureKind string `json:"captureKind,omitempty"` // ddagrab | pipewire | x11grab
 	Display     string `json:"display,omitempty"`     // human-readable display description
+	// ResolutionControl is "host" when the configured resolution sets the
+	// display's, which the desktop's display settings cannot change.
+	ResolutionControl string `json:"resolutionControl,omitempty"`
 }
 
 var (
@@ -407,12 +410,13 @@ func publishVideoStatus(streaming bool, encoder, bitrate string) {
 	videoStatusMu.Unlock()
 }
 
-func publishVideoDisplay(mode, captureKind, description string) {
+func publishVideoDisplay(mode, captureKind, description, resolutionControl string) {
 	videoStatusMu.Lock()
 	status := videoStatus
 	status.DisplayMode = mode
 	status.CaptureKind = captureKind
 	status.Display = description
+	status.ResolutionControl = resolutionControl
 	videoStatus = status
 	videoStatusMu.Unlock()
 }
@@ -420,7 +424,13 @@ func publishVideoDisplay(mode, captureKind, description string) {
 func displayModeFromTarget(target captureTarget) (mode, captureKind string) {
 	captureKind = string(target.Kind)
 	switch target.Kind {
-	case captureDDAGrab, capturePipeWire:
+	case captureDDAGrab:
+		return "extend", captureKind
+	case capturePipeWire, captureScreencopy:
+		// A Wayland virtual output, unless it mirrors another display.
+		if target.Mirrored {
+			return "mirror", captureKind
+		}
 		return "extend", captureKind
 	case captureX11Grab:
 		// A rectangle is one output of the X screen: the X11 extended
@@ -433,6 +443,14 @@ func displayModeFromTarget(target captureTarget) (mode, captureKind string) {
 	default:
 		return "unknown", captureKind
 	}
+}
+
+// resolutionControlOf is the video status's ResolutionControl for target.
+func resolutionControlOf(target captureTarget) string {
+	if target.HostResolution {
+		return "host"
+	}
+	return ""
 }
 
 func currentVideoStatus() videoStatusInfo {
@@ -577,14 +595,14 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 	defer display.Close()
 	log.Printf("Display for session: %s", display.Description())
 	mode, captureKind := displayModeFromTarget(display.Target())
-	publishVideoDisplay(mode, captureKind, display.Description())
+	publishVideoDisplay(mode, captureKind, display.Description(), resolutionControlOf(display.Target()))
 	if mode == "mirror" {
 		setOperationalWarning("display-mode", fmt.Sprintf("Virtual display is unavailable; streaming mirror mode via %s", captureKind))
 	} else {
 		setOperationalWarning("display-mode", "")
 	}
 	defer func() {
-		publishVideoDisplay("", "", "")
+		publishVideoDisplay("", "", "", "")
 		setOperationalWarning("display-mode", "")
 	}()
 

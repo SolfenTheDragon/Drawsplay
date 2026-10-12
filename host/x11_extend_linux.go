@@ -455,17 +455,69 @@ func placeAt(p x11Placement, b displayRect, w, h int) displayRect {
 	}
 }
 
-// planX11Layout decides where the w x h extended display goes. An active
-// output keeps its side of the desktop; an inactive one, or one overlapping
-// the other displays at another size, returns to where it was last switched
-// off (remembered), or goes right of the other displays. An active output
-// that already shows w x h is left alone, even when it mirrors another
-// display.
+// extendOutput is a display as the layout planners see it.
+type extendOutput struct {
+	Name   string
+	Active bool
+	Rect   displayRect
+}
+
+// planX11Layout decides where the w x h extended display goes (see
+// planExtendLayout). An active output that already shows w x h is left
+// alone, even when it mirrors another display.
 func planX11Layout(st xrandrState, name string, w, h int, remembered *x11Placement) (x11Layout, error) {
 	var cur xrandrOutput
-	var others []xrandrOutput
-	var rects []displayRect
+	var outputs []extendOutput
+	others := 0
 	for _, o := range st.Outputs {
+		outputs = append(outputs, extendOutput{Name: o.Name, Active: o.Active, Rect: o.Rect})
+		switch {
+		case o.Name == name:
+			cur = o
+		case o.Active:
+			others++
+		}
+	}
+	if others == 0 {
+		return x11Layout{}, errors.New("no other active display to extend")
+	}
+	if cur.Active && cur.Rect.W == w && cur.Rect.H == h {
+		return x11Layout{Keep: true, Rect: cur.Rect}, nil
+	}
+	layout := planExtendLayout(outputs, name, w, h, remembered, true)
+	moved := map[string]x11OutputPos{}
+	for _, m := range layout.Moves {
+		moved[m.Name] = m
+	}
+	rects := []displayRect{layout.Rect}
+	for _, o := range outputs {
+		if o.Name == name || !o.Active {
+			continue
+		}
+		r := o.Rect
+		if m, ok := moved[o.Name]; ok {
+			r.X, r.Y = m.X, m.Y
+		}
+		rects = append(rects, r)
+	}
+	all := boundsOf(rects)
+	if (st.MaxW > 0 && all.X+all.W > st.MaxW) || (st.MaxH > 0 && all.Y+all.H > st.MaxH) {
+		return x11Layout{}, fmt.Errorf("a %dx%d display does not fit in the X screen's %dx%d maximum", w, h, st.MaxW, st.MaxH)
+	}
+	return layout, nil
+}
+
+// planExtendLayout decides where the w x h extended display named name goes
+// among outputs. An active display keeps its side of the desktop; an
+// inactive one, or one overlapping the other displays, returns to where it
+// was last switched off (remembered), or goes right of the other displays.
+// anchored: the desktop keeps its origin at 0,0, so the other displays move
+// when the extended display goes left of or above them.
+func planExtendLayout(outputs []extendOutput, name string, w, h int, remembered *x11Placement, anchored bool) x11Layout {
+	var cur extendOutput
+	var others []extendOutput
+	var rects []displayRect
+	for _, o := range outputs {
 		switch {
 		case o.Name == name:
 			cur = o
@@ -475,10 +527,7 @@ func planX11Layout(st xrandrState, name string, w, h int, remembered *x11Placeme
 		}
 	}
 	if len(others) == 0 {
-		return x11Layout{}, errors.New("no other active display to extend")
-	}
-	if cur.Active && cur.Rect.W == w && cur.Rect.H == h {
-		return x11Layout{Keep: true, Rect: cur.Rect}, nil
+		return x11Layout{Rect: displayRect{W: w, H: h}}
 	}
 	b := boundsOf(rects)
 	var r displayRect
@@ -494,6 +543,9 @@ func planX11Layout(st xrandrState, name string, w, h int, remembered *x11Placeme
 	default:
 		r = placeAt(x11Placement{Side: "right"}, b, w, h)
 	}
+	if !anchored {
+		return x11Layout{Rect: r}
+	}
 	dx, dy := max(0, -min(r.X, b.X)), max(0, -min(r.Y, b.Y))
 	layout := x11Layout{Rect: displayRect{X: r.X + dx, Y: r.Y + dy, W: w, H: h}}
 	if dx != 0 || dy != 0 {
@@ -501,11 +553,7 @@ func planX11Layout(st xrandrState, name string, w, h int, remembered *x11Placeme
 			layout.Moves = append(layout.Moves, x11OutputPos{Name: o.Name, X: o.Rect.X + dx, Y: o.Rect.Y + dy})
 		}
 	}
-	all := boundsOf([]displayRect{layout.Rect, {X: b.X + dx, Y: b.Y + dy, W: b.W, H: b.H}})
-	if (st.MaxW > 0 && all.X+all.W > st.MaxW) || (st.MaxH > 0 && all.Y+all.H > st.MaxH) {
-		return x11Layout{}, fmt.Errorf("a %dx%d display does not fit in the X screen's %dx%d maximum", w, h, st.MaxW, st.MaxH)
-	}
-	return layout, nil
+	return layout
 }
 
 func x11ApplyArgs(output, mode string, layout x11Layout) []string {
@@ -788,14 +836,18 @@ func switchOffX11OutputsLocked() {
 	}
 }
 
-// releaseVirtualDisplaysOnExit switches off the X11 extended display, which
-// would otherwise stay on as an empty monitor after the host exits.
+// releaseVirtualDisplaysOnExit switches off the X11 extended display and
+// removes the GNOME virtual monitor, which would otherwise stay on as an
+// empty monitor, or leave the other displays as GNOME lays them out, after
+// the host exits.
 func releaseVirtualDisplaysOnExit() {
 	x11Ext.mu.Lock()
-	defer x11Ext.mu.Unlock()
 	x11Ext.exiting = true
 	stopX11ReleaseTimerLocked()
 	switchOffX11OutputsLocked()
+	x11Ext.mu.Unlock()
+	releaseMutterOnExit()
+	releaseWlExtOnExit()
 }
 
 // x11ExtendedDisplay is one session's use of the virtual output.
@@ -970,8 +1022,8 @@ func observeX11Output(st xrandrState, name string) x11Observed {
 	return obs
 }
 
-// watch follows the output while the session runs, like Mutter's
-// watchResolution: a resolution picked in the display settings is saved as
+// watch follows the output while the session runs, like the GNOME virtual
+// monitor's watcher: a resolution picked in the display settings is saved as
 // the configured one, and any change to the output's place on the X screen
 // restarts the session so capture and input mapping follow. A state must be
 // seen on two consecutive polls, so the window manager's intermediate steps

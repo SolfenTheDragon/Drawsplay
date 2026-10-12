@@ -55,11 +55,11 @@ func TestSettingsRejectsUnsafePreferredSerial(t *testing.T) {
 
 // TestSettingsStoreUpdateResolutionPersists guards the fix for Linux's
 // GNOME-managed resolution snapping back to the originally configured size
-// on every session restart: display_linux.go's watchResolution calls
-// updateResolution when it detects a GNOME Settings -> Displays change, and
-// that new width/height must actually be written to disk (not just held in
-// the in-memory snapshot), or the next RecordVirtual call would mark the
-// stale old default "is-preferred" again.
+// on every session restart: the extended displays' watchers
+// (mutter_extend_linux.go, x11_extend_linux.go) call updateResolution when
+// they detect a display-settings change, and that new width/height must
+// actually be written to disk (not just held in the in-memory snapshot), or
+// the next session would set the stale old default again.
 func TestSettingsStoreUpdateResolutionPersists(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 

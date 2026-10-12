@@ -181,11 +181,14 @@ function applyResolutionPolicy(status) {
   // resolution and FPS controls are hidden.
   const windowsManaged = hostOS === "windows" && isTabletClient;
   // Linux: the virtual monitor now declares a real, GNOME-selectable mode
-  // list (see display_linux.go's RecordVirtual "modes" property), so the
+  // list (see mutter_extend_linux.go's RecordVirtual "modes" property), so the
   // user picks resolution from Settings -> Displays like any other
   // monitor. Only resolution is host-managed here -- FPS is independent
   // of the display's refresh rate on Linux, so the FPS control stays.
-  const linuxManaged = hostOS === "linux" && isTabletClient;
+  // Displays the desktop offers no other resolution for (GNOME 49 and
+  // older, KDE Plasma before 6.7) take the configured one instead.
+  const hostResolution = String(status?.video?.resolutionControl || "") === "host";
+  const linuxManaged = hostOS === "linux" && isTabletClient && !hostResolution;
   const managed = windowsManaged || linuxManaged;
   resolutionManagedByOS = managed;
 
@@ -642,12 +645,17 @@ $("run-setup-remediation-btn").addEventListener("click", async () => {
   const btn = $("run-setup-remediation-btn");
   btn.disabled = true;
   try {
-    await api("/api/setup/remediate", {
+    const result = await api("/api/setup/remediate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "restart-adb" }),
     });
-    showMsg("Setup repair checks ran successfully.", true);
+    showMsg(
+      result.videoRestarted
+        ? "Setup repair checks ran; video restarted to use the X11 virtual display."
+        : "Setup repair checks ran successfully.",
+      true,
+    );
     await refreshStatus();
   } catch (e) {
     showMsg(e.message, false);

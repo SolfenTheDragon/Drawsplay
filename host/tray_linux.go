@@ -2,10 +2,11 @@
 
 package main
 
-// System tray status menu for X11 sessions.
+// System tray status menu for X11 and Wayland desktop sessions.
 //
 // The host exports a StatusNotifierItem (the protocol behind the Cinnamon,
-// KDE, XFCE and GNOME-AppIndicator tray areas) and a com.canonical.dbusmenu
+// KDE, XFCE and GNOME-AppIndicator tray areas, under X11 and Wayland alike;
+// stock GNOME needs the AppIndicator extension) and a com.canonical.dbusmenu
 // menu over the session bus, so no GUI toolkit is needed. The menu shows the
 // tablet connection, the display mode and the encoder, and offers
 // "Open Settings" and "Quit". Without a StatusNotifierWatcher on the bus (no
@@ -252,22 +253,13 @@ func (i *trayItem) SecondaryActivate(int32, int32) *dbus.Error { i.onActivate();
 func (i *trayItem) ContextMenu(int32, int32) *dbus.Error       { return nil }
 func (i *trayItem) Scroll(int32, string) *dbus.Error           { return nil }
 
-func isX11Session() bool {
-	switch strings.ToLower(os.Getenv("XDG_SESSION_TYPE")) {
-	case "x11":
-		return true
-	case "":
-		return os.Getenv("DISPLAY") != "" && os.Getenv("WAYLAND_DISPLAY") == ""
-	}
-	return false
-}
-
 func runBackgroundTrayController(background bool, parent context.Context, cancel context.CancelFunc, store *settingsStore) bool {
-	if !isX11Session() {
+	// The tray lives in a desktop session, X11 or Wayland.
+	if currentLinuxSessionBackend() == "unknown" {
 		return false
 	}
 	go func() {
-		if err := runX11StatusTray(parent, cancel); err != nil && parent.Err() == nil {
+		if err := runStatusTray(parent, cancel); err != nil && parent.Err() == nil {
 			log.Printf("System tray unavailable: %v", err)
 		}
 	}()
@@ -282,7 +274,7 @@ func openSettingsWebUI() {
 	}
 }
 
-func runX11StatusTray(ctx context.Context, quit context.CancelFunc) error {
+func runStatusTray(ctx context.Context, quit context.CancelFunc) error {
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		return fmt.Errorf("session bus: %w", err)

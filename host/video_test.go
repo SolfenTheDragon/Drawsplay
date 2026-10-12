@@ -265,6 +265,9 @@ func TestDisplayModeFromTarget(t *testing.T) {
 	}{
 		{target: captureTarget{Kind: captureDDAGrab}, mode: "extend", kind: "ddagrab"},
 		{target: captureTarget{Kind: capturePipeWire}, mode: "extend", kind: "pipewire"},
+		{target: captureTarget{Kind: capturePipeWire, Mirrored: true}, mode: "mirror", kind: "pipewire"},
+		{target: captureTarget{Kind: captureScreencopy, OutputName: "HEADLESS-1"}, mode: "extend", kind: "screencopy"},
+		{target: captureTarget{Kind: captureScreencopy, OutputName: "HEADLESS-1", Mirrored: true}, mode: "mirror", kind: "screencopy"},
 		{target: captureTarget{Kind: captureX11Grab}, mode: "mirror", kind: "x11grab"},
 		{target: captureTarget{Kind: captureX11Grab, Rect: displayRect{X: 1920, W: 1920, H: 1080}}, mode: "extend", kind: "x11grab"},
 		{target: captureTarget{Kind: captureX11Grab, Rect: displayRect{W: 1920, H: 1080}, Mirrored: true}, mode: "mirror", kind: "x11grab"},
@@ -278,15 +281,24 @@ func TestDisplayModeFromTarget(t *testing.T) {
 	}
 }
 
+func TestResolutionControlOf(t *testing.T) {
+	if got := resolutionControlOf(captureTarget{Kind: capturePipeWire}); got != "" {
+		t.Errorf("a display the desktop sizes: resolutionControl = %q, want none", got)
+	}
+	if got := resolutionControlOf(captureTarget{Kind: capturePipeWire, HostResolution: true}); got != "host" {
+		t.Errorf("a display the host sizes: resolutionControl = %q, want host", got)
+	}
+}
+
 func TestPublishVideoStatusClearsMetadataWhenIdle(t *testing.T) {
-	publishVideoDisplay("mirror", "x11grab", "mirror display")
+	publishVideoDisplay("mirror", "x11grab", "mirror display", "host")
 	publishVideoStatus(true, "x264enc", "8M")
-	if got := currentVideoStatus(); got.DisplayMode != "mirror" || got.CaptureKind != "x11grab" {
+	if got := currentVideoStatus(); got.DisplayMode != "mirror" || got.CaptureKind != "x11grab" || got.ResolutionControl != "host" {
 		t.Fatalf("status metadata not preserved while streaming: %+v", got)
 	}
 	publishVideoStatus(false, "", "")
 	got := currentVideoStatus()
-	if got.Streaming || got.DisplayMode != "" || got.CaptureKind != "" || got.Display != "" {
+	if got.Streaming || got.DisplayMode != "" || got.CaptureKind != "" || got.Display != "" || got.ResolutionControl != "" {
 		t.Fatalf("idle status not cleared: %+v", got)
 	}
 }

@@ -10,11 +10,16 @@ package main
 // Per-OS implementations (each also provides a mirror fallback so video
 // still works when the virtual-display mechanism is unavailable):
 //
-//	display_windows.go   — Parsec VDD driver (IddCx) controlled via IOCTLs.
-//	display_linux.go     — GNOME Mutter ScreenCast RecordVirtual (Wayland),
-//	                       x11grab mirror fallback when X11 extend is unavailable.
-//	x11_extend_linux.go  — X11 sessions: a virtual RandR output (vkms)
-//	                       switched on with xrandr and captured by region.
+//	display_windows.go     — Parsec VDD driver (IddCx) controlled via IOCTLs.
+//	display_linux.go       — picks the Linux display by session type; x11grab
+//	                         mirror fallback.
+//	mutter_extend_linux.go — GNOME Wayland: a Mutter ScreenCast virtual
+//	                         monitor recorded through PipeWire.
+//	x11_extend_linux.go    — X11 sessions: a virtual RandR output (vkms)
+//	                         switched on with xrandr and captured by region.
+//
+// The Linux extended displays stay a few seconds after their session ends,
+// so a quick reconnect finds the desktop as it was.
 //
 // The captureTarget returned by a display tells the platform pipeline
 // builder (pipeline_windows.go / pipeline_linux.go) what to record.
@@ -36,6 +41,9 @@ const (
 	// fallback) or, when Rect is set, of one output's rectangle of it (X11
 	// extended display).
 	captureX11Grab captureKind = "x11grab"
+	// captureScreencopy: Linux wlr-screencopy of one output of a wlroots
+	// (sway) or Hyprland desktop, fed to ffmpeg as raw frames.
+	captureScreencopy captureKind = "screencopy"
 )
 
 // captureTarget is the union of per-OS capture parameters.
@@ -49,13 +57,29 @@ type captureTarget struct {
 	// PipeWire node ID (Kind == capturePipeWire).
 	Node uint32
 
+	// The compositor's name of the output to record (Kind ==
+	// captureScreencopy).
+	OutputName string
+
 	// Requested stream dimensions (used where the mechanism can negotiate
 	// them, e.g. Mutter virtual monitors).
 	Width  int
 	Height int
 
+	// SizeFromConsumer: the PipeWire stream has no size of its own; the
+	// compositor sizes it, and the display behind it, to what the consumer
+	// asks for, so pipelines must ask for Width x Height (virtual monitors
+	// of Mutter 49 and older).
+	SizeFromConsumer bool
+
+	// HostResolution: the desktop's display settings offer this display
+	// no resolution but the one it has; the host's configured resolution
+	// sets it, so the web UI offers that setting.
+	HostResolution bool
+
 	// Desktop-space rectangle of the display (virtual desktop coordinates
-	// on Windows; X screen coordinates for the X11 extended display). Input
+	// on Windows; X screen coordinates for the X11 extended display; the
+	// compositor's layout coordinates for a Wayland virtual output). Input
 	// injection (M3) maps normalized tablet coordinates into this
 	// rectangle. Zero Rect means "unknown" — injectors then target the
 	// primary display.
@@ -67,15 +91,15 @@ type captureTarget struct {
 	DesktopWidth  int
 	DesktopHeight int
 
-	// TabletMapped: under Muffin or Mutter, the compositor maps the tablet
-	// input device itself onto this display (see x11_tablet_linux.go), so the
-	// injector sends plain tablet coordinates instead of aiming at Rect
-	// within the whole X screen.
+	// TabletMapped: the compositor (Muffin, Mutter, KWin, sway, Hyprland)
+	// maps the tablet input device itself onto this display (see
+	// x11_tablet_linux.go), so the injector sends plain tablet coordinates
+	// instead of aiming at Rect within the whole desktop.
 	TabletMapped bool
 
-	// Mirrored: the X11 extended display shares its area of the X screen
-	// with another display (e.g. "Mirror displays" in the display
-	// settings), so it shows that display's picture.
+	// Mirrored: the extended display shows the same picture as another
+	// display (e.g. "Mirror displays" in the display settings). The X11
+	// extended display then shares its area of the X screen with it.
 	Mirrored bool
 
 	// GDI device name of the display (Windows, e.g. `\\.\DISPLAY5`).

@@ -285,10 +285,10 @@ type settingsStore struct {
 
 // globalSettingsStore is a process-wide handle to the running settings
 // store, set once in main() right after it's created. It exists so
-// OS-specific code far from main() -- currently only Linux's
-// watchResolution in display_linux.go, which persists a GNOME
-// Settings -> Displays resolution change back into the config -- can
-// update settings without every intermediate caller threading a
+// OS-specific code far from main() -- currently only the Linux extended
+// displays' watchers (x11_extend_linux.go, mutter_extend_linux.go), which
+// persist a resolution picked in the display settings back into the config
+// -- can update settings without every intermediate caller threading a
 // *settingsStore through. Safe for concurrent use: settingsStore itself is
 // already mutex-guarded, and this pointer is written once before any
 // reader goroutine starts.
@@ -297,12 +297,11 @@ var globalSettingsStore *settingsStore
 // updateResolution persists a new width/height into the settings snapshot
 // and config file, without going through the full web UI update path (no
 // CSRF, no active-session restart -- the caller already owns that
-// decision). Used by display_linux.go's watchResolution to make a
-// GNOME Settings -> Displays resolution choice stick across the session
-// restart it triggers; otherwise the next session would re-declare
-// RecordVirtual's "modes" with "is-preferred" still pointing at the old
-// configured resolution, snapping back to it instead of keeping the
-// user's choice.
+// decision). Used by the Linux extended displays' watchers to make a
+// resolution picked in the display settings stick across the session
+// restart it triggers; otherwise the next session would set the display
+// back to the old configured resolution instead of keeping the user's
+// choice.
 func (st *settingsStore) updateResolution(width, height int) error {
 	s := st.get()
 	s.Width = width

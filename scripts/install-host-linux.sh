@@ -82,4 +82,4 @@ if [[ ! "$user_groups" =~ (^|[[:space:]])input($|[[:space:]]) ]] || [[ ! "$user_
   echo
 fi
 
-echo "If pen injection is disabled, grant /dev/uinput access (MODE=0660 GROUP=input) and map 'Drawsplay Pen' in GNOME Wacom Tablet settings."
+echo "If pen injection is disabled, grant /dev/uinput access (MODE=0660 GROUP=input). DrawSplay maps 'Drawsplay Pen' to the tablet's display itself."

@@ -36,7 +36,7 @@ package main
 // which monitor the tablet maps to. GNOME maps stylus devices through
 // Settings → Wacom Tablet → Map to Monitor, keyed by the target monitor's
 // connector vendor/product/serial; the host keeps this in sync automatically
-// (see remapTabletInputToVirtualMonitor in display_linux.go) so touch/pen
+// (see mapMutterTablet in mutter_extend_linux.go) so touch/pen
 // input follows the Drawsplay virtual monitor across reconnects without the
 // user needing to redo it in Settings each session. The X11 extended display
 // does the same through Muffin's/Mutter's tablet settings, and aims at the
@@ -59,7 +59,7 @@ import (
 // Drawsplay Pen's uinput vendor/product IDs, also used as the dconf/gsettings
 // lookup key for GNOME's per-tablet "Map to Monitor" setting (schema path
 // /org/gnome/desktop/peripherals/tablets/<vendor>:<product>/) — see
-// remapTabletInputToVirtualMonitor in display_linux.go.
+// x11TabletSettingsPath in x11_tablet_linux.go.
 const (
 	drawsplayPenVendorID  = 0x1d50
 	drawsplayPenProductID = 0x5044

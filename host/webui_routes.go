@@ -114,7 +114,7 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 			old.KeepAliveOnBackground != s.KeepAliveOnBackground {
 			inputRestarted = restartActiveInputSessions()
 		}
-		go runDependencyPreflight(api.store.get())
+		runBackgroundPreflight(api.store.get())
 		log.Printf("Settings updated via web UI: fps=%d bitrate=%s %dx%d localCursor=%v touch=%v pen=%v keyboard=%v keepAliveOnBackground=%v preferredADBSerial=%q requirePreferredADB=%v autoLaunchAndroidApp=%v zeroCopyCapture=%v temporalLayering=%v allowToolAutoInstall=%v noDriverInstall=%v (videoRestarted=%v inputRestarted=%v)",
 			s.FPS, s.Bitrate, s.Width, s.Height, s.LocalCursor, s.TouchEnabled, s.PenEnabled,
 			s.KeyboardEnabled, s.KeepAliveOnBackground, s.PreferredADBSerial, s.RequirePreferredADB, s.AutoLaunchAndroidApp, s.ZeroCopyCapture, s.TemporalLayering, s.AllowToolAutoInstall,
@@ -172,11 +172,28 @@ func (api webUIAPI) handleSetupRemediate(w http.ResponseWriter, r *http.Request)
 			httpError(w, http.StatusUnprocessableEntity, "adb restart failed: %v", err)
 			return
 		}
-		go runDependencyPreflight(cfg)
-		writeJSON(w, map[string]any{"ok": true, "action": "restart-adb", "setup": currentSetupChecklist()})
+		runBackgroundPreflight(cfg)
+		if x11SessionActive() {
+			refreshX11VkmsWarning()
+		}
+		video := currentVideoStatus()
+		videoRestarted := false
+		if shouldRestartX11AfterSetupRepair(x11SessionActive(), video, x11VirtualDisplayReady()) {
+			videoRestarted = restartActiveVideoSession()
+		}
+		writeJSON(w, map[string]any{
+			"ok":             true,
+			"action":         "restart-adb",
+			"videoRestarted": videoRestarted,
+			"setup":          currentSetupChecklist(),
+		})
 	default:
 		httpError(w, http.StatusUnprocessableEntity, "unknown setup action: %s", req.Action)
 	}
+}
+
+func shouldRestartX11AfterSetupRepair(x11Session bool, video videoStatusInfo, virtualOutputReady bool) bool {
+	return x11Session && video.Streaming && video.DisplayMode == "mirror" && virtualOutputReady
 }
 
 func (api webUIAPI) handleDiagnostics(w http.ResponseWriter, _ *http.Request) {

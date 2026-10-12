@@ -86,6 +86,23 @@ func TestGstPipeWireFallbackHasUnpinnedCaps(t *testing.T) {
 	}
 }
 
+func TestGstPipeWireSpecsAskConsumerSizedStreamsForTheDisplaySize(t *testing.T) {
+	// GNOME 49 and older size a virtual monitor to its stream's consumer:
+	// every pipeline, the anysize fallback too, must ask for the monitor's
+	// size or Mutter resizes it to its 1280x720 default.
+	target, opts := pipeWireTestOpts()
+	target.SizeFromConsumer = true
+	for _, spec := range gstPipeWireSpecs(target, opts) {
+		joined := strings.Join(spec.Args, " ")
+		if !strings.Contains(joined, "node.latency=1/60 ! video/x-raw,width=1920,height=1080 ! ") {
+			t.Errorf("spec %s does not ask the stream for 1920x1080: %s", spec.Name, joined)
+		}
+		if strings.Contains(joined, "height=1080,framerate") && !strings.Contains(joined, "videorate ! video/x-raw,width=1920,height=1080,framerate=60/1") {
+			t.Errorf("spec %s pins the stream's framerate: %s", spec.Name, joined)
+		}
+	}
+}
+
 func TestVideoconvertThreadsForFrameCost(t *testing.T) {
 	// One worker per frame period of measured conversion cost (~4.7 ns per
 	// pixel single-threaded): 1080p60 fits in one thread and must stay
@@ -234,6 +251,41 @@ func TestEffectiveCaptureFPSClampsX11Grab(t *testing.T) {
 	}
 	if got := effectiveCaptureFPS(captureTarget{Kind: capturePipeWire}, 120); got != 60 {
 		t.Fatalf("pipewire fps clamp regressed = %d, want 60", got)
+	}
+	if got := effectiveCaptureFPS(captureTarget{Kind: captureScreencopy}, 120); got != 60 {
+		t.Fatalf("screencopy fps clamp = %d, want 60", got)
+	}
+}
+
+// A screencopy output is encoded like an X11 one, from the raw frames its
+// pump writes to ffmpeg's standard input.
+func TestScreencopySpecsReadFramesFromTheirInput(t *testing.T) {
+	ffmpeg := withFakeFFmpegEncoders(t, "ffmpeg-screencopy", " V..... h264_vaapi \n V..... libx264 \n")
+	withFakeVAAPIProbe(t, "/dev/dri/renderD128", true)
+
+	target := captureTarget{Kind: captureScreencopy, OutputName: "HEADLESS-1", Width: 2560, Height: 1600, TabletMapped: true}
+	opts := videoOptions{FPS: 60, Bitrate: "24M", Codec: "h264", FFmpeg: ffmpeg}
+	specs, err := buildCapturePipelines(target, opts)
+	if err != nil {
+		t.Fatalf("buildCapturePipelines: %v", err)
+	}
+	if got, want := specNames(specs), []string{"h264_vaapi", "libx264"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("screencopy candidates = %v, want %v", got, want)
+	}
+	for _, spec := range specs {
+		if spec.Input == nil {
+			t.Errorf("%s: no frame input", spec.Name)
+		}
+		if spec.AUWriteChunk == 0 {
+			t.Errorf("%s: access-unit writes not declared", spec.Name)
+		}
+		joined := strings.Join(spec.Args, " ")
+		if !strings.Contains(joined, "-f rawvideo -pix_fmt bgr0 -video_size 2560x1600 -framerate 60 -i pipe:0") {
+			t.Errorf("%s: capture args %s", spec.Name, joined)
+		}
+	}
+	if joined := strings.Join(specs[len(specs)-1].Args, " "); !strings.Contains(joined, "-threads ") {
+		t.Errorf("libx264 frame threads not sized: %s", joined)
 	}
 }
 

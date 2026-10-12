@@ -135,8 +135,35 @@ func buildCapturePipelines(target captureTarget, opts videoOptions) ([]pipelineS
 		specs = withVAAPICandidate(specs, opts, capture)
 		specs = withX11VBV(specs, opts)
 		return withAccessUnitWrites(specs, opts), nil
+	case captureScreencopy:
+		capture := screencopyCaptureArgs(target, opts.FPS)
+		specs, err := ffmpegSpecs(opts, capture)
+		if err != nil {
+			return nil, err
+		}
+		specs = withX264FrameThreads(specs, opts, capture, x264FrameThreads(target.Width, target.Height, opts.FPS))
+		specs = withVAAPICandidate(specs, opts, capture)
+		specs = withX11VBV(specs, opts)
+		specs = withAccessUnitWrites(specs, opts)
+		for i := range specs {
+			specs[i].Input = screencopyInput(target, opts.FPS)
+		}
+		return specs, nil
 	default:
 		return nil, fmt.Errorf("unsupported capture kind on Linux: %s", target.Kind)
+	}
+}
+
+// screencopyCaptureArgs reads the raw frames screencopyInput writes to the
+// process's standard input: the output's picture, upright and cropped to
+// even dimensions, as x11grab's bgr0.
+func screencopyCaptureArgs(target captureTarget, fps int) []string {
+	return []string{
+		"-f", "rawvideo",
+		"-pix_fmt", "bgr0",
+		"-video_size", fmt.Sprintf("%dx%d", target.Width, target.Height),
+		"-framerate", strconv.Itoa(fps),
+		"-i", "pipe:0",
 	}
 }
 
@@ -306,6 +333,11 @@ func gstPipeWireSpecs(target captureTarget, opts videoOptions) []pipelineSpec {
 	src := fmt.Sprintf(
 		"pipewiresrc path=%d do-timestamp=true keepalive-time=%d min-buffers=%d max-buffers=%d stream-properties=props,node.latency=1/%d",
 		target.Node, pipewireKeepaliveMs, pipewireMinBuffers, pipewireMaxBuffers, pipewireFPS)
+	if target.SizeFromConsumer {
+		// The stream takes the size its consumer asks for, and resizes the
+		// display to it; ask for the display's, and nothing else.
+		src += fmt.Sprintf(" ! video/x-raw,width=%d,height=%d", target.Width, target.Height)
+	}
 	convert := fmt.Sprintf("videoconvert n-threads=%d", videoconvertThreads(target.Width, target.Height, pipewireFPS))
 	normalized := fmt.Sprintf(
 		"%s ! videoscale ! videorate ! video/x-raw,width=%d,height=%d,framerate=%d/1",
