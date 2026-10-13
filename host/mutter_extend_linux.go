@@ -31,6 +31,10 @@ package main
 //   - Capture follows the monitor itself, so moving it needs no restart.
 //   - Stopping the screen share from GNOME's indicator removes the monitor.
 //     The session then restarts with a new one.
+//   - Mutter leaves the mouse pointer out of a virtual monitor's stream
+//     while a physical display uses a hardware cursor; a second, 1 fps
+//     stream of the virtual monitor turns that off while the pointer is on
+//     it (mutter_cursor_linux.go).
 //   - Mutter streams a rotated virtual monitor at its unrotated size, so
 //     rotating it is not supported.
 //   - The monitor must not be disabled in Settings -> Displays: GNOME Shell
@@ -832,6 +836,9 @@ type mutterScreenCast struct {
 
 	closed    chan struct{}
 	closeOnce sync.Once
+
+	// stopCursor ends the cursor companion stream (mutter_cursor_linux.go).
+	stopCursor func()
 }
 
 func startMutterScreenCast(w, h, nativeW, nativeH int) (mutterCast, mutterState, error) {
@@ -893,7 +900,9 @@ func startMutterScreenCast(w, h, nativeW, nativeH int) (mutterCast, mutterState,
 
 	// cursor-mode 1 embeds the real cursor (whatever shape it has) in the
 	// video, so physical-mouse and touch/pen movement both show the actual
-	// host pointer, as ddagrab does on Windows.
+	// host pointer, as ddagrab does on Windows. Mutter only paints it on a
+	// virtual monitor with the cursor companion stream running (see
+	// mutter_cursor_linux.go).
 	//
 	// Known limitation (accepted): Mutter draws the physical mouse pointer
 	// and the Drawsplay Pen's tablet tool as two cursor sprites (a known
@@ -934,6 +943,10 @@ func startMutterScreenCast(w, h, nativeW, nativeH int) (mutterCast, mutterState,
 	if c.spec, c.consumerSized, err = awaitNewMutterMonitor(c, before, w, h); err != nil {
 		return nil, mutterState{}, err
 	}
+	stopCursor := startMutterCursorCompanion(c.spec.Connector, c.closed)
+	c.mu.Lock()
+	c.stopCursor = stopCursor
+	c.mu.Unlock()
 	ok = true
 	return c, before, nil
 }
@@ -1168,8 +1181,12 @@ func (c *mutterScreenCast) Apply(serial uint32, logical []mutterLogicalConfig, p
 
 func (c *mutterScreenCast) Stop() {
 	c.mu.Lock()
-	session := c.session
+	session, stopCursor := c.session, c.stopCursor
+	c.stopCursor = nil
 	c.mu.Unlock()
+	if stopCursor != nil {
+		stopCursor()
+	}
 	if session == "" {
 		return
 	}
