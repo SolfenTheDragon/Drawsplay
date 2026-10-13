@@ -377,10 +377,14 @@ async function refreshStatus() {
     const v = st.video || {};
     const activeClient = st.activeClient || {};
     ensureNativeResolutionOption(activeClient.nativeWidth, activeClient.nativeHeight);
-    const activeClientLabel = [activeClient.platform, activeClient.type]
+    const nativeW = Number(activeClient.nativeWidth) || 0;
+    const nativeH = Number(activeClient.nativeHeight) || 0;
+    const nativeLabel = nativeW > 0 && nativeH > 0 ? ` (${nativeW}x${nativeH})` : "";
+    const activeClientName = [activeClient.platform, activeClient.type]
       .map((x) => String(x || "").trim())
       .filter((x) => x && x !== "unknown")
       .join(" ");
+    const activeClientLabel = activeClientName ? `${activeClientName}${nativeLabel}` : nativeLabel.trim();
     const displayMode = String(v.displayMode || "").trim();
     const modeLabel = displayMode ? `, ${displayMode}` : "";
     $("dot").className = "dot" + (v.streaming ? " on" : "");
