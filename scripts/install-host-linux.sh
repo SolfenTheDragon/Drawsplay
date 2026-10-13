@@ -2,18 +2,74 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCE_BIN="${1:-$ROOT_DIR/host/host}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_BIN="${1:-}"
+if [[ -z "$SOURCE_BIN" ]]; then
+  if [[ -f "$SCRIPT_DIR/drawsplay-host-linux-amd64" ]]; then
+    SOURCE_BIN="$SCRIPT_DIR/drawsplay-host-linux-amd64"
+  else
+    SOURCE_BIN="$ROOT_DIR/host/host"
+  fi
+fi
+ICON_SOURCE="$SCRIPT_DIR/drawsplay-tray.png"
+if [[ ! -f "$ICON_SOURCE" ]]; then
+  ICON_SOURCE="$ROOT_DIR/host/drawsplay-tray.png"
+fi
 INSTALL_DIR="${HOME}/.local/bin"
 TARGET_BIN="${INSTALL_DIR}/drawsplay-host"
+ICON_DIR="${HOME}/.local/share/icons/hicolor/64x64/apps"
+ICON_TARGET="${ICON_DIR}/drawsplay-host.png"
+APPLICATIONS_DIR="${HOME}/.local/share/applications"
+DESKTOP_ENTRY="${APPLICATIONS_DIR}/drawsplay-host.desktop"
+
+desktop_exec_arg() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//\$/\\$}"
+  value="${value//\`/\\\`}"
+  printf '"%s"' "$value"
+}
 
 if [[ ! -f "$SOURCE_BIN" ]]; then
   echo "Host binary not found: $SOURCE_BIN" >&2
   exit 1
 fi
+if [[ ! -f "$ICON_SOURCE" ]]; then
+  echo "DrawSplay icon not found: $ICON_SOURCE" >&2
+  exit 1
+fi
 
-mkdir -p "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR" "$ICON_DIR" "$APPLICATIONS_DIR"
 install -m 0755 "$SOURCE_BIN" "$TARGET_BIN"
 echo "Installed host to $TARGET_BIN"
+install -m 0644 "$ICON_SOURCE" "$ICON_TARGET"
+printf '[Desktop Entry]\nType=Application\nName=DrawSplay\nComment=Use your Android tablet as an extended display\nExec=%s\nIcon=%s\nTerminal=false\nCategories=Graphics;\nStartupNotify=false\n' \
+  "$(desktop_exec_arg "$TARGET_BIN")" "$ICON_TARGET" > "$DESKTOP_ENTRY"
+chmod 0755 "$DESKTOP_ENTRY"
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database "$APPLICATIONS_DIR"
+fi
+
+DESKTOP_DIR=""
+if command -v xdg-user-dir >/dev/null 2>&1; then
+  DESKTOP_DIR="$(xdg-user-dir DESKTOP)"
+fi
+if [[ -z "$DESKTOP_DIR" ]]; then
+  DESKTOP_DIR="${HOME}/Desktop"
+fi
+mkdir -p "$DESKTOP_DIR"
+DESKTOP_SHORTCUT="${DESKTOP_DIR}/drawsplay-host.desktop"
+install -m 0755 "$DESKTOP_ENTRY" "$DESKTOP_SHORTCUT"
+if command -v gio >/dev/null 2>&1; then
+  if ! gio set "$DESKTOP_SHORTCUT" metadata::trusted true; then
+    echo "Could not mark the desktop shortcut as trusted; use its context menu to allow launching." >&2
+  fi
+else
+  echo "Mark the desktop shortcut as trusted in its context menu before launching it."
+fi
+echo "Created desktop shortcut at $DESKTOP_SHORTCUT"
+echo "Created applications-menu entry at $DESKTOP_ENTRY"
 
 "$TARGET_BIN" -service install
 echo

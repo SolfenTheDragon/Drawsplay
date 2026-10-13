@@ -5,7 +5,7 @@ Use your Android tablet as a touch- and pen-enabled extension of your computer's
 Download the latest [DrawSplay release](https://github.com/SolfenTheDragon/Drawsplay/releases/latest). This guide covers installing and using its packaged app and host:
 
 - **Windows host:** `DrawSplay.exe`
-- **Linux host (x86-64/amd64):** `drawsplay-host-linux-amd64` and `launch-drawsplay-host.sh`
+- **Linux host (x86-64/amd64):** `drawsplay-host-linux-amd64` and `launch-drawsplay-host.sh`; optional `install-drawsplay-host-linux.sh` and `uninstall-drawsplay-host-linux.sh` manage desktop and applications-menu launchers
 - **Android app:** `DrawSplay.APK`
 
 No source build is required.
@@ -95,6 +95,21 @@ chmod +x drawsplay-host-linux-amd64 launch-drawsplay-host.sh
 ```
 
 Run the launcher as your normal desktop user, not with `sudo`. On Ubuntu/Debian, it attempts to install missing tools and set up USB/input permissions, asking for your sudo password when needed. These changes can require logging out and back in or restarting. To keep system changes manual, run `./launch-drawsplay-host.sh --no-install-deps` instead.
+
+To add DrawSplay to the applications menu (including GNOME's app grid) and create a desktop shortcut, download `install-drawsplay-host-linux.sh` and `drawsplay-tray.png` into the same folder as the host binary, then run:
+
+```bash
+chmod +x install-drawsplay-host-linux.sh
+./install-drawsplay-host-linux.sh
+```
+
+The installer copies the host into `~/.local/bin`, installs the launchers and icon under `~/.local/share`, and enables starting the host at login. On GNOME, if the desktop shortcut is not immediately launchable, use its context menu to allow launching.
+
+To remove the installed host and launchers while keeping DrawSplay settings and logs, run:
+
+```bash
+./uninstall-drawsplay-host-linux.sh
+```
 
 For manual Ubuntu setup:
 

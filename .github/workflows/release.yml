@@ -118,6 +118,10 @@ jobs:
           mkdir -p ../release
           go build -trimpath -o ../release/drawsplay-host-linux-amd64 .
           chmod +x ../release/drawsplay-host-linux-amd64
+          cp ../scripts/install-host-linux.sh ../release/install-drawsplay-host-linux.sh
+          cp ../scripts/uninstall-host-linux.sh ../release/uninstall-drawsplay-host-linux.sh
+          cp drawsplay-tray.png ../release/drawsplay-tray.png
+          chmod +x ../release/install-drawsplay-host-linux.sh ../release/uninstall-drawsplay-host-linux.sh
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
@@ -127,6 +131,9 @@ jobs:
           path: |
             release/drawsplay-host-linux-amd64
             release/launch-drawsplay-host.sh
+            release/install-drawsplay-host-linux.sh
+            release/uninstall-drawsplay-host-linux.sh
+            release/drawsplay-tray.png
 
   publish-release:
     runs-on: ubuntu-latest
@@ -192,7 +199,10 @@ jobs:
             DrawSplay-host-windows.zip \
             DrawSplay-android-release.zip \
             drawsplay-host-linux-amd64 \
-            launch-drawsplay-host.sh > SHA256SUMS.txt
+            launch-drawsplay-host.sh \
+            install-drawsplay-host-linux.sh \
+            uninstall-drawsplay-host-linux.sh \
+            drawsplay-tray.png > SHA256SUMS.txt
 
       - name: Generate release patch notes
         env:
@@ -236,7 +246,7 @@ jobs:
               "\n\n## Downloads\n\n"
               "- **Windows:** `DrawSplay.exe`\n"
               "- **Android:** `DrawSplay.APK`\n"
-              "- **Linux (amd64):** `drawsplay-host-linux-amd64` and `launch-drawsplay-host.sh`\n"
+              "- **Linux (amd64):** `drawsplay-host-linux-amd64` and `launch-drawsplay-host.sh`; use `install-drawsplay-host-linux.sh` to install desktop launchers or `uninstall-drawsplay-host-linux.sh` to remove them\n"
               "\nUse `SHA256SUMS.txt` to verify your downloads.\n"
           )
           Path("release/PATCH_NOTES.md").write_text(notes, encoding="utf-8")
@@ -255,4 +265,7 @@ jobs:
             release/DrawSplay-android-release.zip
             release/drawsplay-host-linux-amd64
             release/launch-drawsplay-host.sh
+            release/install-drawsplay-host-linux.sh
+            release/uninstall-drawsplay-host-linux.sh
+            release/drawsplay-tray.png
             release/SHA256SUMS.txt
