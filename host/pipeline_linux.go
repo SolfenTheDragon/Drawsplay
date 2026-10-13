@@ -24,10 +24,12 @@ package main
 // alone produced under CPU pressure.
 //
 // Every candidate ends in h264parse forcing byte-stream (Annex-B) output on
-// stdout via fdsink, matching what video.go expects. Width/height/framerate
-// are normalized downstream (videoscale+videorate caps) instead of pinning
-// source caps on pipewiresrc, which can fail format negotiation on some
-// Mutter/PipeWire stacks and trigger reconnect loops.
+// stdout via fdsink, matching what video.go expects, one access unit per
+// write (see gstAUWriteChunk). Width/height/framerate are normalized
+// downstream (videoscale or vapostproc, then drop-only videorate caps)
+// instead of pinning source caps on pipewiresrc, which can fail format
+// negotiation on some Mutter/PipeWire stacks and trigger reconnect loops.
+// vah264enc is tried first on DMA-BUF capture, then on system memory.
 //
 // X11 targets reuse the ffmpeg x11grab mirror path from M1, recording only
 // the output's rectangle for the X11 extended display (see
@@ -303,15 +305,38 @@ func withAccessUnitWrites(specs []pipelineSpec, opts videoOptions) []pipelineSpe
 	return specs
 }
 
+// gstAUWriteChunk is the pipelineSpec.AUWriteChunk of every gst-launch spec.
+// fdsink writes each buffer (one access unit, as h264parse alignment=au
+// emits) with a single writev(2), resumed only after a partial write on a
+// full pipe, so no write ends inside an access unit: a chunk size larger than
+// any unit (nalBufferMax caps those) states exactly that.
+const gstAUWriteChunk = 1 << 30
+
 // gstPipeWireSpecs builds gst-launch-1.0 command lines that pull the virtual
 // monitor's PipeWire stream and hardware-encode it to Annex-B on stdout.
 //
 // Caps handling: keep pipewiresrc unconstrained and normalize
 // width/height/framerate downstream. Mutter screen-cast streams negotiate a
 // variable framerate (0/1), and forcing source caps can fail negotiation on
-// some setups. videorate converts the damage-driven stream to constant
-// framerate for the encoder, and pipewiresrc keepalive-time re-emits the last
-// frame on a static desktop so the encoder always produces output.
+// some setups. pipewiresrc keepalive-time re-emits the last frame on a static
+// desktop so the encoder always produces output.
+//
+// videorate runs drop-only: it labels the stream with the fixed framerate the
+// encoders' rate control needs and drops frames above it, but never
+// duplicates. In its default mode videorate holds every frame until the next
+// one arrives (to pick which fills each output slot), and Mutter streams are
+// damage-driven: the last frame of a pen stroke waited for the next damage or
+// the 500 ms keepalive before reaching the encoder.
+//
+// Capture memory decides what Mutter does per frame. Offered only system
+// memory, it re-paints the stage offscreen and reads it back synchronously on
+// the compositor thread (clutter_stage_paint_to_buffer), then videoconvert
+// spends ~10 ms of CPU per 1080p frame. Offered DMA-BUF (the consumer lists
+// DRM modifiers, which vapostproc does), Mutter blits on the GPU and the frame
+// stays in video memory up to the encoder: at 1080p this measured 5.6 % vs
+// 47.7 % pipeline CPU, gnome-shell at 9.6 % vs 15.1 % (8.7 % idle), and
+// 42.6 vs 33.5 captured fps. The DMA-BUF candidate comes first, and the
+// system-memory one after it covers stacks where that negotiation fails.
 func gstPipeWireSpecs(target captureTarget, opts videoOptions) []pipelineSpec {
 	kbps := parseBitrateKbps(opts.Bitrate)
 	pipewireFPS := opts.FPS
@@ -333,41 +358,63 @@ func gstPipeWireSpecs(target captureTarget, opts videoOptions) []pipelineSpec {
 	src := fmt.Sprintf(
 		"pipewiresrc path=%d do-timestamp=true keepalive-time=%d min-buffers=%d max-buffers=%d stream-properties=props,node.latency=1/%d",
 		target.Node, pipewireKeepaliveMs, pipewireMinBuffers, pipewireMaxBuffers, pipewireFPS)
+	// The stream takes the size its consumer asks for, and resizes the
+	// display to it; ask for the display's, and nothing else.
+	sourceSize := ""
 	if target.SizeFromConsumer {
-		// The stream takes the size its consumer asks for, and resizes the
-		// display to it; ask for the display's, and nothing else.
-		src += fmt.Sprintf(" ! video/x-raw,width=%d,height=%d", target.Width, target.Height)
+		sourceSize = fmt.Sprintf(",width=%d,height=%d", target.Width, target.Height)
 	}
-	convert := fmt.Sprintf("videoconvert n-threads=%d", videoconvertThreads(target.Width, target.Height, pipewireFPS))
-	normalized := fmt.Sprintf(
-		"%s ! videoscale ! videorate ! video/x-raw,width=%d,height=%d,framerate=%d/1",
-		convert, target.Width, target.Height, pipewireFPS)
-	tail := "h264parse config-interval=1 ! video/x-h264,stream-format=byte-stream ! fdsink fd=1 sync=false"
+	// vapostproc also accepts DMA-BUF, so the system-memory candidates pin
+	// the memory type: that is what makes them a fallback for the DMA-BUF one.
+	sysSrc := src + " ! video/x-raw" + sourceSize
+	dmabufSrc := src + " ! video/x-raw(memory:DMABuf)" + sourceSize
 
+	rate := fmt.Sprintf("videorate drop-only=true ! video/x-raw,framerate=%d/1", pipewireFPS)
+	convert := fmt.Sprintf("videoconvert n-threads=%d", videoconvertThreads(target.Width, target.Height, pipewireFPS))
+	cpuNormalized := fmt.Sprintf("%s ! videoscale ! video/x-raw,width=%d,height=%d ! %s",
+		convert, target.Width, target.Height, rate)
+	// vapostproc converts and scales on the GPU's video engine, from a
+	// DMA-BUF import or a system-memory upload alike.
+	vaNormalized := fmt.Sprintf(
+		"vapostproc ! video/x-raw(memory:VAMemory),format=NV12,width=%d,height=%d ! videorate drop-only=true ! video/x-raw(memory:VAMemory),framerate=%d/1",
+		target.Width, target.Height, pipewireFPS)
+	tail := "h264parse config-interval=1 ! video/x-h264,stream-format=byte-stream,alignment=au ! fdsink fd=1 sync=false"
+
+	// Rate control is VBR capped at the session bitrate, as on the X11 path
+	// (see vaapiEncoderArgs): CBR made vah264enc pad a static 1080p frame to
+	// 25 KB at 24M, against 78 B with VBR, at the same rate on busy content.
+	//
+	// One reference frame: vah264enc's default of 3 writes
+	// max_dec_frame_buffering=4 into the SPS, and Android decoders then hold
+	// output until later input arrives, which on a damage-driven stream took
+	// 150-1000 ms. One reference gives the lowest value the encoder writes.
+	vah264 := fmt.Sprintf(
+		"vah264enc rate-control=vbr target-percentage=100 bitrate=%d key-int-max=%d b-frames=0 ref-frames=1 target-usage=7",
+		kbps, gop)
 	encoders := []struct {
-		name     string
-		elements string
+		name, base string
+		source     string
+		normalized string
+		elements   string
 	}{
 		{
-			name: "nvh264enc",
+			name: "nvh264enc", source: sysSrc, normalized: cpuNormalized,
 			elements: fmt.Sprintf(
-				"nvh264enc preset=low-latency-hq rc-mode=cbr bitrate=%d gop-size=%d bframes=0 zerolatency=true",
+				"nvh264enc preset=low-latency-hq rc-mode=vbr bitrate=%d max-bitrate=%d gop-size=%d bframes=0 zerolatency=true",
+				kbps, kbps, gop),
+		},
+		{name: "vah264enc-dmabuf", base: "vah264enc", source: dmabufSrc, normalized: vaNormalized, elements: vah264},
+		{name: "vah264enc", source: sysSrc, normalized: vaNormalized, elements: vah264},
+		{
+			// Its SPS carries no bitstream_restriction, which leaves Android
+			// decoders free to buffer frames: only reached without vah264enc.
+			name: "vaapih264enc", source: sysSrc, normalized: cpuNormalized,
+			elements: fmt.Sprintf(
+				"vaapih264enc rate-control=vbr target-percentage=100 bitrate=%d keyframe-period=%d max-bframes=0 refs=1 cabac=true quality-level=7",
 				kbps, gop),
 		},
 		{
-			name: "vah264enc",
-			elements: fmt.Sprintf(
-				"vah264enc rate-control=cbr bitrate=%d key-int-max=%d b-frames=0 target-usage=7",
-				kbps, gop),
-		},
-		{
-			name: "vaapih264enc",
-			elements: fmt.Sprintf(
-				"vaapih264enc rate-control=cbr bitrate=%d keyframe-period=%d max-bframes=0 cabac=true quality-level=7",
-				kbps, gop),
-		},
-		{
-			name: "x264enc",
+			name: "x264enc", source: sysSrc, normalized: cpuNormalized,
 			elements: fmt.Sprintf(
 				"video/x-raw,format=I420 ! x264enc tune=zerolatency speed-preset=ultrafast bitrate=%d key-int-max=%d bframes=0 cabac=false byte-stream=true ! video/x-h264,profile=baseline",
 				kbps, gop),
@@ -382,12 +429,17 @@ func gstPipeWireSpecs(target captureTarget, opts videoOptions) []pipelineSpec {
 		// instead of blocking, so a momentary encoder stall never queues up
 		// backlog that would show as increasing lag).
 		pipeline := fmt.Sprintf("%s ! %s ! queue max-size-buffers=1 leaky=downstream ! %s ! %s",
-			src, normalized, enc.elements, tail)
+			enc.source, enc.normalized, enc.elements, tail)
+		base := enc.base
+		if base == "" {
+			base = enc.name
+		}
 		specs = append(specs, pipelineSpec{
-			Name:        enc.name,
-			BaseEncoder: enc.name,
-			Cmd:         "gst-launch-1.0",
-			Args:        append([]string{"-q"}, strings.Split(pipeline, " ")...),
+			Name:         enc.name,
+			BaseEncoder:  base,
+			Cmd:          "gst-launch-1.0",
+			Args:         append([]string{"-q"}, strings.Split(pipeline, " ")...),
+			AUWriteChunk: gstAUWriteChunk,
 		})
 	}
 
@@ -395,12 +447,13 @@ func gstPipeWireSpecs(target captureTarget, opts videoOptions) []pipelineSpec {
 	// refuses the requested resolution.
 	fallback := fmt.Sprintf("%s ! queue max-size-buffers=1 leaky=downstream ! %s ! video/x-raw,format=I420 ! "+
 		"x264enc tune=zerolatency speed-preset=ultrafast bitrate=%d key-int-max=%d bframes=0 cabac=false byte-stream=true ! video/x-h264,profile=baseline ! %s",
-		src, convert, kbps, gop, tail)
+		sysSrc, convert, kbps, gop, tail)
 	specs = append(specs, pipelineSpec{
-		Name:        "x264enc-anysize",
-		BaseEncoder: "x264enc",
-		Cmd:         "gst-launch-1.0",
-		Args:        append([]string{"-q"}, strings.Split(fallback, " ")...),
+		Name:         "x264enc-anysize",
+		BaseEncoder:  "x264enc",
+		Cmd:          "gst-launch-1.0",
+		Args:         append([]string{"-q"}, strings.Split(fallback, " ")...),
+		AUWriteChunk: gstAUWriteChunk,
 	})
 	return specs
 }

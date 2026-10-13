@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sync/atomic"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -88,18 +89,32 @@ func startSessionLockMonitor(ctx context.Context) {
 	}()
 }
 
+// preferredScreenSaver is the index of the service that last answered, asked
+// first so desktops matching a later entry do not pay for the failing
+// queries of the earlier ones on every poll.
+var preferredScreenSaver atomic.Int32
+
+// querySessionLocked asks the running screen-saver service whether the session
+// is locked. Calls never auto-start a service: on GNOME, asking
+// org.cinnamon.ScreenSaver activated cinnamon-screensaver (which exits at
+// once on Wayland) on every poll, two processes and a burst of syslog lines
+// per second.
 func querySessionLocked(ctx context.Context, conn *dbus.Conn) (bool, error) {
 	var errs []error
-	for _, service := range screenSaverServices {
+	first := int(preferredScreenSaver.Load())
+	for n := range screenSaverServices {
+		i := (first + n) % len(screenSaverServices)
+		service := screenSaverServices[i]
 		callCtx, cancel := context.WithTimeout(ctx, sessionLockCallTimeout)
 		var active bool
 		err := conn.Object(service.name, service.path).CallWithContext(
 			callCtx,
 			service.interfaceName+".GetActive",
-			0,
+			dbus.FlagNoAutoStart,
 		).Store(&active)
 		cancel()
 		if err == nil {
+			preferredScreenSaver.Store(int32(i))
 			return active, nil
 		}
 		errs = append(errs, fmt.Errorf("%s: %w", service.name, err))

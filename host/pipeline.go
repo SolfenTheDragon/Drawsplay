@@ -38,7 +38,8 @@ type pipelineSpec struct {
 	// AUWriteChunk, when > 0, declares that the process writes nothing to
 	// stdout but H.264 access units, each as write(2) calls of exactly
 	// AUWriteChunk bytes followed by one shorter final call (ffmpeg's raw
-	// muxer flushing its AVIO buffer under -flush_packets 1). It lets
+	// muxer flushing its AVIO buffer under -flush_packets 1; GStreamer's
+	// fdsink writes each unit at once, see gstAUWriteChunk). It lets
 	// runEncodePipeline emit a frame's last NAL as soon as that final write
 	// has been read (see accessUnitTracker). Zero keeps the hold-back.
 	AUWriteChunk int

@@ -18,7 +18,7 @@ func pipeWireTestOpts() (captureTarget, videoOptions) {
 func TestGstPipeWireSpecsOrderAndFallback(t *testing.T) {
 	target, opts := pipeWireTestOpts()
 	specs := gstPipeWireSpecs(target, opts)
-	wantNames := []string{"nvh264enc", "vah264enc", "vaapih264enc", "x264enc", "x264enc-anysize"}
+	wantNames := []string{"nvh264enc", "vah264enc-dmabuf", "vah264enc", "vaapih264enc", "x264enc", "x264enc-anysize"}
 	if len(specs) != len(wantNames) {
 		t.Fatalf("got %d specs, want %d", len(specs), len(wantNames))
 	}
@@ -47,13 +47,21 @@ func TestGstPipeWireSpecsDoNotPinFramerateOnSourceCaps(t *testing.T) {
 	}
 }
 
-func TestGstPipeWireSizedSpecsUseVideorateCFR(t *testing.T) {
+func TestGstPipeWireSizedSpecsNormalizeWithDropOnlyVideorate(t *testing.T) {
+	// Default videorate holds each frame until the next one arrives; on a
+	// damage-driven stream that delayed a stroke's last frame by up to the
+	// keepalive period. drop-only still labels the fixed rate encoders need.
 	target, opts := pipeWireTestOpts()
 	specs := gstPipeWireSpecs(target, opts)
 	for _, spec := range specs[:len(specs)-1] {
 		joined := strings.Join(spec.Args, " ")
-		if !strings.Contains(joined, "videoscale ! videorate ! video/x-raw,width=1920,height=1080,framerate=60/1") {
-			t.Errorf("spec %s does not normalize output caps via videoscale/videorate: %s", spec.Name, joined)
+		cpu := "videoscale ! video/x-raw,width=1920,height=1080 ! videorate drop-only=true ! video/x-raw,framerate=60/1"
+		va := "vapostproc ! video/x-raw(memory:VAMemory),format=NV12,width=1920,height=1080 ! videorate drop-only=true ! video/x-raw(memory:VAMemory),framerate=60/1"
+		if !strings.Contains(joined, cpu) && !strings.Contains(joined, va) {
+			t.Errorf("spec %s does not normalize output caps with drop-only videorate: %s", spec.Name, joined)
+		}
+		if strings.Contains(joined, "videorate !") {
+			t.Errorf("spec %s uses a frame-holding videorate: %s", spec.Name, joined)
 		}
 		if strings.Contains(joined, "videoconvert ! videoconvert") {
 			t.Errorf("spec %s duplicated videoconvert unexpectedly: %s", spec.Name, joined)
@@ -94,10 +102,11 @@ func TestGstPipeWireSpecsAskConsumerSizedStreamsForTheDisplaySize(t *testing.T) 
 	target.SizeFromConsumer = true
 	for _, spec := range gstPipeWireSpecs(target, opts) {
 		joined := strings.Join(spec.Args, " ")
-		if !strings.Contains(joined, "node.latency=1/60 ! video/x-raw,width=1920,height=1080 ! ") {
+		if !strings.Contains(joined, "node.latency=1/60 ! video/x-raw,width=1920,height=1080 ! ") &&
+			!strings.Contains(joined, "node.latency=1/60 ! video/x-raw(memory:DMABuf),width=1920,height=1080 ! ") {
 			t.Errorf("spec %s does not ask the stream for 1920x1080: %s", spec.Name, joined)
 		}
-		if strings.Contains(joined, "height=1080,framerate") && !strings.Contains(joined, "videorate ! video/x-raw,width=1920,height=1080,framerate=60/1") {
+		if strings.Contains(joined, "height=1080,framerate") {
 			t.Errorf("spec %s pins the stream's framerate: %s", spec.Name, joined)
 		}
 	}
@@ -139,6 +148,9 @@ func TestGstPipeWireSpecsThreadVideoconvert(t *testing.T) {
 	target.Width, target.Height = 2880, 1800
 	want := fmt.Sprintf("videoconvert n-threads=%d", videoconvertThreads(2880, 1800, 60))
 	for _, spec := range gstPipeWireSpecs(target, opts) {
+		if !usesVideoconvert(spec) {
+			continue
+		}
 		joined := strings.Join(spec.Args, " ")
 		if !strings.Contains(joined, want) {
 			t.Errorf("spec %s does not thread videoconvert (%q): %s", spec.Name, want, joined)
@@ -154,6 +166,9 @@ func TestGstPipeWireSpecsUseClampedRateForThreadBudget(t *testing.T) {
 	opts.FPS = 120
 	want := fmt.Sprintf("videoconvert n-threads=%d", videoconvertThreads(2560, 1440, 60))
 	for _, spec := range gstPipeWireSpecs(target, opts) {
+		if !usesVideoconvert(spec) {
+			continue
+		}
 		if !strings.Contains(strings.Join(spec.Args, " "), want) {
 			t.Errorf("spec %s did not size threads from the clamped rate (%q)", spec.Name, want)
 		}
@@ -165,6 +180,9 @@ func TestGstPipeWireSpecsStaySerialAt1080p(t *testing.T) {
 	// and more than doubled capture CPU (56 % -> 135 % of one core).
 	target, opts := pipeWireTestOpts()
 	for _, spec := range gstPipeWireSpecs(target, opts) {
+		if !usesVideoconvert(spec) {
+			continue
+		}
 		joined := strings.Join(spec.Args, " ")
 		if !strings.Contains(joined, "videoconvert n-threads=1") {
 			t.Errorf("spec %s should keep 1080p conversion single-threaded: %s", spec.Name, joined)
@@ -503,7 +521,7 @@ func TestX11GrabSpecsDeclareAccessUnitWrites(t *testing.T) {
 	}
 }
 
-func TestOnlyX11GrabH264SpecsDeclareAccessUnitWrites(t *testing.T) {
+func TestH264SpecsDeclareAccessUnitWrites(t *testing.T) {
 	ffmpeg := withFakeFFmpegEncoders(t, "ffmpeg-x11-au-hevc", " V..... libx265 \n")
 	withFakeVAAPIProbe(t, "", false)
 	specs, err := buildCapturePipelines(x11TestTarget(), videoOptions{FPS: 60, Bitrate: "24M", Codec: "hevc", FFmpeg: ffmpeg})
@@ -517,8 +535,8 @@ func TestOnlyX11GrabH264SpecsDeclareAccessUnitWrites(t *testing.T) {
 	}
 	target, opts := pipeWireTestOpts()
 	for _, spec := range gstPipeWireSpecs(target, opts) {
-		if spec.AUWriteChunk != 0 {
-			t.Errorf("gst %s declares ffmpeg's write pattern", spec.Name)
+		if spec.AUWriteChunk != gstAUWriteChunk {
+			t.Errorf("gst %s AUWriteChunk = %d, want gstAUWriteChunk", spec.Name, spec.AUWriteChunk)
 		}
 	}
 }
@@ -749,5 +767,75 @@ func TestX11GrabFallsBackWhenFFmpegLacksScaleVAAPI(t *testing.T) {
 	}
 	if got := specNames(specs); !reflect.DeepEqual(got, []string{"libx264"}) {
 		t.Fatalf("candidates = %v, want [libx264]", got)
+	}
+}
+
+func usesVideoconvert(spec pipelineSpec) bool {
+	return strings.Contains(strings.Join(spec.Args, " "), "videoconvert")
+}
+
+func TestGstPipeWireVASpecsConvertOnTheGPU(t *testing.T) {
+	// vah264enc candidates convert with vapostproc: DMA-BUF capture first
+	// (Mutter blits instead of painting and reading back each frame), then
+	// system memory pinned so it really is the fallback.
+	target, opts := pipeWireTestOpts()
+	specs := gstPipeWireSpecs(target, opts)
+	byName := map[string]string{}
+	for _, spec := range specs {
+		byName[spec.Name] = strings.Join(spec.Args, " ")
+	}
+	dmabuf := byName["vah264enc-dmabuf"]
+	if !strings.Contains(dmabuf, "node.latency=1/60 ! video/x-raw(memory:DMABuf) ! vapostproc ! ") {
+		t.Errorf("vah264enc-dmabuf does not capture DMA-BUF into vapostproc: %s", dmabuf)
+	}
+	shm := byName["vah264enc"]
+	if !strings.Contains(shm, "node.latency=1/60 ! video/x-raw ! vapostproc ! ") {
+		t.Errorf("vah264enc does not pin system memory into vapostproc: %s", shm)
+	}
+	for _, joined := range []string{dmabuf, shm} {
+		if strings.Contains(joined, "videoconvert") {
+			t.Errorf("VA spec converts on the CPU: %s", joined)
+		}
+	}
+	for _, spec := range specs {
+		if spec.Name == "vah264enc-dmabuf" && spec.BaseEncoder != "vah264enc" {
+			t.Errorf("vah264enc-dmabuf BaseEncoder = %q, want vah264enc", spec.BaseEncoder)
+		}
+	}
+}
+
+func TestGstPipeWireHardwareEncodersUseCappedVBRAndOneReference(t *testing.T) {
+	// CBR padded static frames ~320x; vah264enc's default 3 references made
+	// Android decoders hold output (max_dec_frame_buffering=4).
+	target, opts := pipeWireTestOpts()
+	want := map[string][]string{
+		"nvh264enc":        {"rc-mode=vbr", "bitrate=8000", "max-bitrate=8000"},
+		"vah264enc-dmabuf": {"rate-control=vbr", "target-percentage=100", "bitrate=8000", "ref-frames=1"},
+		"vah264enc":        {"rate-control=vbr", "target-percentage=100", "bitrate=8000", "ref-frames=1"},
+		"vaapih264enc":     {"rate-control=vbr", "target-percentage=100", "bitrate=8000", "refs=1"},
+	}
+	for _, spec := range gstPipeWireSpecs(target, opts) {
+		joined := strings.Join(spec.Args, " ")
+		if strings.Contains(joined, "cbr") {
+			t.Errorf("spec %s still uses CBR: %s", spec.Name, joined)
+		}
+		for _, w := range want[spec.Name] {
+			if !strings.Contains(joined, " "+w+" ") {
+				t.Errorf("spec %s missing %q: %s", spec.Name, w, joined)
+			}
+		}
+	}
+}
+
+func TestGstPipeWireSpecsEmitWholeAccessUnits(t *testing.T) {
+	target, opts := pipeWireTestOpts()
+	for _, spec := range gstPipeWireSpecs(target, opts) {
+		joined := strings.Join(spec.Args, " ")
+		if !strings.Contains(joined, "stream-format=byte-stream,alignment=au ! fdsink fd=1") {
+			t.Errorf("spec %s does not write one access unit per buffer: %s", spec.Name, joined)
+		}
+	}
+	if gstAUWriteChunk <= nalBufferMax {
+		t.Errorf("gstAUWriteChunk %d must exceed any access unit (nalBufferMax %d)", gstAUWriteChunk, nalBufferMax)
 	}
 }
