@@ -256,6 +256,10 @@ If `adb devices` reports `no permissions`, check that Android USB rules are inst
 
 Occasionally Linux may show two cursors after switching between mouse and pen input; this is a known GNOME/Mutter limitation. On an extended display (GNOME Wayland or X11), the host log reports where the pen was mapped (`Mapped Drawsplay Pen ...`); if touch lands on another monitor, check that the tablet's **Map to Monitor** setting in Cinnamon's or GNOME's tablet settings points at the virtual display.
 
+### Multi-touch gestures do not work in an app on X11
+
+DrawSplay delivers real multi-touch (up to 10 fingers) to X11 sessions, but some applications ignore it unless it is enabled for them. Firefox, for example, only handles touch (two-finger scroll, pinch) when started with `MOZ_USE_XINPUT2=1`: quit it completely, then run `MOZ_USE_XINPUT2=1 firefox`. To make that permanent, copy the app's `.desktop` file to `~/.local/share/applications/` and prefix its `Exec=` lines with `env MOZ_USE_XINPUT2=1`. Other applications do not support touch gestures at all (GIMP has no canvas pinch or two-finger gestures); Krita, Xournal++ and Inkscape do. Wayland sessions are unaffected.
+
 ### Linux shows a mirror instead of an extra display
 
 On Wayland, extended display requires GNOME, KDE Plasma 6, sway or Hyprland (GNOME and KDE Plasma also need working GStreamer/PipeWire tools); on other Wayland desktops, the tablet mirrors XWayland's screen, which shows only X11 applications (see [Other Wayland desktops](#other-wayland-desktops)). The host log explains why GNOME's virtual monitor was not used (`PipeWire capture tooling unavailable ...` or `Mutter virtual monitor unavailable ...`). On X11, load the `vkms` kernel module (`sudo modprobe vkms`) and reconnect the tablet; see [X11 extended display](#x11-extended-display-vkms). If the module is loaded but `xrandr` lists no `Virtual-1-1` output, log out and back in. The host log explains why it fell back to mirroring (`X11 extended display unavailable ...`). Check the warnings in DrawSplay's settings panel.
