@@ -957,12 +957,16 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 		configSent = true
 		return nil
 	}
+	var taggedSPS spsVUICache
 	emitUnit := func(unit []byte) error {
 		if err := sendConfig(); err != nil {
 			return err
 		}
 		if sentNALs < 5 {
 			log.Printf("Video NAL[%d] %s: len=%d type=%d", sentNALs, spec.Name, len(unit), h264NALType(unit))
+		}
+		if spec.SignalBT709Limited && h264NALType(unit) == 7 {
+			unit = taggedSPS.rewrite(unit)
 		}
 		if temporal.droppingNonRef() && spec.SupportsTemporalDrop && isDroppableNonRefNAL(unit) {
 			telemetry.addDropped(1)

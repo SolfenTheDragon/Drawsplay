@@ -435,11 +435,12 @@ func gstPipeWireSpecs(target captureTarget, opts videoOptions) []pipelineSpec {
 			base = enc.name
 		}
 		specs = append(specs, pipelineSpec{
-			Name:         enc.name,
-			BaseEncoder:  base,
-			Cmd:          "gst-launch-1.0",
-			Args:         append([]string{"-q"}, strings.Split(pipeline, " ")...),
-			AUWriteChunk: gstAUWriteChunk,
+			Name:               enc.name,
+			BaseEncoder:        base,
+			Cmd:                "gst-launch-1.0",
+			Args:               append([]string{"-q"}, strings.Split(pipeline, " ")...),
+			AUWriteChunk:       gstAUWriteChunk,
+			SignalBT709Limited: true,
 		})
 	}
 
@@ -449,11 +450,12 @@ func gstPipeWireSpecs(target captureTarget, opts videoOptions) []pipelineSpec {
 		"x264enc tune=zerolatency speed-preset=ultrafast bitrate=%d key-int-max=%d bframes=0 cabac=false byte-stream=true ! video/x-h264,profile=baseline ! %s",
 		sysSrc, convert, kbps, gop, tail)
 	specs = append(specs, pipelineSpec{
-		Name:         "x264enc-anysize",
-		BaseEncoder:  "x264enc",
-		Cmd:          "gst-launch-1.0",
-		Args:         append([]string{"-q"}, strings.Split(fallback, " ")...),
-		AUWriteChunk: gstAUWriteChunk,
+		Name:               "x264enc-anysize",
+		BaseEncoder:        "x264enc",
+		Cmd:                "gst-launch-1.0",
+		Args:               append([]string{"-q"}, strings.Split(fallback, " ")...),
+		AUWriteChunk:       gstAUWriteChunk,
+		SignalBT709Limited: true,
 	})
 	return specs
 }
