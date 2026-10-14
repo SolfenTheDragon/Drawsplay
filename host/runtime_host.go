@@ -12,6 +12,7 @@ import (
 func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) error {
 	cfg := store.get()
 	runDependencyPreflight(cfg)
+	ensureX11VirtualDisplayAsync("host start")
 	ensureVDDDriver(cfg.NoDriverInstall)
 
 	// Keep both channel ports reverse-tunneled for the life of the process.

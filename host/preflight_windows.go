@@ -13,3 +13,5 @@ func waylandVirtualDisplayName() string { return "" }
 func x11VirtualDisplayReady() bool { return false }
 
 func refreshX11VkmsWarning() {}
+
+func ensureX11VirtualDisplayAsync(reason string) {}
