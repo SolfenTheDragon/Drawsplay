@@ -258,7 +258,7 @@ Occasionally Linux may show two cursors after switching between mouse and pen in
 
 ### Multi-touch gestures do not work in an app on X11
 
-DrawSplay delivers real multi-touch (up to 10 fingers) to X11 sessions, but some applications ignore it unless it is enabled for them. Firefox, for example, only handles touch (two-finger scroll, pinch) when started with `MOZ_USE_XINPUT2=1`: quit it completely, then run `MOZ_USE_XINPUT2=1 firefox`. To make that permanent, copy the app's `.desktop` file to `~/.local/share/applications/` and prefix its `Exec=` lines with `env MOZ_USE_XINPUT2=1`. Other applications do not support touch gestures at all (GIMP has no canvas pinch or two-finger gestures); Krita, Xournal++ and Inkscape do. Wayland sessions are unaffected.
+DrawSplay delivers real multi-touch (up to 10 fingers) to X11 sessions, but some applications ignore it unless it is enabled for them. Firefox, for example, only handles touch (two-finger scroll, pinch) when started with `MOZ_USE_XINPUT2=1`: quit it completely, then run `MOZ_USE_XINPUT2=1 firefox`. To make that permanent, copy the app's `.desktop` file to `~/.local/share/applications/` and prefix its `Exec=` lines with `env MOZ_USE_XINPUT2=1`. Other applications do not support touch gestures at all (GIMP has no canvas pinch or two-finger gestures); Krita, Xournal++ and Inkscape do.
 
 ### Linux shows a mirror instead of an extra display
 
