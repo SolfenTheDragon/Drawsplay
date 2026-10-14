@@ -72,3 +72,39 @@ func TestX11ScreenAbsStaysInRange(t *testing.T) {
 		t.Errorf("x11ScreenAbs left of the screen = %d, want 0", got)
 	}
 }
+
+func TestInjectTouchTracksSlotsAndContacts(t *testing.T) {
+	var l linuxInjector
+	l.touchFd = -1 // writes fail harmlessly; only slot state is checked
+	pkt := func(action string, id int) *packet {
+		return &packet{Action: action, PointerID: id, X: 10, Y: 10, Width: 100, Height: 100}
+	}
+	l.injectTouch(pkt("down", 7))
+	l.injectTouch(pkt("pointer_down", 9))
+	if l.touch.activeCt != 2 {
+		t.Fatalf("active contacts = %d, want 2", l.touch.activeCt)
+	}
+	if s0, _ := l.touch.slotFor(7); s0 != 0 {
+		t.Errorf("pointer 7 slot = %d, want 0", s0)
+	}
+	l.injectTouch(pkt("move", 3)) // unknown pointer: ignored
+	if l.touch.activeCt != 2 {
+		t.Errorf("stale move changed contacts: %d", l.touch.activeCt)
+	}
+	l.injectTouch(pkt("pointer_up", 7))
+	l.injectTouch(pkt("up", 9))
+	if l.touch.activeCt != 0 {
+		t.Errorf("active contacts after release = %d, want 0", l.touch.activeCt)
+	}
+	l.injectTouch(pkt("down", 1))
+	l.injectTouch(pkt("cancel", 1))
+	if l.touch.activeCt != 0 || l.touch.used[0] {
+		t.Errorf("cancel left contacts down: %+v", l.touch)
+	}
+}
+
+// Tests must never write the user's real compositor settings.
+func init() {
+	setTouchscreenOutput = func(x11TabletCompositor, monitorSpec) error { return nil }
+	kwinSetTouchOutput = func(string) error { return nil }
+}

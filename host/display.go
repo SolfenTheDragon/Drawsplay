@@ -120,8 +120,13 @@ func (r displayRect) empty() bool { return r.W <= 0 || r.H <= 0 }
 // no video session is active (injectors fall back to the primary display).
 var currentTarget atomic.Pointer[captureTarget]
 
-func setActiveTarget(t *captureTarget) { currentTarget.Store(t) }
-func activeTarget() *captureTarget     { return currentTarget.Load() }
+func setActiveTarget(t *captureTarget) {
+	currentTarget.Store(t)
+	if t == nil {
+		clearTouchMapped()
+	}
+}
+func activeTarget() *captureTarget { return currentTarget.Load() }
 
 // Mode-change fan-out: when the session display's resolution changes
 // mid-session (the user adjusted it in the OS display settings), the video

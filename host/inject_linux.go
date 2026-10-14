@@ -137,7 +137,11 @@ type linuxInjector struct {
 	mu   sync.Mutex
 	fd   int
 	kbFd int // virtual keyboard fd, or -1 when unavailable
-	gate penGate
+	// touchFd is the multi-touch finger device, or -1 when unavailable (see
+	// inject_touch_linux.go); fingers use it only while it is mapped.
+	touchFd int
+	touch   touchState
+	gate    penGate
 	// Active tool key currently reported (btnToolPen/btnToolRubber), or 0
 	// when out of range. Finger contact also uses btnToolPen.
 	tool int
@@ -177,9 +181,18 @@ func newInjector() injector {
 			kbFd = kfd
 		}
 	}
+	touchFd := -1
+	if tfd, err := unix.Open("/dev/uinput", unix.O_WRONLY|unix.O_NONBLOCK, 0); err == nil {
+		if err := setupUinputTouch(tfd); err != nil {
+			_ = unix.Close(tfd)
+			log.Printf("Multi-touch device unavailable (%v); fingers use the pen device", err)
+		} else {
+			touchFd = tfd
+		}
+	}
 	setOperationalWarning("uinput-runtime", "")
-	log.Printf("Input injection ready (uinput pen tablet, keyboard=%v)", kbFd >= 0)
-	return &linuxInjector{fd: fd, kbFd: kbFd}
+	log.Printf("Input injection ready (uinput pen tablet, keyboard=%v, multitouch=%v)", kbFd >= 0, touchFd >= 0)
+	return &linuxInjector{fd: fd, kbFd: kbFd, touchFd: touchFd}
 }
 
 // setupUinputDevice declares capabilities and creates the device node.
@@ -263,6 +276,11 @@ func (l *linuxInjector) close() {
 		_ = unix.Close(l.kbFd)
 		l.kbFd = -1
 	}
+	if l.touchFd >= 0 {
+		_ = unix.IoctlSetInt(l.touchFd, uiDevDestroy, 0)
+		_ = unix.Close(l.touchFd)
+		l.touchFd = -1
+	}
 }
 
 func (l *linuxInjector) inject(msg *packet) {
@@ -274,6 +292,10 @@ func (l *linuxInjector) inject(msg *packet) {
 		l.gate.notePen()
 	} else if l.gate.blocksFinger() {
 		return // palm rejection
+	}
+	if !pen && l.useTouchDevice() {
+		l.injectTouch(msg)
+		return
 	}
 
 	// Finger contact is reported as btnToolPen (see file header comment):
@@ -344,6 +366,7 @@ func (l *linuxInjector) inject(msg *packet) {
 func (l *linuxInjector) cancelAll() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.cancelTouches()
 	events := append(l.eventBuf[:0],
 		inputEvent{typ: evKey, code: uint16(btnTouch), value: 0},
 		inputEvent{typ: evKey, code: uint16(btnStylus), value: 0},

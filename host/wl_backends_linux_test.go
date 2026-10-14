@@ -157,7 +157,7 @@ func TestSwayBackendSpeaksIPC(t *testing.T) {
 	if err := hd.Remove(nil, "eDP-1"); err != nil {
 		t.Fatal(err)
 	}
-	want = []string{"input 7504:20548:Drawsplay_Pen map_to_output HEADLESS-1", "output HEADLESS-1 unplug", "output eDP-1 enable"}
+	want = []string{"input 7504:20550:Drawsplay_Touch map_to_output HEADLESS-1", "input 7504:20548:Drawsplay_Pen map_to_output HEADLESS-1", "output HEADLESS-1 unplug", "output eDP-1 enable"}
 	if got := f.takeCmds(); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("commands = %q, want %q", got, want)
 	}
@@ -270,6 +270,7 @@ func TestHyprBackendSpeaksIPC(t *testing.T) {
 		"keyword monitor Drawsplay,2960x1848@60,-2368x0,1.25,transform,0",
 		`eval hl.monitor({ output = "Drawsplay", mode = "2960x1848@60", position = "-2368x0", scale = "1.25", transform = 0 })`,
 		"j/devices",
+		`eval hl.device({ name = "drawsplay-touch", output = "Drawsplay" })`,
 		`eval hl.device({ name = "drawsplay-pen-1", output = "Drawsplay" })`,
 	}
 	if got := f.takeReqs(); fmt.Sprint(got) != fmt.Sprint(want) {

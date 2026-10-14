@@ -1444,6 +1444,7 @@ func ensureMutterMonitorLocked(w, h, nativeW, nativeH int) error {
 // virtual monitor. Mutter keys the setting by the monitor's serial, which is
 // new for every virtual monitor.
 func mapMutterTablet(spec monitorSpec) {
+	mapGsettingsTouchscreen(mutterTabletCompositor, spec)
 	if err := setTabletOutput(mutterTabletCompositor, spec); err != nil {
 		log.Printf("GNOME virtual monitor: could not map Drawsplay Pen input to %s (%v); touch/pen input may land on another monitor", spec.Connector, err)
 		return

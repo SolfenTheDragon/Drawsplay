@@ -29,6 +29,8 @@ const (
 	// swayPenIdentifier is the Drawsplay Pen as sway's input commands name
 	// it: vendor:product:name.
 	swayPenIdentifier = "7504:20548:Drawsplay_Pen"
+	// swayTouchIdentifier is the Drawsplay Touch multi-touch device.
+	swayTouchIdentifier = "7504:20550:Drawsplay_Touch"
 )
 
 var swayTransforms = []string{"normal", "90", "180", "270", "flipped", "flipped-90", "flipped-180", "flipped-270"}
@@ -274,6 +276,7 @@ func (s *swayOutput) Target() captureTarget {
 	return captureTarget{Kind: captureScreencopy, OutputName: s.name}
 }
 func (s *swayOutput) MapTablet() error {
+	noteTouchMapping("sway", s.name, swayRun(s.sock, "input "+swayTouchIdentifier+" map_to_output "+s.name))
 	return swayRun(s.sock, "input "+swayPenIdentifier+" map_to_output "+s.name)
 }
 func (s *swayOutput) State() (wlExtState, error) {

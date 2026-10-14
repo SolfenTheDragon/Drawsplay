@@ -30,6 +30,7 @@ const (
 )
 
 var hyprPenPattern = regexp.MustCompile(`^drawsplay-pen(-\d+)?$`)
+var hyprTouchPattern = regexp.MustCompile(`^drawsplay-touch(-\d+)?$`)
 
 // hyprSocketDir is the running Hyprland instance's socket directory.
 func hyprSocketDir() (string, error) {
@@ -253,14 +254,24 @@ func (s *hyprOutput) Configure(c wlExtConfig) error {
 
 // MapTablet points the Drawsplay Pen's device rule at the output.
 func (s *hyprOutput) MapTablet() error {
+	touch := "drawsplay-touch"
 	pen := "drawsplay-pen"
 	if reply, err := hyprCall(s.dir, "j/devices"); err == nil {
 		var devs struct {
 			Tablets []struct {
 				Name string `json:"name"`
 			} `json:"tablets"`
+			Touch []struct {
+				Name string `json:"name"`
+			} `json:"touch"`
 		}
 		if json.Unmarshal([]byte(reply), &devs) == nil {
+			for _, t := range devs.Touch {
+				if hyprTouchPattern.MatchString(t.Name) {
+					touch = t.Name
+					break
+				}
+			}
 			for _, t := range devs.Tablets {
 				if hyprPenPattern.MatchString(t.Name) {
 					pen = t.Name
@@ -269,6 +280,9 @@ func (s *hyprOutput) MapTablet() error {
 			}
 		}
 	}
+	noteTouchMapping("Hyprland", hyprOutputName, s.rule(
+		fmt.Sprintf("device[%s]:output %s", touch, hyprOutputName),
+		fmt.Sprintf(`hl.device({ name = %q, output = %q })`, touch, hyprOutputName)))
 	return s.rule(
 		fmt.Sprintf("device[%s]:output %s", pen, hyprOutputName),
 		fmt.Sprintf(`hl.device({ name = %q, output = %q })`, pen, hyprOutputName))

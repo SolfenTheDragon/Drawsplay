@@ -47,6 +47,9 @@ type x11TabletCompositor struct {
 	objectPath dbus.ObjectPath
 	schema     string // relocatable tablet settings schema
 	schemaPath string // prefix of the schema's per-device path
+	// touchSchema/touchSchemaPath are the same for touchscreens.
+	touchSchema     string
+	touchSchemaPath string
 }
 
 // mutterTabletCompositor is GNOME's Mutter, under Xorg or Wayland.
@@ -56,6 +59,9 @@ var mutterTabletCompositor = x11TabletCompositor{
 	objectPath: displayConfigObjectPath,
 	schema:     "org.gnome.desktop.peripherals.tablet",
 	schemaPath: "/org/gnome/desktop/peripherals/tablets/",
+
+	touchSchema:     "org.gnome.desktop.peripherals.touchscreen",
+	touchSchemaPath: "/org/gnome/desktop/peripherals/touchscreens/",
 }
 
 var x11TabletCompositors = []x11TabletCompositor{
@@ -65,6 +71,9 @@ var x11TabletCompositors = []x11TabletCompositor{
 		objectPath: "/org/cinnamon/Muffin/DisplayConfig",
 		schema:     "org.cinnamon.desktop.peripherals.tablet",
 		schemaPath: "/org/cinnamon/desktop/peripherals/tablets/",
+
+		touchSchema:     "org.cinnamon.desktop.peripherals.touchscreen",
+		touchSchemaPath: "/org/cinnamon/desktop/peripherals/touchscreens/",
 	},
 	mutterTabletCompositor,
 }
@@ -100,6 +109,7 @@ var (
 // to this output set before), so aiming the coordinates at the output as
 // well would misplace them.
 func mapX11TabletToOutput(connector string) bool {
+	touchMapped.Store(false)
 	for _, c := range x11TabletCompositors {
 		spec, err := lookupMonitorSpec(c, connector)
 		if errors.Is(err, errCompositorAbsent) {
@@ -113,6 +123,7 @@ func mapX11TabletToOutput(connector string) bool {
 			return true
 		}
 		log.Printf("Mapped Drawsplay Pen touch/pen input to %s (%s)", connector, c.name)
+		mapGsettingsTouchscreen(c, spec)
 		return true
 	}
 	log.Printf("X11 extended display: no Muffin or Mutter tablet mapping; aiming touch/pen input at %s within the X screen", connector)

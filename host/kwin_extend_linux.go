@@ -38,6 +38,7 @@ const (
 var (
 	kwinDial            = dialWayland
 	kwinSetTabletOutput = setKWinTabletOutput
+	kwinSetTouchOutput  = setKWinTouchOutput
 	kwinEnableOutput    = enableKWinOutput
 	kwinPrepare         = installKWinDesktopFile
 	kwinStreamTimeout   = 5 * time.Second
@@ -219,7 +220,10 @@ func (k *kwinOutput) State() (wlExtState, error) {
 	return st, nil
 }
 
-func (k *kwinOutput) MapTablet() error { return kwinSetTabletOutput(kwinOutputName) }
+func (k *kwinOutput) MapTablet() error {
+	noteTouchMapping("KWin", kwinOutputName, kwinSetTouchOutput(kwinOutputName))
+	return kwinSetTabletOutput(kwinOutputName)
+}
 
 func (k *kwinOutput) Remove([]x11OutputPos, string) error {
 	k.close()
@@ -229,6 +233,17 @@ func (k *kwinOutput) Remove([]x11OutputPos, string) error {
 // setKWinTabletOutput maps the Drawsplay Pen onto output through KWin's
 // input device D-Bus interface.
 func setKWinTabletOutput(output string) error {
+	return setKWinDeviceOutput("Drawsplay Pen", "tabletTool", output)
+}
+
+// setKWinTouchOutput maps the Drawsplay Touch device onto output.
+func setKWinTouchOutput(output string) error {
+	return setKWinDeviceOutput("Drawsplay Touch", "touch", output)
+}
+
+// setKWinDeviceOutput maps the input device called deviceName, whose boolean
+// capability property is kind, onto output.
+func setKWinDeviceOutput(deviceName, kind, output string) error {
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		return err
@@ -244,10 +259,10 @@ func setKWinTabletOutput(output string) error {
 	for _, sys := range names {
 		obj := conn.Object("org.kde.KWin", dbus.ObjectPath("/org/kde/KWin/InputDevice/"+sys))
 		name, err := obj.GetProperty(dev + ".name")
-		if err != nil || name.Value() != "Drawsplay Pen" {
+		if err != nil || name.Value() != deviceName {
 			continue
 		}
-		if tool, err := obj.GetProperty(dev + ".tabletTool"); err != nil || tool.Value() != true {
+		if tool, err := obj.GetProperty(dev + "." + kind); err != nil || tool.Value() != true {
 			continue
 		}
 		found = true
@@ -259,7 +274,7 @@ func setKWinTabletOutput(output string) error {
 		}
 	}
 	if !found {
-		return errors.New("KWin does not list the Drawsplay Pen")
+		return fmt.Errorf("KWin does not list the %s", deviceName)
 	}
 	return nil
 }
