@@ -59,15 +59,15 @@ const pipewireKeepaliveMs = 500
 // lever, scoped per-session rather than a global daemon setting under
 // /etc/pipewire or ~/.config/pipewire, which would affect every PipeWire
 // client on the machine, audio included). The element's own defaults are
-// min=1 (already fine) and max=unlimited, and an unbounded negotiated pool
-// lets the compositor's screen-cast source build up a multi-frame backlog
-// under load before the downstream leaky queue (see gstPipeWireSpecs) ever
-// gets a chance to drop anything. Two buffers is the standard low-latency
-// floor (enough to decouple producer/consumer without tolerating queuing
-// delay); one is not used because it can starve on a single missed
-// wakeup, forcing an avoidable keepalive resend.
+// min=1 (already fine) and max=unlimited; the cap keeps the pool small.
+//
+// Mutter records a frame only into a buffer the consumer has returned and
+// otherwise skips it. Two buffers starved it: on a GNOME 50 virtual monitor
+// playing 30 fps content the stream fell to ~4 fps (most frames skipped,
+// the rest keepalive resends), and 60 fps content stalled for up to 500 ms.
+// Four delivered a steady 30/60 fps, the same as an uncapped pool.
 const pipewireMinBuffers = 1
-const pipewireMaxBuffers = 2
+const pipewireMaxBuffers = 4
 
 // maxVideoconvertThreads bounds the videoconvert worker count. The stage is
 // memory-bandwidth bound, so beyond four workers the extra threads buy no
