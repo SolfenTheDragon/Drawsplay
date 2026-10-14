@@ -68,3 +68,4 @@ docs/
 wiki/
 research/
 !/README.md
+.github/copilot-instructions.md
