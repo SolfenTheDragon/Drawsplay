@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.view.Display
+import android.view.Gravity
+import android.view.View
 import android.graphics.ImageFormat
 import android.view.KeyEvent
 import android.view.Surface
@@ -26,6 +28,7 @@ import com.drawsplay.tablet.input.HostCursorView
 import com.drawsplay.tablet.transport.HostEndpointSelector
 import com.drawsplay.tablet.transport.WiFiDiscoveryManager
 import com.drawsplay.tablet.video.VideoChannel
+import com.drawsplay.tablet.video.VideoScaling
 
 /**
  * Single fullscreen activity. Zero-configuration by design: both channels
@@ -33,7 +36,8 @@ import com.drawsplay.tablet.video.VideoChannel
  * drops â€” there are no connect/disconnect controls.
  *
  * View stack (back to front):
- *  1. [SurfaceView]   â€” hardware-decoded host video.
+ *  1. [SurfaceView]   â€” hardware-decoded host video, sized and centred
+ *                       inside videoFrame per the host's [VideoScaling].
  *  2. [InputPadView]  â€” transparent, captures touch/stylus over the video so
  *                       input coordinates map 1:1 onto displayed host pixels.
  *  3. Status text     â€” only visible while waiting for the host.
@@ -48,6 +52,7 @@ import com.drawsplay.tablet.video.VideoChannel
  */
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var videoFrame: FrameLayout
     private lateinit var videoSurface: SurfaceView
     private lateinit var statusOverlay: FrameLayout
     private lateinit var statusText: TextView
@@ -64,6 +69,11 @@ class MainActivity : AppCompatActivity() {
 
     @Volatile
     private var keepAliveOnBackground = false
+
+    // UI thread only.
+    private var videoScaling = VideoScaling.DEFAULT
+    private var videoWidth = 0
+    private var videoHeight = 0
     @Volatile
     private var wifiPolicyEnabled = false
     @Volatile
@@ -77,6 +87,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        videoFrame = findViewById(R.id.videoFrame)
         videoSurface = findViewById(R.id.videoSurface)
         statusOverlay = findViewById(R.id.statusOverlay)
         statusText = findViewById(R.id.statusText)
@@ -93,6 +104,11 @@ class MainActivity : AppCompatActivity() {
         // A monitor must not sleep while in use.
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         restoreKnownHostPolicy()
+        videoScaling = VideoScaling.fromWireName(displayPrefs.getString(KEY_VIDEO_SCALING, null))
+            ?: VideoScaling.DEFAULT
+        (videoFrame.parent as View).addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
+            if (r - l != or - ol || b - t != ob - ot) applyVideoLayout()
+        }
 
         inputChannel = InputChannel(object : InputChannel.InputChannelListener {
             override fun onConnected() {
@@ -117,6 +133,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onSessionPolicy(
                 keepAliveOnBackground: Boolean,
+                videoScaling: String,
                 wifiEnabled: Boolean,
                 wifiAuthToken: String,
                 wifiTlsRequired: Boolean,
@@ -129,7 +146,10 @@ class MainActivity : AppCompatActivity() {
                     wifiTlsRequired,
                     wifiTlsFingerprint
                 )
-                runOnUiThread { updateWiFiDiscoveryState() }
+                runOnUiThread {
+                    updateWiFiDiscoveryState()
+                    VideoScaling.fromWireName(videoScaling)?.let { setVideoScaling(it) }
+                }
             }
         }, endpointSelector, appVersionName())
         inputChannel.displayInfo = buildDisplayInfo()
@@ -143,6 +163,14 @@ class MainActivity : AppCompatActivity() {
             override fun onWaitingForHost(reason: String?) {
                 streamUp = false
                 runOnUiThread { updateStatus() }
+            }
+
+            override fun onVideoSize(width: Int, height: Int) {
+                runOnUiThread {
+                    videoWidth = width
+                    videoHeight = height
+                    applyVideoLayout()
+                }
             }
         }, endpointSelector)
         wifiDiscoveryManager = WiFiDiscoveryManager(
@@ -268,6 +296,35 @@ class MainActivity : AppCompatActivity() {
         if (!saved) {
             Log.w(TAG, "Failed to clear preferred display mode")
         }
+    }
+
+    // --- Video scaling ---
+    //
+    // The surface, input pad and cursor overlay share videoFrame, so resizing
+    // it keeps touch/pen coordinates mapped onto the displayed picture. The
+    // mode is remembered so the last choice applies before the host's policy
+    // arrives on the next launch.
+
+    private fun setVideoScaling(mode: VideoScaling) {
+        if (mode == videoScaling) return
+        videoScaling = mode
+        displayPrefs.edit().putString(KEY_VIDEO_SCALING, mode.wireName).apply()
+        applyVideoLayout()
+    }
+
+    private fun applyVideoLayout() {
+        val root = videoFrame.parent as View
+        val size = videoScaling.frameSize(videoWidth, videoHeight, root.width, root.height)
+        val width = size?.first ?: FrameLayout.LayoutParams.MATCH_PARENT
+        val height = size?.second ?: FrameLayout.LayoutParams.MATCH_PARENT
+        val lp = videoFrame.layoutParams as FrameLayout.LayoutParams
+        if (lp.width == width && lp.height == height) return
+        lp.width = width
+        lp.height = height
+        lp.gravity = Gravity.CENTER
+        videoFrame.layoutParams = lp
+        Log.i(TAG, "Video scaling ${videoScaling.wireName}: ${videoWidth}x$videoHeight -> " +
+            "${size?.let { "${it.first}x${it.second}" } ?: "full screen"}")
     }
 
     // --- Keyboard passthrough (M5) ---
@@ -456,6 +513,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
+        private const val KEY_VIDEO_SCALING = "videoScaling"
         private const val KEY_WIFI_ENABLED = "wifiEnabled"
         private const val KEY_WIFI_AUTH_TOKEN = "wifiAuthToken"
         private const val KEY_WIFI_TLS_REQUIRED = "wifiTlsRequired"

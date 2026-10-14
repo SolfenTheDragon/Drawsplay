@@ -361,6 +361,7 @@ async function loadSettings() {
   $("pen-enabled").checked = s.penEnabled !== false;
   $("keyboard-enabled").checked = s.keyboardEnabled !== false;
   $("keep-alive-on-background").checked = !!s.keepAliveOnBackground;
+  $("video-scaling").value = s.videoScaling || "fill";
   $("auto-launch-android-app").checked = !!s.autoLaunchAndroidApp;
   $("zero-copy-capture").checked = !!s.zeroCopyCapture;
   $("temporal-layering").checked = !!s.temporalLayering;
@@ -557,6 +558,7 @@ $("form").addEventListener("submit", async (ev) => {
       penEnabled: $("pen-enabled").checked,
       keyboardEnabled: $("keyboard-enabled").checked,
       keepAliveOnBackground: $("keep-alive-on-background").checked,
+      videoScaling: $("video-scaling").value,
       autoLaunchAndroidApp: $("auto-launch-android-app").checked,
       zeroCopyCapture: $("zero-copy-capture").checked,
       temporalLayering: $("temporal-layering").checked,

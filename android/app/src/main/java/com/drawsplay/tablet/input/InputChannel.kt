@@ -36,6 +36,7 @@ class InputChannel(
         fun onClearHostDisplayModePreference()
         fun onSessionPolicy(
             keepAliveOnBackground: Boolean,
+            videoScaling: String,
             wifiEnabled: Boolean,
             wifiAuthToken: String,
             wifiTlsRequired: Boolean,
@@ -247,6 +248,7 @@ class InputChannel(
                 "clearDisplayMode" -> listener.onClearHostDisplayModePreference()
                 "sessionPolicy" -> listener.onSessionPolicy(
                     obj.optBoolean("keepAliveOnBackground", false),
+                    obj.optString("videoScaling", ""),
                     obj.optBoolean("wifiEnabled", false),
                     obj.optString("wifiAuthToken", ""),
                     obj.optBoolean("wifiTlsRequired", false),

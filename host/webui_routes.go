@@ -111,13 +111,14 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 		if old.LocalCursor != s.LocalCursor ||
 			old.TouchEnabled != s.TouchEnabled ||
 			old.PenEnabled != s.PenEnabled ||
-			old.KeepAliveOnBackground != s.KeepAliveOnBackground {
+			old.KeepAliveOnBackground != s.KeepAliveOnBackground ||
+			old.VideoScaling != s.VideoScaling {
 			inputRestarted = restartActiveInputSessions()
 		}
 		runBackgroundPreflight(api.store.get())
-		log.Printf("Settings updated via web UI: fps=%d bitrate=%s %dx%d localCursor=%v touch=%v pen=%v keyboard=%v keepAliveOnBackground=%v preferredADBSerial=%q requirePreferredADB=%v autoLaunchAndroidApp=%v zeroCopyCapture=%v temporalLayering=%v allowToolAutoInstall=%v noDriverInstall=%v (videoRestarted=%v inputRestarted=%v)",
+		log.Printf("Settings updated via web UI: fps=%d bitrate=%s %dx%d localCursor=%v touch=%v pen=%v keyboard=%v keepAliveOnBackground=%v videoScaling=%s preferredADBSerial=%q requirePreferredADB=%v autoLaunchAndroidApp=%v zeroCopyCapture=%v temporalLayering=%v allowToolAutoInstall=%v noDriverInstall=%v (videoRestarted=%v inputRestarted=%v)",
 			s.FPS, s.Bitrate, s.Width, s.Height, s.LocalCursor, s.TouchEnabled, s.PenEnabled,
-			s.KeyboardEnabled, s.KeepAliveOnBackground, s.PreferredADBSerial, s.RequirePreferredADB, s.AutoLaunchAndroidApp, s.ZeroCopyCapture, s.TemporalLayering, s.AllowToolAutoInstall,
+			s.KeyboardEnabled, s.KeepAliveOnBackground, s.VideoScaling, s.PreferredADBSerial, s.RequirePreferredADB, s.AutoLaunchAndroidApp, s.ZeroCopyCapture, s.TemporalLayering, s.AllowToolAutoInstall,
 			s.NoDriverInstall, restarted, inputRestarted)
 		writeJSON(w, map[string]any{
 			"ok":             true,

@@ -45,22 +45,25 @@ type settings struct {
 	PenEnabled            bool   `json:"penEnabled"`
 	KeyboardEnabled       bool   `json:"keyboardEnabled"`
 	KeepAliveOnBackground bool   `json:"keepAliveOnBackground"`
-	NoDriverInstall       bool   `json:"noDriverInstall"`
-	WifiEnabled           bool   `json:"wifiEnabled"`
-	WifiBindAddress       string `json:"wifiBindAddress"`
-	WifiInputPort         int    `json:"wifiInputPort"`
-	WifiVideoPort         int    `json:"wifiVideoPort"`
-	WifiServiceName       string `json:"wifiServiceName"`
-	WifiTLS               bool   `json:"wifiTLS"`
-	WifiAuthToken         string `json:"wifiAuthToken,omitempty"`
-	WifiMaxBitrate        string `json:"wifiMaxBitrate"`
-	USBLinkEnabled        bool   `json:"usbLinkEnabled"`
-	USBLinkBindAddress    string `json:"usbLinkBindAddress"`
-	USBLinkInputPort      int    `json:"usbLinkInputPort"`
-	USBLinkVideoPort      int    `json:"usbLinkVideoPort"`
-	USBLinkTLS            bool   `json:"usbLinkTLS"`
-	USBLinkAuthToken      string `json:"usbLinkAuthToken,omitempty"`
-	USBLinkMaxBitrate     string `json:"usbLinkMaxBitrate"`
+	// VideoScaling is how the tablet lays the host picture out on its panel
+	// (videoScalingFill, videoScalingFit or videoScalingOriginal).
+	VideoScaling       string `json:"videoScaling"`
+	NoDriverInstall    bool   `json:"noDriverInstall"`
+	WifiEnabled        bool   `json:"wifiEnabled"`
+	WifiBindAddress    string `json:"wifiBindAddress"`
+	WifiInputPort      int    `json:"wifiInputPort"`
+	WifiVideoPort      int    `json:"wifiVideoPort"`
+	WifiServiceName    string `json:"wifiServiceName"`
+	WifiTLS            bool   `json:"wifiTLS"`
+	WifiAuthToken      string `json:"wifiAuthToken,omitempty"`
+	WifiMaxBitrate     string `json:"wifiMaxBitrate"`
+	USBLinkEnabled     bool   `json:"usbLinkEnabled"`
+	USBLinkBindAddress string `json:"usbLinkBindAddress"`
+	USBLinkInputPort   int    `json:"usbLinkInputPort"`
+	USBLinkVideoPort   int    `json:"usbLinkVideoPort"`
+	USBLinkTLS         bool   `json:"usbLinkTLS"`
+	USBLinkAuthToken   string `json:"usbLinkAuthToken,omitempty"`
+	USBLinkMaxBitrate  string `json:"usbLinkMaxBitrate"`
 }
 
 // defaultSettings mirrors the flag defaults in main.go.
@@ -81,6 +84,7 @@ func defaultSettings() settings {
 		PenEnabled:            true,
 		KeyboardEnabled:       true,
 		KeepAliveOnBackground: false,
+		VideoScaling:          videoScalingFill,
 		NoDriverInstall:       false,
 		WifiEnabled:           false,
 		WifiBindAddress:       "0.0.0.0",
@@ -100,6 +104,24 @@ func defaultSettings() settings {
 	}
 }
 
+// Tablet video scaling modes. Fill stretches the picture over the whole panel
+// (the original behaviour), fit scales it to the panel keeping its aspect
+// ratio, and original shows it pixel for pixel, centred (scaled down like fit
+// only when it is larger than the panel).
+const (
+	videoScalingFill     = "fill"
+	videoScalingFit      = "fit"
+	videoScalingOriginal = "original"
+)
+
+func validVideoScaling(mode string) bool {
+	switch mode {
+	case videoScalingFill, videoScalingFit, videoScalingOriginal:
+		return true
+	}
+	return false
+}
+
 // validate rejects values that would break the capture pipeline or the
 // virtual display. Returned errors are user-facing (web UI form feedback).
 func (s settings) validate() error {
@@ -111,6 +133,9 @@ func (s settings) validate() error {
 	}
 	if s.Width < 640 || s.Width > 7680 || s.Height < 480 || s.Height > 4320 {
 		return fmt.Errorf("resolution must be between 640x480 and 7680x4320")
+	}
+	if !validVideoScaling(s.VideoScaling) {
+		return fmt.Errorf("video scaling must be %q, %q or %q", videoScalingFill, videoScalingFit, videoScalingOriginal)
 	}
 	if err := validateConfiguredExecutable(s.ADB, "adb"); err != nil {
 		return fmt.Errorf("adb path: %w", err)

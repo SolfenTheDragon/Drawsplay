@@ -53,6 +53,26 @@ func TestSettingsRejectsUnsafePreferredSerial(t *testing.T) {
 	}
 }
 
+func TestSettingsVideoScalingValidation(t *testing.T) {
+	if got := defaultSettings().VideoScaling; got != videoScalingFill {
+		t.Fatalf("default video scaling = %q, want %q", got, videoScalingFill)
+	}
+	for _, mode := range []string{videoScalingFill, videoScalingFit, videoScalingOriginal} {
+		s := defaultSettings()
+		s.VideoScaling = mode
+		if err := s.validate(); err != nil {
+			t.Errorf("video scaling %q rejected: %v", mode, err)
+		}
+	}
+	for _, mode := range []string{"", "stretch", "FIT"} {
+		s := defaultSettings()
+		s.VideoScaling = mode
+		if err := s.validate(); err == nil {
+			t.Errorf("video scaling %q unexpectedly accepted", mode)
+		}
+	}
+}
+
 // TestSettingsStoreUpdateResolutionPersists guards the fix for Linux's
 // GNOME-managed resolution snapping back to the originally configured size
 // on every session restart: the extended displays' watchers

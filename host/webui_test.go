@@ -82,7 +82,7 @@ func TestSettingsAPIRoundTrip(t *testing.T) {
 	}
 
 	// PUT applies a valid change.
-	body := `{"adb":"adb","preferredADBSerial":"tablet-123","requirePreferredADB":true,"ffmpeg":"ffmpeg","fps":30,"bitrate":"12M","width":2560,"height":1600,"localCursor":false,"touchEnabled":false,"penEnabled":true,"keyboardEnabled":false,"keepAliveOnBackground":true,"autoLaunchAndroidApp":true,"zeroCopyCapture":false,"temporalLayering":true,"allowToolAutoInstall":false,"noDriverInstall":true}`
+	body := `{"adb":"adb","preferredADBSerial":"tablet-123","requirePreferredADB":true,"ffmpeg":"ffmpeg","fps":30,"bitrate":"12M","width":2560,"height":1600,"localCursor":false,"touchEnabled":false,"penEnabled":true,"keyboardEnabled":false,"keepAliveOnBackground":true,"videoScaling":"fit","autoLaunchAndroidApp":true,"zeroCopyCapture":false,"temporalLayering":true,"allowToolAutoInstall":false,"noDriverInstall":true}`
 	res = protectedRequest(t, http.MethodPut, srv.URL, "/api/settings", body, token)
 	res.Body.Close()
 	if res.StatusCode != http.StatusOK {
@@ -92,7 +92,7 @@ func TestSettingsAPIRoundTrip(t *testing.T) {
 	if got.FPS != 30 || got.Bitrate != "12M" || got.Width != 2560 || got.Height != 1600 ||
 		got.PreferredADBSerial != "tablet-123" || !got.RequirePreferredADB ||
 		got.LocalCursor || got.TouchEnabled || !got.PenEnabled || got.KeyboardEnabled ||
-		!got.KeepAliveOnBackground || !got.AutoLaunchAndroidApp || got.ZeroCopyCapture || !got.TemporalLayering ||
+		!got.KeepAliveOnBackground || got.VideoScaling != videoScalingFit || !got.AutoLaunchAndroidApp || got.ZeroCopyCapture || !got.TemporalLayering ||
 		got.AllowToolAutoInstall || !got.NoDriverInstall {
 		t.Errorf("store after PUT = %+v", got)
 	}

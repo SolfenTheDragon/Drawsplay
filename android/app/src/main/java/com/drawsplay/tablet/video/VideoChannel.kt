@@ -49,6 +49,9 @@ class VideoChannel(
 
         /** Stream down or not yet up; the channel keeps retrying on its own. */
         fun onWaitingForHost(reason: String?)
+
+        /** Decoded picture size (visible area) is known or changed. */
+        fun onVideoSize(width: Int, height: Int) {}
     }
 
     private val generation = AtomicLong(0L)
@@ -152,7 +155,7 @@ class VideoChannel(
             socket.getOutputStream().flush()
 
             val input = DataInputStream(socket.getInputStream().buffered(256 * 1024))
-            val decoder = VideoDecoder(renderSurface)
+            val decoder = VideoDecoder(renderSurface) { w, h -> listener.onVideoSize(w, h) }
             val statsThread = startStatsReporter(socket, decoder)
             try {
                 while (gen == generation.get() && !Thread.currentThread().isInterrupted) {

@@ -44,7 +44,10 @@ import java.util.concurrent.atomic.AtomicLong
  * channel's reader thread). Output draining is asynchronous via MediaCodec's
  * callback thread.
  */
-class VideoDecoder(private val surface: Surface) {
+class VideoDecoder(
+    private val surface: Surface,
+    private val onVideoSize: (width: Int, height: Int) -> Unit = { _, _ -> }
+) {
     private val initialRefreshHz: Float = try {
         @Suppress("DEPRECATION")
         val display = if (AndroidCompat.supportsWindowMetrics) {
@@ -529,6 +532,17 @@ class VideoDecoder(private val surface: Surface) {
 
         override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
             Log.i(TAG, "Decoder output format: $format")
+            val width = if (format.containsKey("crop-left") && format.containsKey("crop-right")) {
+                format.getInteger("crop-right") - format.getInteger("crop-left") + 1
+            } else {
+                format.getInteger(MediaFormat.KEY_WIDTH)
+            }
+            val height = if (format.containsKey("crop-top") && format.containsKey("crop-bottom")) {
+                format.getInteger("crop-bottom") - format.getInteger("crop-top") + 1
+            } else {
+                format.getInteger(MediaFormat.KEY_HEIGHT)
+            }
+            if (width > 0 && height > 0) onVideoSize(width, height)
         }
     }
 
