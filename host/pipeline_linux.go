@@ -80,6 +80,12 @@ func pipewireKeepaliveMs(fps int) int {
 const pipewireMinBuffers = 1
 const pipewireMaxBuffers = 4
 
+// vah264MaxQP caps vah264enc's quantizer. Its default (51) lets VBR spend
+// almost nothing on flat or slowly graded areas, which showed as colour
+// banding; those areas cost few bits even at this QP, so the cap trades a
+// little bitrate for smooth gradients.
+const vah264MaxQP = 26
+
 // maxVideoconvertThreads bounds the videoconvert worker count. The stage is
 // memory-bandwidth bound, so beyond four workers the extra threads buy no
 // throughput while competing with the compositor and the encoder for cores.
@@ -400,8 +406,8 @@ func gstPipeWireSpecs(target captureTarget, opts videoOptions) []pipelineSpec {
 	// output until later input arrives, which on a damage-driven stream took
 	// 150-1000 ms. One reference gives the lowest value the encoder writes.
 	vah264 := fmt.Sprintf(
-		"vah264enc rate-control=vbr target-percentage=100 bitrate=%d key-int-max=%d b-frames=0 ref-frames=1 target-usage=7",
-		kbps, gop)
+		"vah264enc rate-control=vbr target-percentage=100 bitrate=%d key-int-max=%d b-frames=0 ref-frames=1 target-usage=4 mbbrc=enabled max-qp=%d",
+		kbps, gop, vah264MaxQP)
 	encoders := []struct {
 		name, base string
 		source     string
