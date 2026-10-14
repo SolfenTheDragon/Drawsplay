@@ -41,7 +41,7 @@ func TestGstPipeWireSpecsDoNotPinFramerateOnSourceCaps(t *testing.T) {
 	target, opts := pipeWireTestOpts()
 	for _, spec := range gstPipeWireSpecs(target, opts) {
 		joined := strings.Join(spec.Args, " ")
-		if strings.Contains(joined, "pipewiresrc path=42 do-timestamp=true keepalive-time=500 ! video/x-raw,width=") {
+		if strings.Contains(joined, "pipewiresrc path=42 do-timestamp=true keepalive-time=17 ! video/x-raw,width=") {
 			t.Errorf("spec %s pins source caps on pipewiresrc path: %s", spec.Name, joined)
 		}
 	}
@@ -71,9 +71,13 @@ func TestGstPipeWireSizedSpecsNormalizeWithDropOnlyVideorate(t *testing.T) {
 
 func TestGstPipeWireSpecsUseKeepalive(t *testing.T) {
 	// A static virtual monitor produces no damage frames; keepalive-time
-	// keeps the encoder producing output so the start timeout does not trip.
+	// of one frame period keeps the encoder producing output, which flushes
+	// the tablet decoder's held pictures after the pointer stops.
 	target, opts := pipeWireTestOpts()
-	want := fmt.Sprintf("keepalive-time=%d", pipewireKeepaliveMs)
+	if got := pipewireKeepaliveMs(60); got != 17 {
+		t.Errorf("pipewireKeepaliveMs(60) = %d, want 17", got)
+	}
+	want := fmt.Sprintf("keepalive-time=%d", pipewireKeepaliveMs(60))
 	for _, spec := range gstPipeWireSpecs(target, opts) {
 		joined := strings.Join(spec.Args, " ")
 		if !strings.Contains(joined, "pipewiresrc path=42 do-timestamp=true "+want) {

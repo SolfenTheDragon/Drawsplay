@@ -51,8 +51,19 @@ import (
 
 // pipewireKeepaliveMs makes pipewiresrc re-send the last frame when the
 // compositor emits nothing (no screen damage), so downstream encoders keep
-// producing output on a static desktop.
-const pipewireKeepaliveMs = 500
+// producing output on a static desktop. It is one frame period: Mutter streams
+// are damage-driven, and the tablet's decoder holds the last couple of
+// pictures until later input arrives, so a slower keepalive left the final
+// pointer/pen movements stuck in the decoder and released them only once the
+// keepalive came, which looked like the pointer continuing to move after the
+// user stopped. Re-sent frames of a static picture encode to almost nothing
+// (VBR), as the X11 path's constant-rate capture already does.
+func pipewireKeepaliveMs(fps int) int {
+	if fps <= 0 {
+		return 17
+	}
+	return max(1, (1000+fps-1)/fps)
+}
 
 // pipewireMinBuffers/pipewireMaxBuffers cap how many buffers pipewiresrc
 // negotiates with the PipeWire graph for this stream only (the "quantum"
@@ -357,7 +368,7 @@ func gstPipeWireSpecs(target captureTarget, opts videoOptions) []pipelineSpec {
 	// PipeWire client (including this machine's audio graph).
 	src := fmt.Sprintf(
 		"pipewiresrc path=%d do-timestamp=true keepalive-time=%d min-buffers=%d max-buffers=%d stream-properties=props,node.latency=1/%d",
-		target.Node, pipewireKeepaliveMs, pipewireMinBuffers, pipewireMaxBuffers, pipewireFPS)
+		target.Node, pipewireKeepaliveMs(pipewireFPS), pipewireMinBuffers, pipewireMaxBuffers, pipewireFPS)
 	// The stream takes the size its consumer asks for, and resizes the
 	// display to it; ask for the display's, and nothing else.
 	sourceSize := ""
