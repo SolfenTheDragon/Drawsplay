@@ -615,14 +615,14 @@ func withFakeX11Ext(t *testing.T, f *fakeXrandr) *fakeX11Session {
 	s := &fakeX11Session{xrandr: f}
 	prevRun, prevMap := xrandrRun, mapX11Tablet
 	prevHotplug, prevPoll, prevRounds := x11HotplugWait, x11SettlePoll, x11SettleRounds
-	prevWatch, prevGrace := x11WatchInterval, x11ReleaseGrace
+	prevWatch, prevGrace, prevRetry := x11WatchInterval, x11ReleaseGrace, x11SwitchOffRetry
 	xrandrRun = f.run
 	mapX11Tablet = func(output string) bool {
 		s.mapped = append(s.mapped, output)
 		return true
 	}
 	x11HotplugWait, x11SettlePoll, x11SettleRounds = 0, 0, 3
-	x11WatchInterval, x11ReleaseGrace = time.Hour, time.Hour
+	x11WatchInterval, x11ReleaseGrace, x11SwitchOffRetry = time.Hour, time.Hour, time.Millisecond
 	t.Setenv("DISPLAY", ":0")
 	t.Setenv(x11OutputEnv, "")
 	resetX11Ext()
@@ -634,7 +634,7 @@ func withFakeX11Ext(t *testing.T, f *fakeXrandr) *fakeX11Session {
 		resetX11Ext()
 		xrandrRun, mapX11Tablet = prevRun, prevMap
 		x11HotplugWait, x11SettlePoll, x11SettleRounds = prevHotplug, prevPoll, prevRounds
-		x11WatchInterval, x11ReleaseGrace = prevWatch, prevGrace
+		x11WatchInterval, x11ReleaseGrace, x11SwitchOffRetry = prevWatch, prevGrace, prevRetry
 	})
 	return s
 }
@@ -646,6 +646,7 @@ func resetX11Ext() {
 	x11Ext.gen, x11Ext.claimed, x11Ext.exiting = 0, false, false
 	x11Ext.enabled = map[string]x11EnabledOutput{}
 	x11Ext.placement = map[string]*x11Placement{}
+	x11Ext.released = map[string]*x11ReleasedOutput{}
 }
 
 func newTestX11Display(t *testing.T, width, height int) *x11ExtendedDisplay {
@@ -809,10 +810,10 @@ func TestX11ExtendedDisplayGivesUpWhenTheLayoutDoesNotStick(t *testing.T) {
 		t.Fatalf("tablet mapped to %v after a failure", s.mapped)
 	}
 	x11Ext.mu.Lock()
-	claimed, timer := x11Ext.claimed, x11Ext.timer
+	claimed := x11Ext.claimed
 	x11Ext.mu.Unlock()
-	if claimed || timer != nil {
-		t.Fatalf("failed session left claimed=%v timer=%v", claimed, timer != nil)
+	if claimed {
+		t.Fatalf("failed session left the output claimed")
 	}
 }
 
@@ -1024,7 +1025,7 @@ func TestX11ExtendedDisplayGivesUpSwitchingOffUntilExit(t *testing.T) {
 	s.xrandr.update(func(f *fakeXrandr) { f.failSwitchOffs = x11SwitchOffAttempts })
 	d.Close()
 	waitUntil(t, "the switch-off attempts", func() bool { return switchOffAttempts(s.xrandr) == x11SwitchOffAttempts })
-	time.Sleep(20 * x11ReleaseGrace)
+	time.Sleep(20 * time.Millisecond)
 	x11Ext.mu.Lock()
 	timer := x11Ext.timer
 	x11Ext.mu.Unlock()
@@ -1364,4 +1365,21 @@ func TestX11GrabVBVHoldsAKeyframe(t *testing.T) {
 	if got := x11VBVKbits("400k"); got != 100 {
 		t.Errorf("x11VBVKbits(400k) = %d, want the 100 kbit floor", got)
 	}
+}
+
+func TestX11ExtendedDisplaySwitchesOffAnOutputThatComesBackAfterTheSession(t *testing.T) {
+	s := withFakeX11Ext(t, newFakeLaptopWithVKMS())
+	x11ReleaseGrace = 5 * time.Millisecond
+	d := newTestX11Display(t, 1920, 1080)
+	d.Close()
+	waitUntil(t, "the switch-off", func() bool { return len(x11Enabled()) == 0 })
+	if n := switchOffAttempts(s.xrandr); n != 1 {
+		t.Fatalf("switch-off attempts = %d, want 1", n)
+	}
+	// The window manager switches the connected output back on.
+	s.xrandr.update(func(f *fakeXrandr) {
+		o := f.outputLocked("Virtual-1-1")
+		o.mode = "1920x1080"
+	})
+	waitUntil(t, "the second switch-off", func() bool { return switchOffAttempts(s.xrandr) >= 2 })
 }

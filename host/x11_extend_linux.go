@@ -82,10 +82,16 @@ var (
 	x11WatchInterval = 2 * time.Second
 	// x11ReleaseGrace keeps the output on across a quick reconnect.
 	x11ReleaseGrace = 5 * time.Second
-	// x11SwitchOffAttempts bounds how often an unclaimed output is switched
-	// off: once after x11ReleaseGrace, then again after each failure.
-	x11SwitchOffAttempts = 3
+	// x11SwitchOffAttempts bounds the passes made over an unclaimed output:
+	// the first after x11ReleaseGrace, then one every x11SwitchOffRetry
+	// until it is confirmed off, which also catches a failed switch-off and
+	// a window manager that switches the output back on.
+	x11SwitchOffAttempts = 30
 )
+
+// x11SwitchOffRetry is the delay between passes after the first. A variable
+// so tests need not wait.
+var x11SwitchOffRetry = time.Second
 
 var errNoX11VirtualOutput = errors.New("no virtual RandR output found; load the vkms kernel module (sudo modprobe vkms) to extend the desktop onto the tablet")
 
@@ -693,14 +699,14 @@ func configureX11Extended(display, name string, w, h, nativeW, nativeH int) (x11
 // off, it switches one back on rather than leave the screen without a
 // visible display, and it hands the primary role on. It returns where the
 // output was, so the next session can put it back there.
-func switchOffX11Output(display, name string) (*x11Placement, error) {
+func switchOffX11Output(display, name string) (placement *x11Placement, switched bool, err error) {
 	st, err := queryXrandr(display)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	o, ok := st.output(name)
 	if !ok || !o.Active {
-		return nil, nil
+		return nil, false, nil
 	}
 	var others []xrandrOutput
 	var rects []displayRect
@@ -711,7 +717,6 @@ func switchOffX11Output(display, name string) (*x11Placement, error) {
 		}
 	}
 	args := []string{"--output", name, "--off"}
-	var placement *x11Placement
 	if len(others) > 0 {
 		b := boundsOf(rects)
 		if p, ok := placementOf(o.Rect, b); ok {
@@ -736,9 +741,9 @@ func switchOffX11Output(display, name string) (*x11Placement, error) {
 		}
 	}
 	if _, err := xrandrRun(display, args...); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return placement, nil
+	return placement, true, nil
 }
 
 // x11FallbackOutput picks the display to switch back on when the extended
@@ -778,9 +783,11 @@ var x11Ext = struct {
 	// placement remembers, per display/output, where the user had the
 	// extended display when it was last switched off (process lifetime).
 	placement map[string]*x11Placement
+	released  map[string]*x11ReleasedOutput
 	exiting   bool
 }{
 	enabled:   map[string]x11EnabledOutput{},
+	released:  map[string]*x11ReleasedOutput{},
 	placement: map[string]*x11Placement{},
 }
 
@@ -802,28 +809,40 @@ func releaseX11Locked(gen uint64) {
 }
 
 // scheduleX11SwitchOffLocked switches the enabled outputs off after
-// x11ReleaseGrace, and retries the ones that could not be, up to attempts
-// times in all.
+// x11ReleaseGrace, then keeps checking every x11SwitchOffRetry until each is
+// confirmed off, up to attempts passes in all.
 func scheduleX11SwitchOffLocked(gen uint64, attempts int) {
+	scheduleX11SwitchOffAfterLocked(gen, attempts, x11ReleaseGrace)
+}
+
+func scheduleX11SwitchOffAfterLocked(gen uint64, attempts int, delay time.Duration) {
 	stopX11ReleaseTimerLocked()
-	if x11Ext.exiting || len(x11Ext.enabled) == 0 || attempts <= 0 {
+	if x11Ext.exiting || len(x11Ext.enabled)+len(x11Ext.released) == 0 {
 		return
 	}
-	x11Ext.timer = time.AfterFunc(x11ReleaseGrace, func() {
+	if attempts <= 0 {
+		log.Printf("X11 extended display: giving up switching the output off; it is switched off when the host exits")
+		return
+	}
+	x11Ext.timer = time.AfterFunc(delay, func() {
 		x11Ext.mu.Lock()
 		defer x11Ext.mu.Unlock()
 		if gen != x11Ext.gen || x11Ext.claimed || x11Ext.exiting {
 			return
 		}
 		x11Ext.timer = nil
+		verifyX11ReleasedLocked()
 		switchOffX11OutputsLocked()
-		scheduleX11SwitchOffLocked(gen, attempts-1)
+		scheduleX11SwitchOffAfterLocked(gen, attempts-1, x11SwitchOffRetry)
 	})
 }
 
+// switchOffX11OutputsLocked makes one pass over the enabled outputs: it
+// switches off the ones that are on, and forgets the ones it finds off, so
+// an output stays tracked until a later pass confirms it stayed off.
 func switchOffX11OutputsLocked() {
 	for key, e := range x11Ext.enabled {
-		placement, err := switchOffX11Output(e.display, e.output)
+		placement, _, err := switchOffX11Output(e.display, e.output)
 		if err != nil {
 			log.Printf("X11 extended display: could not switch %s off: %v", e.output, err)
 			continue
@@ -832,7 +851,43 @@ func switchOffX11OutputsLocked() {
 			x11Ext.placement[key] = placement
 		}
 		delete(x11Ext.enabled, key)
+		x11Ext.released[key] = &x11ReleasedOutput{x11EnabledOutput: e}
 		log.Printf("X11 extended display: switched %s off", e.output)
+	}
+}
+
+// x11VerifyPasses is how many consecutive passes must find a released output
+// still off before it is no longer watched.
+const x11VerifyPasses = 3
+
+// x11ReleasedOutput is an output the host switched off and still watches,
+// since a window manager can switch a connected output back on by itself.
+type x11ReleasedOutput struct {
+	x11EnabledOutput
+	clean int
+}
+
+// verifyX11ReleasedLocked switches off again the released outputs that are
+// on, and stops watching the ones found off x11VerifyPasses times in a row.
+func verifyX11ReleasedLocked() {
+	for key, r := range x11Ext.released {
+		placement, switched, err := switchOffX11Output(r.display, r.output)
+		switch {
+		case err != nil:
+			r.clean = 0
+			log.Printf("X11 extended display: could not check that %s is off: %v", r.output, err)
+		case switched:
+			r.clean = 0
+			if placement != nil {
+				x11Ext.placement[key] = placement
+			}
+			log.Printf("X11 extended display: %s came back on after the session ended; switched it off again", r.output)
+		default:
+			r.clean++
+			if r.clean >= x11VerifyPasses {
+				delete(x11Ext.released, key)
+			}
+		}
 	}
 }
 
@@ -844,6 +899,7 @@ func releaseVirtualDisplaysOnExit() {
 	x11Ext.mu.Lock()
 	x11Ext.exiting = true
 	stopX11ReleaseTimerLocked()
+	verifyX11ReleasedLocked()
 	switchOffX11OutputsLocked()
 	x11Ext.mu.Unlock()
 	releaseMutterOnExit()
@@ -885,6 +941,7 @@ func newX11ExtendedDisplay(opts videoOptions, display string) (*x11ExtendedDispl
 	gen := x11Ext.gen
 	x11Ext.claimed = true
 	stopX11ReleaseTimerLocked()
+	clear(x11Ext.released)
 
 	res, err := configureX11Extended(display, strings.TrimSpace(os.Getenv(x11OutputEnv)), w, h, ident.NativeWidth, ident.NativeHeight)
 	if res.output != "" && (err == nil || res.changed) {
@@ -895,7 +952,7 @@ func newX11ExtendedDisplay(opts videoOptions, display string) (*x11ExtendedDispl
 		// session mirrors the X screen instead, which should not include a
 		// display nobody sees.
 		switchOffX11OutputsLocked()
-		releaseX11Locked(gen)
+		releaseX11Locked(gen) // keeps checking that it stays off
 		return nil, err
 	}
 	d := &x11ExtendedDisplay{
