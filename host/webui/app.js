@@ -396,14 +396,12 @@ async function refreshStatus() {
     const inputLockToggle = $("input-lock-toggle");
     if (!inputLockToggle.disabled) inputLockToggle.checked = !!st.inputLocked;
     autostartOn = !!st.autostart;
-    $("autostart-state").textContent = st.autostartError
+    const serviceToggle = $("autostart-toggle");
+    serviceToggle.checked = autostartOn;
+    serviceToggle.disabled = !!st.autostartError || serviceBusy;
+    serviceToggle.title = st.autostartError
       ? `Unavailable: ${st.autostartError}`
-      : (autostartOn ? "Enabled" : "Disabled");
-    $("autostart-implementation").textContent =
-      st.autostartImplementation || "Platform login service";
-    const serviceButton = $("autostart-toggle");
-    serviceButton.disabled = !!st.autostartError || serviceBusy;
-    serviceButton.textContent = autostartOn ? "Disable service" : "Enable service";
+      : (st.autostartImplementation || "Platform login service");
     const activeDevice = String(st.activeInputDevice || "").trim();
     if (activeDevice !== currentCalibrationDevice) {
       currentCalibrationDevice = activeDevice;
@@ -751,12 +749,11 @@ if (themeToggle) {
   });
 }
 
-$("autostart-toggle").addEventListener("click", async () => {
-  const want = !autostartOn;
+$("autostart-toggle").addEventListener("change", async () => {
+  const want = $("autostart-toggle").checked;
   const button = $("autostart-toggle");
   serviceBusy = true;
   button.disabled = true;
-  button.textContent = want ? "Enabling…" : "Disabling…";
   try {
     await api("/api/autostart", {
       method: "POST",

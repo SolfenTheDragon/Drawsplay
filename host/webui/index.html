@@ -33,7 +33,13 @@
     </div>
     <div id="connection-info" class="hint"></div>
     <div id="warnings" class="hint" hidden></div>
-    <div id="metrics-summary" class="hint"></div>
+    <div class="metrics-row">
+      <div id="metrics-summary" class="hint"></div>
+      <label class="autostart-check" title="Start the host automatically at login">
+        <input id="autostart-toggle" type="checkbox" disabled>
+        <span>Run at login</span>
+      </label>
+    </div>
   </div>
 
   <div class="column column-left">
@@ -282,18 +288,6 @@
     </div>
 
     <div class="action-stack">
-    <div class="panel dashboard-card autostart-panel">
-      <div class="eyebrow">STARTUP</div>
-      <h2>Login service</h2>
-      <div class="toggle-row">
-        <div>
-          <div class="hint" id="autostart-state">…</div>
-          <div class="hint" id="autostart-implementation">Detecting platform and session…</div>
-        </div>
-        <button id="autostart-toggle" type="button" disabled>Enable service</button>
-      </div>
-    </div>
-
     <div class="panel dashboard-card">
       <div class="eyebrow">LIVE SESSION</div>
       <h2>Session controls</h2>
