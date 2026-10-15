@@ -100,6 +100,22 @@ func TestSettingsStoreUpdateResolutionPersists(t *testing.T) {
 	}
 }
 
+func TestUpdateResolutionNotifiesTablet(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	const id = 987654
+	var gotW, gotH int
+	subscribeModeChanges(id, func(w, h, fps int) { gotW, gotH = w, h })
+	defer unsubscribeModeChanges(id)
+
+	st := newSettingsStore(defaultSettings())
+	if err := st.updateResolution(2560, 1440); err != nil {
+		t.Fatalf("updateResolution: %v", err)
+	}
+	if gotW != 2560 || gotH != 1440 {
+		t.Fatalf("tablet notified of %dx%d, want 2560x1440", gotW, gotH)
+	}
+}
+
 func TestSettingsRequirePreferredSerial(t *testing.T) {
 	s := defaultSettings()
 	s.RequirePreferredADB = true
