@@ -72,7 +72,9 @@ var runBackgroundPreflight = func(s settings) { go runDependencyPreflight(s) }
 // runDependencyPreflight records degraded-mode warnings without preventing
 // input-only operation when optional runtime dependencies are unavailable.
 func runDependencyPreflight(s settings) {
-	if err := ensureADBAvailable(s.ADB); err != nil {
+	if !s.ADBTunnelEnabled {
+		setOperationalWarning("adb-preflight", "")
+	} else if err := ensureADBAvailable(s.ADB); err != nil {
 		setOperationalWarning("adb-preflight", fmt.Sprintf("ADB is unreachable: %v", err))
 	} else {
 		setOperationalWarning("adb-preflight", "")

@@ -31,6 +31,7 @@
       </div>
       <div class="status-meta">USB / LAN stream monitor</div>
     </div>
+    <div id="connection-info" class="hint"></div>
     <div id="warnings" class="hint" hidden></div>
     <div id="metrics-summary" class="hint"></div>
   </div>
@@ -108,11 +109,6 @@
         <div class="hint">Primary stream bitrate is managed automatically by adaptive bitrate.</div>
         <label for="ffmpeg">ffmpeg path</label>
         <input id="ffmpeg" type="text" required>
-        <label for="adb">adb path</label>
-        <input id="adb" type="text" required>
-        <label for="adb-serial">Preferred ADB device serial (optional)</label>
-        <input id="adb-serial" type="text" placeholder="R58M…">
-        <div class="hint">When set, reverse tunnels are created only for this device.</div>
         <div class="input-options" data-feature-wifi hidden>
           <strong>Optional Wi-Fi transport</strong>
           <div class="hint">Adds LAN discovery/connectivity while keeping USB behavior unchanged when disabled.</div>
@@ -146,6 +142,42 @@
             <span>Require TLS on Wi-Fi</span>
             <label class="switch">
               <input id="wifi-tls" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="input-options">
+          <strong>ADB tunnel (legacy)</strong>
+          <div class="hint">Connects through <code>adb reverse</code>. Requires Developer options and USB debugging on the tablet. Off by default; USB accessory transport below needs neither.</div>
+          <div class="toggle-row">
+            <span>Enable ADB tunnel</span>
+            <label class="switch">
+              <input id="adb-tunnel-enabled" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div id="adb-options" hidden>
+            <label for="adb">adb path</label>
+            <input id="adb" type="text">
+            <label for="adb-serial">Preferred ADB device serial (optional)</label>
+            <input id="adb-serial" type="text" placeholder="R58M…">
+            <div class="hint">When set, reverse tunnels are created only for this device.</div>
+            <div class="toggle-row">
+              <span>Require preferred ADB serial</span>
+              <label class="switch">
+                <input id="require-adb-serial" type="checkbox">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="input-options">
+          <strong>USB accessory transport (no ADB)</strong>
+          <div class="hint">Connects the tablet over USB using Android Open Accessory, so Developer options and USB debugging are not needed. On by default; changes apply on the next host launch. On Linux the user needs access to the tablet's USB node (see README); on Windows a WinUSB driver must be bound to the tablet.</div>
+          <div class="toggle-row">
+            <span>Enable USB accessory transport</span>
+            <label class="switch">
+              <input id="aoa-enabled" type="checkbox">
               <span class="slider"></span>
             </label>
           </div>
@@ -196,13 +228,6 @@
             </label>
           </div>
           <div class="hint">The local cursor is smoother on a static Windows desktop. Disable it to embed the cursor in the captured video instead.</div>
-          <div class="toggle-row">
-            <span>Require preferred ADB serial</span>
-            <label class="switch">
-              <input id="require-adb-serial" type="checkbox">
-              <span class="slider"></span>
-            </label>
-          </div>
           <div class="toggle-row">
             <span>Allow keyboard passthrough</span>
             <label class="switch">

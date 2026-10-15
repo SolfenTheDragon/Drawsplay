@@ -137,9 +137,12 @@ func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"video":                   currentVideoStatus(),
 		"clientVideoStats":        currentClientVideoStats(),
 		"adb":                     currentADBStatus(),
+		"aoa":                     currentAOAStatus(),
+		"adbTunnelEnabled":        api.store.get().ADBTunnelEnabled,
+		"aoaEnabled":              api.store.get().AOAEnabled,
 		"warnings":                currentOperationalWarnings(),
 		"metrics":                 currentOperationalMetrics(),
-		"setup":                   currentSetupChecklist(),
+		"setup":                   currentSetupChecklist(api.store.get()),
 		"autostart":               enabled,
 		"autostartImplementation": autostartImplementation(),
 		"hostOS":                  runtime.GOOS,
@@ -155,7 +158,7 @@ func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (api webUIAPI) handleSetupCheck(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, currentSetupChecklist())
+	writeJSON(w, currentSetupChecklist(api.store.get()))
 }
 
 func (api webUIAPI) handleSetupRemediate(w http.ResponseWriter, r *http.Request) {
@@ -169,7 +172,9 @@ func (api webUIAPI) handleSetupRemediate(w http.ResponseWriter, r *http.Request)
 	cfg := api.store.get()
 	switch strings.TrimSpace(req.Action) {
 	case "", "restart-adb":
-		if err := ensureADBAvailable(cfg.ADB); err != nil {
+		if !cfg.ADBTunnelEnabled {
+			// Nothing to restart without the adb tunnel.
+		} else if err := ensureADBAvailable(cfg.ADB); err != nil {
 			httpError(w, http.StatusUnprocessableEntity, "adb restart failed: %v", err)
 			return
 		}
@@ -186,7 +191,7 @@ func (api webUIAPI) handleSetupRemediate(w http.ResponseWriter, r *http.Request)
 			"ok":             true,
 			"action":         "restart-adb",
 			"videoRestarted": videoRestarted,
-			"setup":          currentSetupChecklist(),
+			"setup":          currentSetupChecklist(api.store.get()),
 		})
 	default:
 		httpError(w, http.StatusUnprocessableEntity, "unknown setup action: %s", req.Action)
@@ -212,9 +217,10 @@ func (api webUIAPI) handleDiagnostics(w http.ResponseWriter, _ *http.Request) {
 		"clientVideoStats":  currentClientVideoStats(),
 		"activeClient":      activeClientIdentity(),
 		"adb":               currentADBStatus(),
+		"aoa":               currentAOAStatus(),
 		"warnings":          currentOperationalWarnings(),
 		"metrics":           currentOperationalMetrics(),
-		"setup":             currentSetupChecklist(),
+		"setup":             currentSetupChecklist(api.store.get()),
 		"activeInputDevice": activeInputDevice(),
 		"inputLocked":       sessionInputLocked(),
 		"logCursor":         next,

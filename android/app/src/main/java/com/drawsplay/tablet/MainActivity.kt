@@ -1,5 +1,6 @@
 ﻿package com.drawsplay.tablet
 
+import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -25,6 +26,7 @@ import androidx.security.crypto.MasterKey
 import com.drawsplay.tablet.input.InputChannel
 import com.drawsplay.tablet.input.InputPadView
 import com.drawsplay.tablet.input.HostCursorView
+import com.drawsplay.tablet.transport.AccessoryTransport
 import com.drawsplay.tablet.transport.HostEndpointSelector
 import com.drawsplay.tablet.transport.WiFiDiscoveryManager
 import com.drawsplay.tablet.video.VideoChannel
@@ -183,6 +185,8 @@ class MainActivity : AppCompatActivity() {
 
         inputPad.onInputBatch = { events -> inputChannel.send(events) }
 
+        AccessoryTransport.start(this) { attached -> endpointSelector.updateAccessoryAttached(attached) }
+
         videoSurface.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
                 pendingForegroundSurface = holder.surface
@@ -211,7 +215,14 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         updateWiFiDiscoveryState()
+        AccessoryTransport.refresh()
         inputChannel.start()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        AccessoryTransport.refresh()
     }
 
     override fun onStop() {
@@ -223,6 +234,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        AccessoryTransport.stop()
         releaseBackgroundVideoSink()
         videoChannel.stop()
         inputChannel.shutdown()

@@ -41,22 +41,28 @@ type setupChecklist struct {
 	Items       []setupCheckItem `json:"items"`
 }
 
-func currentSetupChecklist() setupChecklist {
+func currentSetupChecklist(cfg settings) setupChecklist {
 	hostOS := runtime.GOOS
-	adb := currentADBStatus()
 	video := currentVideoStatus()
 	activeDevice := activeInputDevice()
 	warnings := currentOperationalWarnings()
 
-	items := []setupCheckItem{
-		{
+	var items []setupCheckItem
+	if cfg.ADBTunnelEnabled {
+		adb := currentADBStatus()
+		items = append(items, setupCheckItem{
 			Key:     "adb-ready",
 			Label:   "ADB is connected",
 			OK:      adb.Ready,
 			Detail:  detailOrDefault(adb.Error, "Ready"),
 			Action:  adbSetupAction(hostOS, adb.Error),
 			Command: adbSetupCommand(hostOS),
-		},
+		})
+	}
+	if cfg.AOAEnabled {
+		items = append(items, aoaSetupItem(hostOS, currentAOAStatus()))
+	}
+	items = append(items, []setupCheckItem{
 		{
 			Key:     "ffmpeg-ready",
 			Label:   "Video encoder available",
@@ -79,7 +85,7 @@ func currentSetupChecklist() setupChecklist {
 			Detail: detailOrDefault(video.Encoder, "Waiting for stream"),
 			Action: "If this stays idle, lower resolution/FPS or reconnect the session.",
 		},
-	}
+	}...)
 	if hostOS == "linux" && video.Streaming {
 		detail := "Extended desktop"
 		if video.DisplayMode == "mirror" {
@@ -173,6 +179,32 @@ func firstWarningDetail(warnings []string, needles []string, fallback string) st
 		}
 	}
 	return fallback
+}
+
+func aoaSetupItem(hostOS string, st aoaStatusInfo) setupCheckItem {
+	item := setupCheckItem{Key: "aoa-ready", Label: "USB accessory link"}
+	switch st.State {
+	case "linked":
+		item.OK = true
+		item.Detail = "Tablet linked over USB"
+	case "waiting-app":
+		item.Detail = detailOrDefault(st.Detail, "Waiting for the tablet app")
+		item.Action = "Accept the USB prompt on the tablet and keep DrawSplay open."
+	case "switching":
+		item.Detail = "Switching the tablet to accessory mode"
+	case "error":
+		item.Detail = st.Detail
+		if hostOS == "linux" {
+			item.Action = "Install the udev rule so your user can open the tablet, then reconnect it."
+			item.Command = "sudo cp packaging/linux/70-drawsplay-aoa.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger"
+		} else {
+			item.Action = "Bind a WinUSB driver to the tablet (see packaging/windows/README.md), then reconnect it."
+		}
+	default:
+		item.Detail = "No tablet detected"
+		item.Action = "Connect the tablet with a USB data cable and unlock it."
+	}
+	return item
 }
 
 func adbSetupAction(hostOS, detail string) string {

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Must match the identification strings in host/aoa_protocol.go. -->
+    <usb-accessory manufacturer="DrawSplay" model="Tablet" />
+</resources>

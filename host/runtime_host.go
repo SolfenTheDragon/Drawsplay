@@ -21,6 +21,8 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	// Settings web UI (localhost only; best-effort like the video channel).
 	go runWebUI(ctx, store, stop)
 	startSessionLockMonitor(ctx)
+	go releaseStaleVirtualDisplays()
+	startDisplayWatchdog(ctx)
 
 	// Video channel (best-effort: logs and disables itself if ffmpeg or the
 	// port is unavailable; input continues to work regardless).
@@ -30,6 +32,9 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	// behavior and performance stay unchanged.
 	go startWiFiTransport(ctx, store)
 	go startUSBLinkTransport(ctx, store)
+
+	// Optional ADB-free USB transport over Android Open Accessory.
+	startAOATransport(ctx, store)
 
 	// Input channel (blocking; owns process lifetime).
 	addr := fmt.Sprintf("127.0.0.1:%d", inputPort)
@@ -42,7 +47,7 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	}
 	defer ln.Close()
 	log.Printf("Input listener on %s", addr)
-	log.Printf("Waiting for client (USB via adb reverse)")
+	log.Printf("Waiting for client (USB accessory or adb reverse)")
 
 	go func() {
 		<-ctx.Done()

@@ -344,6 +344,9 @@ async function loadSettings() {
     ? "configured (enter new token to rotate)"
     : "shared token";
   $("wifi-tls").checked = s.wifiTLS !== false;
+  $("aoa-enabled").checked = !!s.aoaEnabled;
+  $("adb-tunnel-enabled").checked = !!s.adbTunnelEnabled;
+  updateADBVisibility();
   $("usb-link-enabled").checked = !!s.usbLinkEnabled;
   $("usb-link-bind-address").value = s.usbLinkBindAddress || "0.0.0.0";
   $("usb-link-input-port").value = s.usbLinkInputPort || 37193;
@@ -398,6 +401,7 @@ async function refreshStatus() {
     if (setupPrompt) lines.push(setupPrompt);
     $("warnings").hidden = warnings.length === 0;
     $("warnings").textContent = lines.join("\n");
+    renderConnectionInfo(st);
     renderMetrics(st.metrics || {}, v, st.clientVideoStats || null);
     renderSetupChecklist(st.setup || {});
     const inputLockToggle = $("input-lock-toggle");
@@ -420,6 +424,7 @@ async function refreshStatus() {
     $("dot").className = "dot";
     $("status").textContent = "Host unreachable";
     $("warnings").hidden = true;
+    $("connection-info").textContent = "";
     $("metrics-summary").textContent = "";
     $("setup-checklist").textContent = "Host unreachable";
   }
@@ -452,6 +457,34 @@ function showMsg(text, ok) {
   const el = $("msg");
   el.textContent = text;
   el.className = ok ? "ok" : "err";
+}
+
+const AOA_STATE_LABELS = {
+  searching: "looking for a tablet on USB",
+  switching: "switching the tablet to accessory mode",
+  "waiting-app": "tablet found, waiting for the DrawSplay app to open",
+  linked: "linked",
+  error: "error",
+};
+
+// Shows only the connection details for transports that are turned on.
+function renderConnectionInfo(st) {
+  const lines = [];
+  if (st.aoaEnabled) {
+    const aoa = st.aoa || {};
+    const label = AOA_STATE_LABELS[aoa.state] || aoa.state || "unknown";
+    lines.push(`USB accessory: ${label}${aoa.detail ? ` (${aoa.detail})` : ""}`);
+  }
+  if (st.adbTunnelEnabled) {
+    const adb = st.adb || {};
+    const serials = Array.isArray(adb.availableSerials) ? adb.availableSerials : [];
+    const detail = adb.error
+      ? `error: ${adb.error}`
+      : (adb.ready ? `${serials.length} device(s) attached` : "not ready");
+    lines.push(`ADB tunnel: ${detail}${adb.preferredSerial ? `, preferred ${adb.preferredSerial}` : ""}`);
+  }
+  if (!lines.length) lines.push("No USB transport is enabled. Turn on USB accessory or the ADB tunnel in settings.");
+  $("connection-info").textContent = lines.join("\n");
 }
 
 function renderSetupChecklist(setup) {
@@ -564,6 +597,8 @@ $("form").addEventListener("submit", async (ev) => {
       temporalLayering: $("temporal-layering").checked,
       allowToolAutoInstall: $("allow-tool-auto-install").checked,
       noDriverInstall: $("no-driver-install").checked,
+      aoaEnabled: $("aoa-enabled").checked,
+      adbTunnelEnabled: $("adb-tunnel-enabled").checked,
       usbLinkEnabled: $("usb-link-enabled").checked,
       usbLinkBindAddress: $("usb-link-bind-address").value.trim(),
       usbLinkInputPort: parseInt($("usb-link-input-port").value, 10),
@@ -646,6 +681,15 @@ $("pause-video-btn").addEventListener("click", async () => {
     btn.disabled = false;
   }
 });
+
+function updateADBVisibility() {
+  const on = $("adb-tunnel-enabled").checked;
+  $("adb-options").hidden = !on;
+  $("run-setup-remediation-btn").textContent = on
+    ? "Restart ADB & re-check setup"
+    : "Re-check setup";
+}
+$("adb-tunnel-enabled").addEventListener("change", updateADBVisibility);
 
 $("run-setup-remediation-btn").addEventListener("click", async () => {
   const btn = $("run-setup-remediation-btn");
