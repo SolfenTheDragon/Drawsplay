@@ -192,7 +192,7 @@ Connection behavior is automatic:
 
 No manual IP entry or pairing is required.
 
-**Without Developer options (USB accessory mode, experimental):** enable *USB accessory transport (no ADB)* in the host settings (or start the host with `-aoa-enabled`). On Linux first copy `packaging/linux/70-drawsplay-aoa.rules` into `/etc/udev/rules.d/` and reload udev; on Windows bind WinUSB to the tablet as described in `packaging/windows/README.md`. Plug in the tablet, accept the USB prompt on the tablet once, and DrawSplay opens automatically. Switching the tablet into accessory mode ends any adb session on it.
+**USB accessory mode (default, no Developer options needed):** this is on by default (`aoaEnabled`; flag `-aoa-enabled`). The older adb tunnel is off by default; enable *ADB tunnel* in Advanced settings (or start the host with `-adb-tunnel`) if you want it, which also reveals the adb options. On Linux first copy `packaging/linux/70-drawsplay-aoa.rules` into `/etc/udev/rules.d/` and reload udev; on Windows bind WinUSB to the tablet as described in `packaging/windows/README.md`. Plug in the tablet, accept the USB prompt on the tablet once, and DrawSplay opens automatically. Switching the tablet into accessory mode ends any adb session on it.
 When Wi-Fi transport is enabled on the host, the tablet keeps the known-host trust from host policy sync so future launches can reconnect over Wi-Fi without asking for a new code.
 
 ---

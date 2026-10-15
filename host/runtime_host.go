@@ -47,7 +47,7 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	}
 	defer ln.Close()
 	log.Printf("Input listener on %s", addr)
-	log.Printf("Waiting for client (USB via adb reverse)")
+	log.Printf("Waiting for client (USB accessory or adb reverse)")
 
 	go func() {
 		<-ctx.Done()

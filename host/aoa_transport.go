@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 )
@@ -13,8 +14,8 @@ const (
 )
 
 // startAOATransport serves a tablet over Android Open Accessory when enabled.
-// It needs no ADB and no Developer options on the tablet. It is additive: the
-// adb-reverse path keeps working and shares the "usb" session ownership.
+// It needs no ADB and no Developer options on the tablet, and is the default
+// USB path. The optional adb-reverse path shares the "usb" session ownership.
 func startAOATransport(ctx context.Context, store *settingsStore) {
 	if !store.get().AOAEnabled {
 		return
@@ -72,6 +73,7 @@ func aoaPollOnce(ctx context.Context, scan aoaScanFunc, lastSwitch map[string]ti
 	cands, err := scan()
 	if err != nil {
 		throttledLog("aoa-scan", "AOA device scan failed: %v", err)
+		setAOAStatus("error", err.Error())
 		return false
 	}
 	live := map[string]bool{}
@@ -90,19 +92,26 @@ func aoaPollOnce(ctx context.Context, scan aoaScanFunc, lastSwitch map[string]ti
 		}
 		dev, err := c.Open()
 		if err != nil {
+			setAOAStatus("error", fmt.Sprintf("cannot open accessory device %04x:%04x: %v", c.VID, c.PID, err))
 			throttledLog("aoa-open", "AOA: cannot open accessory device %04x:%04x: %v", c.VID, c.PID, err)
 			continue
 		}
 		pipe, err := dev.OpenPipe()
 		if err != nil {
 			_ = dev.Close()
+			setAOAStatus("error", fmt.Sprintf("cannot open accessory pipe: %v", err))
 			throttledLog("aoa-pipe", "AOA: cannot open accessory pipe: %v", err)
 			continue
 		}
 		log.Printf("AOA: accessory %04x:%04x open, waiting for the tablet app", c.VID, c.PID)
+		setAOAStatus("waiting-app", "Accept the USB prompt on the tablet and open DrawSplay.")
 		link := newAOALink(pipe)
-		err = link.serve(ctx, onOpen)
+		err = link.serve(ctx, func(kind byte, conn *aoaConn) {
+			setAOAStatus("linked", "")
+			onOpen(kind, conn)
+		})
 		log.Printf("AOA: link closed: %v", err)
+		setAOAStatus("searching", "")
 		return true
 	}
 
@@ -116,15 +125,18 @@ func aoaPollOnce(ctx context.Context, scan aoaScanFunc, lastSwitch map[string]ti
 		lastSwitch[c.Key] = time.Now()
 		dev, err := c.Open()
 		if err != nil {
+			setAOAStatus("error", fmt.Sprintf("cannot open %04x:%04x: %v (see the udev rule in the README)", c.VID, c.PID, err))
 			throttledLog("aoa-open-"+c.Key, "AOA: cannot open %04x:%04x: %v", c.VID, c.PID, err)
 			continue
 		}
 		err = aoaSwitchToAccessory(dev)
 		_ = dev.Close()
 		if err != nil {
+			setAOAStatus("error", fmt.Sprintf("%04x:%04x did not switch to accessory mode: %v", c.VID, c.PID, err))
 			throttledLog("aoa-switch-"+c.Key, "AOA: %04x:%04x not switched to accessory mode: %v", c.VID, c.PID, err)
 			continue
 		}
+		setAOAStatus("switching", "")
 		log.Printf("AOA: switched %04x:%04x to accessory mode; waiting for re-enumeration", c.VID, c.PID)
 	}
 	return false

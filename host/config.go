@@ -65,6 +65,9 @@ type settings struct {
 	USBLinkAuthToken   string `json:"usbLinkAuthToken,omitempty"`
 	USBLinkMaxBitrate  string `json:"usbLinkMaxBitrate"`
 	AOAEnabled         bool   `json:"aoaEnabled"`
+	// ADBTunnelEnabled turns on the legacy adb-reverse transport. It needs
+	// Developer options and USB debugging on the tablet, so it is opt-in.
+	ADBTunnelEnabled bool `json:"adbTunnelEnabled"`
 }
 
 // defaultSettings mirrors the flag defaults in main.go.
@@ -102,7 +105,8 @@ func defaultSettings() settings {
 		USBLinkTLS:            true,
 		USBLinkAuthToken:      "",
 		USBLinkMaxBitrate:     "60M",
-		AOAEnabled:            false,
+		AOAEnabled:            true,
+		ADBTunnelEnabled:      false,
 	}
 }
 

@@ -74,8 +74,18 @@ echo "Created applications-menu entry at $DESKTOP_ENTRY"
 "$TARGET_BIN" -service install
 echo
 
+# ADB is only needed when the optional adb tunnel is enabled (env override or saved setting).
+ADB_MODE=0
+if [[ "${DRAWSPLAY_ADB_TUNNEL:-}" == "1" ]] ||
+  grep -qs '"adbTunnelEnabled": *true' "${XDG_CONFIG_HOME:-$HOME/.config}"/DrawSplay/*.json; then
+  ADB_MODE=1
+fi
+
 missing=()
-commands=(adb ffmpeg)
+commands=(ffmpeg)
+if [[ "$ADB_MODE" -eq 1 ]]; then
+  commands+=(adb)
+fi
 WAYLAND_CAPTURE=1
 if [[ "${XDG_SESSION_TYPE:-}" == "x11" ]] || {
   [[ -z "${XDG_SESSION_TYPE:-}" ]] &&
@@ -98,7 +108,11 @@ done
 if [[ ${#missing[@]} -gt 0 ]]; then
   echo "Missing Linux runtime tools: ${missing[*]}"
   echo "Install the missing tools with your package manager. On Ubuntu/Debian:"
-  echo "  sudo apt install android-sdk-platform-tools android-sdk-platform-tools-common ffmpeg"
+  if [[ "$ADB_MODE" -eq 1 ]]; then
+    echo "  sudo apt install android-sdk-platform-tools android-sdk-platform-tools-common ffmpeg"
+  else
+    echo "  sudo apt install ffmpeg"
+  fi
   if [[ "$WAYLAND_CAPTURE" -eq 1 ]]; then
     echo "  sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-pipewire"
   else
@@ -130,15 +144,20 @@ else
   echo
 fi
 
+if [[ "$ADB_MODE" -eq 1 ]]; then
+  USB_NOTE="uinput + adb USB access"
+else
+  USB_NOTE="uinput access"
+fi
 user_groups="$(groups "$USER" 2>/dev/null || true)"
 if [[ ! "$user_groups" =~ (^|[[:space:]])input($|[[:space:]]) ]] || [[ ! "$user_groups" =~ (^|[[:space:]])plugdev($|[[:space:]]) ]]; then
-  echo "User groups note: add your user to input and plugdev for uinput + adb USB access:"
+  echo "User groups note: add your user to input and plugdev for $USB_NOTE:"
   echo "  sudo usermod -aG input,plugdev $USER"
   echo "Then log out and back in."
   echo
 fi
 
-echo "Optional ADB-free USB accessory mode (no Developer options): install the udev rule, then enable it in the host settings:"
+echo "USB accessory mode (default, no Developer options) needs this udev rule so your user can open the tablet:"
 echo "  sudo cp packaging/linux/70-drawsplay-aoa.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger"
 echo
 

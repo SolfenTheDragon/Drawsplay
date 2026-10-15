@@ -345,6 +345,8 @@ async function loadSettings() {
     : "shared token";
   $("wifi-tls").checked = s.wifiTLS !== false;
   $("aoa-enabled").checked = !!s.aoaEnabled;
+  $("adb-tunnel-enabled").checked = !!s.adbTunnelEnabled;
+  updateADBVisibility();
   $("usb-link-enabled").checked = !!s.usbLinkEnabled;
   $("usb-link-bind-address").value = s.usbLinkBindAddress || "0.0.0.0";
   $("usb-link-input-port").value = s.usbLinkInputPort || 37193;
@@ -566,6 +568,7 @@ $("form").addEventListener("submit", async (ev) => {
       allowToolAutoInstall: $("allow-tool-auto-install").checked,
       noDriverInstall: $("no-driver-install").checked,
       aoaEnabled: $("aoa-enabled").checked,
+      adbTunnelEnabled: $("adb-tunnel-enabled").checked,
       usbLinkEnabled: $("usb-link-enabled").checked,
       usbLinkBindAddress: $("usb-link-bind-address").value.trim(),
       usbLinkInputPort: parseInt($("usb-link-input-port").value, 10),
@@ -648,6 +651,15 @@ $("pause-video-btn").addEventListener("click", async () => {
     btn.disabled = false;
   }
 });
+
+function updateADBVisibility() {
+  const on = $("adb-tunnel-enabled").checked;
+  $("adb-options").hidden = !on;
+  $("run-setup-remediation-btn").textContent = on
+    ? "Restart ADB & re-check setup"
+    : "Re-check setup";
+}
+$("adb-tunnel-enabled").addEventListener("change", updateADBVisibility);
 
 $("run-setup-remediation-btn").addEventListener("click", async () => {
   const btn = $("run-setup-remediation-btn");

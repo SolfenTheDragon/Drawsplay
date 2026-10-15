@@ -59,6 +59,19 @@ func maintainADBReverse(ctx context.Context, store *settingsStore, ports ...int)
 	launchedForSerial := map[string]bool{}
 	for {
 		cfg := store.get()
+		if !cfg.ADBTunnelEnabled {
+			if readySerials != "" || failures > 0 || failureLogged {
+				setOperationalWarning("adb-runtime", "")
+				readySerials, failures, failureLogged = "", 0, false
+				clear(launchedForSerial)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+			continue
+		}
 		serials, err := attachedDeviceSerials(ctx, cfg.ADB)
 		targets := []string(nil)
 		if err == nil {
