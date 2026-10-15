@@ -64,10 +64,8 @@ func TestSettingsAPIRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	var getBody struct {
-		WifiAuthToken              string `json:"wifiAuthToken"`
-		USBLinkAuthToken           string `json:"usbLinkAuthToken"`
-		WifiAuthTokenConfigured    bool   `json:"wifiAuthTokenConfigured"`
-		USBLinkAuthTokenConfigured bool   `json:"usbLinkAuthTokenConfigured"`
+		WifiAuthToken           string `json:"wifiAuthToken"`
+		WifiAuthTokenConfigured bool   `json:"wifiAuthTokenConfigured"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&getBody); err != nil {
 		t.Fatal(err)
@@ -76,8 +74,7 @@ func TestSettingsAPIRoundTrip(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("GET status = %d", res.StatusCode)
 	}
-	if getBody.WifiAuthToken != "" || getBody.USBLinkAuthToken != "" ||
-		getBody.WifiAuthTokenConfigured || getBody.USBLinkAuthTokenConfigured {
+	if getBody.WifiAuthToken != "" || getBody.WifiAuthTokenConfigured {
 		t.Fatalf("expected redacted default tokens, got %+v", getBody)
 	}
 
@@ -146,36 +143,11 @@ func TestSettingsAPIPreservesWiFiFieldsWhenFeatureDisabled(t *testing.T) {
 	}
 }
 
-func TestSettingsAPIUSBLinkPayload(t *testing.T) {
-	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
-	defer srv.Close()
-	token := testCSRFToken(t, srv.URL)
-
-	body := `{"adb":"adb","ffmpeg":"ffmpeg","fps":120,"bitrate":"24M","width":1920,"height":1080,"usbLinkEnabled":true,"usbLinkBindAddress":"192.168.7.1","usbLinkInputPort":40101,"usbLinkVideoPort":40102,"usbLinkTLS":true,"usbLinkAuthToken":"usb-link-secret","usbLinkMaxBitrate":"18M"}`
-	res := protectedRequest(t, http.MethodPut, srv.URL, "/api/settings", body, token)
-	res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("PUT status = %d", res.StatusCode)
-	}
-
-	got := store.get()
-	if !got.USBLinkEnabled || got.USBLinkBindAddress != "192.168.7.1" ||
-		got.USBLinkInputPort != 40101 || got.USBLinkVideoPort != 40102 ||
-		!got.USBLinkTLS || got.USBLinkAuthToken != "usb-link-secret" ||
-		got.USBLinkMaxBitrate != "18M" {
-		t.Fatalf("USB Link settings after PUT = %+v", got)
-	}
-}
-
 func TestSettingsAndDiagnosticsRedactAuthTokens(t *testing.T) {
 	store := newTestStore(t)
 	s := defaultSettings()
 	s.WifiEnabled = true
 	s.WifiAuthToken = "wifi-secret"
-	s.USBLinkEnabled = true
-	s.USBLinkAuthToken = "usb-secret"
-	s.USBLinkTLS = true
 	if err := store.update(s); err != nil {
 		t.Fatalf("store.update: %v", err)
 	}
@@ -187,19 +159,17 @@ func TestSettingsAndDiagnosticsRedactAuthTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	var settingsBody struct {
-		WifiAuthToken              string `json:"wifiAuthToken"`
-		USBLinkAuthToken           string `json:"usbLinkAuthToken"`
-		WifiAuthTokenConfigured    bool   `json:"wifiAuthTokenConfigured"`
-		USBLinkAuthTokenConfigured bool   `json:"usbLinkAuthTokenConfigured"`
+		WifiAuthToken           string `json:"wifiAuthToken"`
+		WifiAuthTokenConfigured bool   `json:"wifiAuthTokenConfigured"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&settingsBody); err != nil {
 		t.Fatal(err)
 	}
 	res.Body.Close()
-	if settingsBody.WifiAuthToken != "" || settingsBody.USBLinkAuthToken != "" {
+	if settingsBody.WifiAuthToken != "" {
 		t.Fatalf("expected settings token redaction, got %+v", settingsBody)
 	}
-	if !settingsBody.WifiAuthTokenConfigured || !settingsBody.USBLinkAuthTokenConfigured {
+	if !settingsBody.WifiAuthTokenConfigured {
 		t.Fatalf("expected configured flags true, got %+v", settingsBody)
 	}
 
@@ -209,20 +179,18 @@ func TestSettingsAndDiagnosticsRedactAuthTokens(t *testing.T) {
 	}
 	var diagnosticsBody struct {
 		Settings struct {
-			WifiAuthToken              string `json:"wifiAuthToken"`
-			USBLinkAuthToken           string `json:"usbLinkAuthToken"`
-			WifiAuthTokenConfigured    bool   `json:"wifiAuthTokenConfigured"`
-			USBLinkAuthTokenConfigured bool   `json:"usbLinkAuthTokenConfigured"`
+			WifiAuthToken           string `json:"wifiAuthToken"`
+			WifiAuthTokenConfigured bool   `json:"wifiAuthTokenConfigured"`
 		} `json:"settings"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&diagnosticsBody); err != nil {
 		t.Fatal(err)
 	}
 	res.Body.Close()
-	if diagnosticsBody.Settings.WifiAuthToken != "" || diagnosticsBody.Settings.USBLinkAuthToken != "" {
+	if diagnosticsBody.Settings.WifiAuthToken != "" {
 		t.Fatalf("expected diagnostics token redaction, got %+v", diagnosticsBody.Settings)
 	}
-	if !diagnosticsBody.Settings.WifiAuthTokenConfigured || !diagnosticsBody.Settings.USBLinkAuthTokenConfigured {
+	if !diagnosticsBody.Settings.WifiAuthTokenConfigured {
 		t.Fatalf("expected diagnostics configured flags true, got %+v", diagnosticsBody.Settings)
 	}
 }

@@ -19,21 +19,18 @@ type webUIAPI struct {
 
 type settingsView struct {
 	settings
-	WifiAuthTokenConfigured    bool `json:"wifiAuthTokenConfigured"`
-	USBLinkAuthTokenConfigured bool `json:"usbLinkAuthTokenConfigured"`
+	WifiAuthTokenConfigured bool `json:"wifiAuthTokenConfigured"`
 }
 
 func redactedSettingsView(s settings) settingsView {
 	return settingsView{
-		settings:                   redactSettingsSecrets(s),
-		WifiAuthTokenConfigured:    strings.TrimSpace(s.WifiAuthToken) != "",
-		USBLinkAuthTokenConfigured: strings.TrimSpace(s.USBLinkAuthToken) != "",
+		settings:                redactSettingsSecrets(s),
+		WifiAuthTokenConfigured: strings.TrimSpace(s.WifiAuthToken) != "",
 	}
 }
 
 func redactSettingsSecrets(s settings) settings {
 	s.WifiAuthToken = ""
-	s.USBLinkAuthToken = ""
 	return s
 }
 

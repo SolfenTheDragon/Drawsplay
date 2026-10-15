@@ -347,17 +347,6 @@ async function loadSettings() {
   $("aoa-enabled").checked = !!s.aoaEnabled;
   $("adb-tunnel-enabled").checked = !!s.adbTunnelEnabled;
   updateADBVisibility();
-  $("usb-link-enabled").checked = !!s.usbLinkEnabled;
-  $("usb-link-bind-address").value = s.usbLinkBindAddress || "0.0.0.0";
-  $("usb-link-input-port").value = s.usbLinkInputPort || 37193;
-  $("usb-link-video-port").value = s.usbLinkVideoPort || 37194;
-  $("usb-link-max-bitrate").value = s.usbLinkMaxBitrate || "60M";
-  const usbLinkAuthConfigured = !!s.usbLinkAuthTokenConfigured;
-  $("usb-link-auth-token").value = "";
-  $("usb-link-auth-token").placeholder = usbLinkAuthConfigured
-    ? "configured (enter new token to rotate)"
-    : "required when enabled";
-  $("usb-link-tls").checked = s.usbLinkTLS !== false;
   $("require-adb-serial").checked = !!s.requirePreferredADB;
   $("local-cursor").checked = s.localCursor !== false;
   $("touch-enabled").checked = s.touchEnabled !== false;
@@ -599,17 +588,7 @@ $("form").addEventListener("submit", async (ev) => {
       noDriverInstall: $("no-driver-install").checked,
       aoaEnabled: $("aoa-enabled").checked,
       adbTunnelEnabled: $("adb-tunnel-enabled").checked,
-      usbLinkEnabled: $("usb-link-enabled").checked,
-      usbLinkBindAddress: $("usb-link-bind-address").value.trim(),
-      usbLinkInputPort: parseInt($("usb-link-input-port").value, 10),
-      usbLinkVideoPort: parseInt($("usb-link-video-port").value, 10),
-      usbLinkMaxBitrate: $("usb-link-max-bitrate").value.trim(),
-      usbLinkTLS: $("usb-link-tls").checked,
     };
-    const usbLinkAuthToken = $("usb-link-auth-token").value;
-    if (usbLinkAuthToken.trim() !== "") {
-      body.usbLinkAuthToken = usbLinkAuthToken;
-    }
     if (featureFlags.wifi) {
       body.wifiEnabled = $("wifi-enabled").checked;
       body.wifiServiceName = $("wifi-service-name").value.trim();

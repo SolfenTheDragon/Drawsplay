@@ -45,7 +45,7 @@ import (
 // for start codes itself.
 
 // Channel ports. The default input and video ports are localhost-only and
-// reach Android through `adb reverse` over USB. Optional USB Link and Wi-Fi
+// reach Android through `adb reverse` over USB. Optional Wi-Fi
 // transports use independently configured TCP listeners; the web UI remains
 // local-only.
 const (

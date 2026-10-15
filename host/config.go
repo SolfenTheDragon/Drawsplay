@@ -47,24 +47,17 @@ type settings struct {
 	KeepAliveOnBackground bool   `json:"keepAliveOnBackground"`
 	// VideoScaling is how the tablet lays the host picture out on its panel
 	// (videoScalingFill, videoScalingFit or videoScalingOriginal).
-	VideoScaling       string `json:"videoScaling"`
-	NoDriverInstall    bool   `json:"noDriverInstall"`
-	WifiEnabled        bool   `json:"wifiEnabled"`
-	WifiBindAddress    string `json:"wifiBindAddress"`
-	WifiInputPort      int    `json:"wifiInputPort"`
-	WifiVideoPort      int    `json:"wifiVideoPort"`
-	WifiServiceName    string `json:"wifiServiceName"`
-	WifiTLS            bool   `json:"wifiTLS"`
-	WifiAuthToken      string `json:"wifiAuthToken,omitempty"`
-	WifiMaxBitrate     string `json:"wifiMaxBitrate"`
-	USBLinkEnabled     bool   `json:"usbLinkEnabled"`
-	USBLinkBindAddress string `json:"usbLinkBindAddress"`
-	USBLinkInputPort   int    `json:"usbLinkInputPort"`
-	USBLinkVideoPort   int    `json:"usbLinkVideoPort"`
-	USBLinkTLS         bool   `json:"usbLinkTLS"`
-	USBLinkAuthToken   string `json:"usbLinkAuthToken,omitempty"`
-	USBLinkMaxBitrate  string `json:"usbLinkMaxBitrate"`
-	AOAEnabled         bool   `json:"aoaEnabled"`
+	VideoScaling    string `json:"videoScaling"`
+	NoDriverInstall bool   `json:"noDriverInstall"`
+	WifiEnabled     bool   `json:"wifiEnabled"`
+	WifiBindAddress string `json:"wifiBindAddress"`
+	WifiInputPort   int    `json:"wifiInputPort"`
+	WifiVideoPort   int    `json:"wifiVideoPort"`
+	WifiServiceName string `json:"wifiServiceName"`
+	WifiTLS         bool   `json:"wifiTLS"`
+	WifiAuthToken   string `json:"wifiAuthToken,omitempty"`
+	WifiMaxBitrate  string `json:"wifiMaxBitrate"`
+	AOAEnabled      bool   `json:"aoaEnabled"`
 	// ADBTunnelEnabled turns on the legacy adb-reverse transport. It needs
 	// Developer options and USB debugging on the tablet, so it is opt-in.
 	ADBTunnelEnabled bool `json:"adbTunnelEnabled"`
@@ -98,13 +91,6 @@ func defaultSettings() settings {
 		WifiTLS:               true,
 		WifiAuthToken:         "",
 		WifiMaxBitrate:        "12M",
-		USBLinkEnabled:        false,
-		USBLinkBindAddress:    "0.0.0.0",
-		USBLinkInputPort:      37193,
-		USBLinkVideoPort:      37194,
-		USBLinkTLS:            true,
-		USBLinkAuthToken:      "",
-		USBLinkMaxBitrate:     "60M",
 		AOAEnabled:            true,
 		ADBTunnelEnabled:      false,
 	}
@@ -184,30 +170,6 @@ func (s settings) validate() error {
 		if s.WifiEnabled && !s.WifiTLS {
 			return fmt.Errorf("wifi TLS is required when Wi-Fi transport is enabled")
 		}
-	}
-	if strings.TrimSpace(s.USBLinkBindAddress) == "" {
-		return fmt.Errorf("USB Link bind address must not be empty")
-	}
-	if s.USBLinkInputPort < 1024 || s.USBLinkInputPort > 65535 {
-		return fmt.Errorf("USB Link input port must be between 1024 and 65535")
-	}
-	if s.USBLinkVideoPort < 1024 || s.USBLinkVideoPort > 65535 {
-		return fmt.Errorf("USB Link video port must be between 1024 and 65535")
-	}
-	if s.USBLinkInputPort == s.USBLinkVideoPort {
-		return fmt.Errorf("USB Link input and video ports must differ")
-	}
-	if kbps := parseBitrateKbps(s.USBLinkMaxBitrate); kbps < minLadderKbps {
-		return fmt.Errorf("USB Link max bitrate must be at least %dk", minLadderKbps)
-	}
-	if strings.IndexFunc(s.USBLinkAuthToken, unicode.IsControl) >= 0 {
-		return fmt.Errorf("USB Link auth token must not contain control characters")
-	}
-	if s.USBLinkEnabled && strings.TrimSpace(s.USBLinkAuthToken) == "" {
-		return fmt.Errorf("USB Link auth token is required when USB Link is enabled")
-	}
-	if s.USBLinkEnabled && !s.USBLinkTLS {
-		return fmt.Errorf("USB Link TLS is required when USB Link transport is enabled")
 	}
 	return nil
 }

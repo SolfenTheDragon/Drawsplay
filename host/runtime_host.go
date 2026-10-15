@@ -31,7 +31,6 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	// Optional Wi-Fi transport is additive and disabled by default so USB
 	// behavior and performance stay unchanged.
 	go startWiFiTransport(ctx, store)
-	go startUSBLinkTransport(ctx, store)
 
 	// Optional ADB-free USB transport over Android Open Accessory.
 	startAOATransport(ctx, store)

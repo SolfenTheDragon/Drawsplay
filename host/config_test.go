@@ -112,26 +112,3 @@ func TestSettingsRequirePreferredSerial(t *testing.T) {
 		t.Fatalf("valid strict serial rejected: %v", err)
 	}
 }
-
-func TestUSBLinkSettingsValidation(t *testing.T) {
-	s := defaultSettings()
-	s.USBLinkEnabled = true
-	if err := s.validate(); err == nil {
-		t.Fatal("enabled USB Link accepted without an auth token")
-	}
-
-	s.USBLinkAuthToken = "usb-link-secret"
-	s.USBLinkTLS = false
-	if err := s.validate(); err == nil {
-		t.Fatal("enabled USB Link accepted without TLS")
-	}
-
-	s.USBLinkTLS = true
-	if err := s.validate(); err != nil {
-		t.Fatalf("valid TLS USB Link settings rejected: %v", err)
-	}
-	s.USBLinkVideoPort = s.USBLinkInputPort
-	if err := s.validate(); err == nil {
-		t.Fatal("USB Link accepted matching input and video ports")
-	}
-}
