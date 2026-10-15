@@ -41,11 +41,11 @@ No source build is required.
    .\DrawSplay.exe
    ```
 
-On first run the host sets up `ffmpeg` automatically if needed and may install a virtual display driver (approve the UAC prompt).
+On first run the host sets up `ffmpeg` automatically if needed and may install a virtual display driver and, when you plug in the tablet, the WinUSB driver for it (approve the UAC prompts).
 
 ### Linux
 
-1. Download `drawsplay-host-linux-amd64`, `launch-drawsplay-host.sh` and `DrawSplay.APK` into one folder, then run:
+1. Download `drawsplay-host-linux-amd64`, `launch-drawsplay-host.sh`, `70-drawsplay-aoa.rules` and `DrawSplay.APK` into one folder, then run:
    ```bash
    chmod +x drawsplay-host-linux-amd64 launch-drawsplay-host.sh
    ./launch-drawsplay-host.sh
@@ -54,7 +54,7 @@ On first run the host sets up `ffmpeg` automatically if needed and may install a
 2. Install the app on the tablet: copy `DrawSplay.APK` to it, open it and allow installs from that source if asked.
 3. For menu and desktop launchers plus start at login, put `install-drawsplay-host-linux.sh` and `drawsplay-tray.png` beside the host and run `./install-drawsplay-host-linux.sh`. Remove it with `./uninstall-drawsplay-host-linux.sh` (settings and logs are kept).
 
-To let your user open the tablet over USB, install the udev rule from `packaging/linux/70-drawsplay-aoa.rules` into `/etc/udev/rules.d/` and reload udev.
+The Linux install script (and the launcher) install the udev rule for USB access automatically when `70-drawsplay-aoa.rules` is beside them (asks for your password); replug the tablet afterwards.
 
 For smoother streaming, install your GPU's VA-API driver (for example `intel-media-va-driver-non-free` or `mesa-va-drivers`).
 

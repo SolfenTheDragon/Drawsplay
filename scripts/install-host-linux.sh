@@ -157,8 +157,28 @@ if [[ ! "$user_groups" =~ (^|[[:space:]])input($|[[:space:]]) ]] || [[ ! "$user_
   echo
 fi
 
-echo "USB accessory mode (default, no Developer options) needs this udev rule so your user can open the tablet:"
-echo "  sudo cp packaging/linux/70-drawsplay-aoa.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger"
+UDEV_RULE_SOURCE="$SCRIPT_DIR/70-drawsplay-aoa.rules"
+if [[ ! -f "$UDEV_RULE_SOURCE" ]]; then
+  UDEV_RULE_SOURCE="$ROOT_DIR/packaging/linux/70-drawsplay-aoa.rules"
+fi
+UDEV_RULE_TARGET="/etc/udev/rules.d/70-drawsplay-aoa.rules"
+UDEV_MANUAL="  sudo cp 70-drawsplay-aoa.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger"
+# USB accessory mode (default, no Developer options) needs this rule so the user can open the tablet.
+if [[ ! -f "$UDEV_RULE_SOURCE" ]]; then
+  echo "udev rule 70-drawsplay-aoa.rules not found; USB accessory mode needs it. Download it and run:"
+  echo "$UDEV_MANUAL"
+elif cmp -s "$UDEV_RULE_SOURCE" "$UDEV_RULE_TARGET" 2>/dev/null; then
+  echo "USB udev rule already installed: $UDEV_RULE_TARGET"
+else
+  echo "Installing USB udev rule so your user can open the tablet (asks for your password)..."
+  if sudo install -m 0644 "$UDEV_RULE_SOURCE" "$UDEV_RULE_TARGET" &&
+    sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=usb; then
+    echo "Installed $UDEV_RULE_TARGET. Replug the tablet."
+  else
+    echo "Could not install the udev rule. Run manually:" >&2
+    echo "$UDEV_MANUAL" >&2
+  fi
+fi
 echo
 
 echo "If pen injection is disabled, grant /dev/uinput access (MODE=0660 GROUP=input). DrawSplay maps 'Drawsplay Pen' to the tablet's display itself."

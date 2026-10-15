@@ -230,6 +230,27 @@ if [[ ! -f "$UDEV_RULE_FILE" ]] || [[ "$uinput_needs_fix" -eq 1 ]]; then
   echo
 fi
 
+# --- Android USB access (accessory mode) -----------------------------------
+# The rule shipped beside this script lets the logged-in user open the tablet
+# over USB without adb or Developer options.
+AOA_RULE_SOURCE="$SCRIPT_DIR/70-drawsplay-aoa.rules"
+AOA_RULE_TARGET="/etc/udev/rules.d/70-drawsplay-aoa.rules"
+if [[ -f "$AOA_RULE_SOURCE" ]] && ! cmp -s "$AOA_RULE_SOURCE" "$AOA_RULE_TARGET" 2>/dev/null; then
+  if [[ "$SKIP_INSTALL" -eq 0 ]]; then
+    echo "Installing USB udev rule: $AOA_RULE_TARGET"
+    if sudo install -m 0644 "$AOA_RULE_SOURCE" "$AOA_RULE_TARGET" &&
+      sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=usb; then
+      echo "USB udev rule installed. Replug the tablet if it was already connected."
+    else
+      echo "Could not install the USB udev rule. Run manually:"
+      echo "  sudo cp $AOA_RULE_SOURCE $AOA_RULE_TARGET && sudo udevadm control --reload-rules && sudo udevadm trigger"
+    fi
+  else
+    echo "Run manually: sudo cp $AOA_RULE_SOURCE $AOA_RULE_TARGET && sudo udevadm control --reload-rules && sudo udevadm trigger"
+  fi
+  echo
+fi
+
 # --- X11 extended display (vkms) -------------------------------------------
 # X11 desktops have no virtual-monitor API, so the host extends the desktop
 # onto an output of the vkms kernel module (a virtual display that is always

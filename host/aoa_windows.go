@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -276,7 +277,12 @@ func aoaScanDevices() ([]aoaCandidate, error) {
 		}
 		paths := winusbInterfacePaths(set, info, instance)
 		if len(paths) == 0 {
-			throttledLog("aoa-nowinusb-"+instance, "AOA: %04x:%04x has no WinUSB interface; bind the WinUSB driver to it (see README)", vid, pid)
+			if ensureWinUSBDriver(vid, pid) {
+				// Rebinding is asynchronous; the next scan picks the device up.
+				log.Printf("AOA: WinUSB installed for %04x:%04x; waiting for the device to rebind", vid, pid)
+			} else {
+				throttledLog("aoa-nowinusb-"+instance, "AOA: %04x:%04x has no WinUSB interface; bind the WinUSB driver to it (see packaging/windows/README.md)", vid, pid)
+			}
 			continue
 		}
 		cand.Key = instance
