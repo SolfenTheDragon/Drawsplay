@@ -69,3 +69,9 @@ wiki/
 research/
 !/README.md
 .github/copilot-instructions.md
+
+# Google Play signing/publishing secrets and docs
+*.jks
+*.keystore
+play-*.json
+play-store/

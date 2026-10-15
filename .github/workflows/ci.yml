@@ -91,8 +91,17 @@ jobs:
       - name: Assemble Android release APK
         run: ./gradlew :app:assembleRelease
 
+      - name: Assemble Android release App Bundle (Google Play)
+        run: ./gradlew :app:bundleRelease
+
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
         with:
           name: DrawSplay-APK
           path: android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload Android App Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: DrawSplay-AAB
+          path: android/app/build/outputs/bundle/release/app-release.aab

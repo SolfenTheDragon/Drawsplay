@@ -125,7 +125,7 @@ Sign-WindowsExecutable -ExePath "$repoRoot\host\host.exe"
 
 Write-Host "Building Android APK..."
 Set-Location "$repoRoot\android"
-.\gradlew.bat :app:assembleRelease
+.\gradlew.bat :app:assembleRelease :app:bundleRelease
 if (-not $?) {
   throw "Android release build failed"
 }
