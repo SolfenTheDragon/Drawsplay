@@ -151,6 +151,17 @@
           </div>
         </div>
         <div class="input-options">
+          <strong>USB accessory transport (no ADB)</strong>
+          <div class="hint">Connects the tablet over USB using Android Open Accessory, so Developer options and USB debugging are not needed. Starts on the next host launch. On Linux the user needs access to the tablet's USB node (see README); on Windows a WinUSB driver must be bound to the tablet.</div>
+          <div class="toggle-row">
+            <span>Enable USB accessory transport</span>
+            <label class="switch">
+              <input id="aoa-enabled" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="input-options">
           <strong>USB Link transport</strong>
           <div class="hint">For a computer client connected through a USB virtual NIC (IP-over-USB). This does not use ADB and starts on the next host launch.</div>
           <div class="toggle-row">

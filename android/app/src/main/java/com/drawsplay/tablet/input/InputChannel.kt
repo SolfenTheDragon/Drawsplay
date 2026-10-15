@@ -4,6 +4,8 @@ import android.os.Build
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import com.drawsplay.tablet.AndroidCompat
+import com.drawsplay.tablet.transport.AccessoryFraming
+import com.drawsplay.tablet.transport.AccessoryTransport
 import com.drawsplay.tablet.transport.HostEndpoint
 import com.drawsplay.tablet.transport.HostEndpointSelector
 import com.drawsplay.tablet.transport.TlsSocketFactory
@@ -119,6 +121,12 @@ class InputChannel(
         try {
             val endpoints = endpointSelector.inputCandidates()
             val dialed = dialEndpointHappyEyeballs(endpoints, FALLBACK_RACE_DELAY_MS) { endpoint ->
+                if (endpoint.accessory) {
+                    return@dialEndpointHappyEyeballs AccessoryTransport.connect(
+                        AccessoryFraming.KIND_INPUT,
+                        CONNECT_TIMEOUT_MS.toLong()
+                    )
+                }
                 if (endpoint.tls && endpoint.tlsFingerprintSha256.isNotBlank()) {
                     TlsSocketFactory.connectPinned(
                         endpoint.host,

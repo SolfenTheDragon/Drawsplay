@@ -1,0 +1,40 @@
+; DrawSplay: binds the in-box WinUSB driver to the Android accessory device
+; so the host can use the USB accessory (AOA) transport. Must be signed
+; (catalog) for normal installs; use Zadig for development.
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = USBDevice
+ClassGuid   = {88BAE032-5A81-49f0-BC3D-A4FF138216D6}
+Provider    = %ProviderName%
+DriverVer   = 10/15/2026,1.0.0.0
+CatalogFile = drawsplay-aoa.cat
+
+[Manufacturer]
+%ProviderName% = DrawSplayAOA,NTamd64
+
+[DrawSplayAOA.NTamd64]
+%AccessoryDesc% = USB_Install, USB\VID_18D1&PID_2D00
+%AccessoryDesc% = USB_Install, USB\VID_18D1&PID_2D01
+%AccessoryDesc% = USB_Install, USB\VID_18D1&PID_2D02
+%AccessoryDesc% = USB_Install, USB\VID_18D1&PID_2D03
+%AccessoryDesc% = USB_Install, USB\VID_18D1&PID_2D04
+%AccessoryDesc% = USB_Install, USB\VID_18D1&PID_2D05
+
+[USB_Install]
+Include = winusb.inf
+Needs   = WINUSB.NT
+
+[USB_Install.Services]
+Include = winusb.inf
+Needs   = WINUSB.NT.Services
+
+[USB_Install.HW]
+AddReg = Dev_AddReg
+
+[Dev_AddReg]
+HKR,,DeviceInterfaceGUIDs,0x10000,"{8C7A2C7E-5B1F-4A6E-9D3B-5D2B7E0A1D42}"
+
+[Strings]
+ProviderName  = "DrawSplay"
+AccessoryDesc = "DrawSplay Tablet (USB accessory)"

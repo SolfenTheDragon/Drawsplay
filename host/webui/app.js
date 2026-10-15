@@ -344,6 +344,7 @@ async function loadSettings() {
     ? "configured (enter new token to rotate)"
     : "shared token";
   $("wifi-tls").checked = s.wifiTLS !== false;
+  $("aoa-enabled").checked = !!s.aoaEnabled;
   $("usb-link-enabled").checked = !!s.usbLinkEnabled;
   $("usb-link-bind-address").value = s.usbLinkBindAddress || "0.0.0.0";
   $("usb-link-input-port").value = s.usbLinkInputPort || 37193;
@@ -564,6 +565,7 @@ $("form").addEventListener("submit", async (ev) => {
       temporalLayering: $("temporal-layering").checked,
       allowToolAutoInstall: $("allow-tool-auto-install").checked,
       noDriverInstall: $("no-driver-install").checked,
+      aoaEnabled: $("aoa-enabled").checked,
       usbLinkEnabled: $("usb-link-enabled").checked,
       usbLinkBindAddress: $("usb-link-bind-address").value.trim(),
       usbLinkInputPort: parseInt($("usb-link-input-port").value, 10),

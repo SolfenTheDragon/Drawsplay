@@ -2,6 +2,8 @@
 
 import android.util.Log
 import android.view.Surface
+import com.drawsplay.tablet.transport.AccessoryFraming
+import com.drawsplay.tablet.transport.AccessoryTransport
 import com.drawsplay.tablet.transport.HostEndpoint
 import com.drawsplay.tablet.transport.HostEndpointSelector
 import com.drawsplay.tablet.transport.TlsSocketFactory
@@ -127,6 +129,12 @@ class VideoChannel(
         val renderSurface = surface ?: throw IllegalStateException("no surface")
         val endpoints = endpointSelector.videoCandidates()
         val (socket, selectedEndpoint) = dialEndpointHappyEyeballs(endpoints, FALLBACK_RACE_DELAY_MS) { endpoint ->
+            if (endpoint.accessory) {
+                return@dialEndpointHappyEyeballs AccessoryTransport.connect(
+                    AccessoryFraming.KIND_VIDEO,
+                    CONNECT_TIMEOUT_MS.toLong()
+                )
+            }
             if (endpoint.tls && endpoint.tlsFingerprintSha256.isNotBlank()) {
                 TlsSocketFactory.connectPinned(
                     endpoint.host,

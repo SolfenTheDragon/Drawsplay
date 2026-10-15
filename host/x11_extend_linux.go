@@ -1154,3 +1154,36 @@ func (d *x11ExtendedDisplay) saveUserResolution(obs x11Observed, auto bool) {
 	}
 	log.Printf("X11 extended display resolution changed in the display settings (%dx%d -> %dx%d); saved as the configured resolution", reqW, reqH, w, h)
 }
+
+// releaseStaleVirtualDisplays switches off the X11 virtual output a previous
+// host process (crashed, killed, or interrupted by a suspend) left on as a
+// ghost display. It does nothing once a session of this process has claimed
+// the output.
+func releaseStaleVirtualDisplays() {
+	if !x11SessionActive() {
+		return
+	}
+	display := os.Getenv("DISPLAY")
+	if display == "" {
+		return
+	}
+	x11Ext.mu.Lock()
+	defer x11Ext.mu.Unlock()
+	if x11Ext.claimed || x11Ext.exiting {
+		return
+	}
+	st, err := queryXrandr(display)
+	if err != nil {
+		log.Printf("X11 extended display: could not look for a stale virtual output: %v", err)
+		return
+	}
+	o, err := pickX11VirtualOutput(st, strings.TrimSpace(os.Getenv(x11OutputEnv)))
+	if err != nil || !o.Active {
+		return
+	}
+	if _, _, err := switchOffX11Output(display, o.Name); err != nil {
+		log.Printf("X11 extended display: could not switch the stale output %s off: %v", o.Name, err)
+		return
+	}
+	log.Printf("X11 extended display: switched off %s, left on by a previous host process", o.Name)
+}

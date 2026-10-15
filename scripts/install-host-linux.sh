@@ -138,4 +138,8 @@ if [[ ! "$user_groups" =~ (^|[[:space:]])input($|[[:space:]]) ]] || [[ ! "$user_
   echo
 fi
 
+echo "Optional ADB-free USB accessory mode (no Developer options): install the udev rule, then enable it in the host settings:"
+echo "  sudo cp packaging/linux/70-drawsplay-aoa.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger"
+echo
+
 echo "If pen injection is disabled, grant /dev/uinput access (MODE=0660 GROUP=input). DrawSplay maps 'Drawsplay Pen' to the tablet's display itself."

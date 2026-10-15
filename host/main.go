@@ -63,6 +63,7 @@ func main() {
 	usbLinkBindAddress := flag.String("usb-link-bind-address", "0.0.0.0", "USB Link listener bind address")
 	usbLinkInputPort := flag.Int("usb-link-input-port", 37193, "USB Link input channel port")
 	usbLinkVideoPort := flag.Int("usb-link-video-port", 37194, "USB Link video channel port")
+	aoaEnabled := flag.Bool("aoa-enabled", false, "enable ADB-free USB transport over Android Open Accessory (no developer mode needed)")
 	usbLinkTLS := flag.Bool("usb-link-tls", true, "enable TLS for USB Link transport")
 	usbLinkAuthToken := flag.String("usb-link-auth-token", "", "required USB Link auth token")
 	usbLinkMaxBitrate := flag.String("usb-link-max-bitrate", "60M", "USB Link session max bitrate cap")
@@ -120,6 +121,7 @@ func main() {
 		"wifi-tls":                 func() { cfg.WifiTLS = *wifiTLS },
 		"wifi-auth-token":          func() { cfg.WifiAuthToken = *wifiAuthToken },
 		"wifi-max-bitrate":         func() { cfg.WifiMaxBitrate = *wifiMaxBitrate },
+		"aoa-enabled":              func() { cfg.AOAEnabled = *aoaEnabled },
 		"usb-link-enabled":         func() { cfg.USBLinkEnabled = *usbLinkEnabled },
 		"usb-link-bind-address":    func() { cfg.USBLinkBindAddress = *usbLinkBindAddress },
 		"usb-link-input-port":      func() { cfg.USBLinkInputPort = *usbLinkInputPort },

@@ -1,0 +1,40 @@
+# DrawSplay: let the logged-in user talk to Android tablets over USB without adb or Developer options.
+# Install: sudo cp 70-drawsplay-aoa.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
+# then replug the tablet. "uaccess" grants access to the active local session only (no group membership needed).
+
+# Accessory-mode device (what DrawSplay streams over).
+SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", ATTR{idProduct}=="2d0[0-5]", TAG+="uaccess", ATTR{power/control}="on"
+
+# Tablets in their normal mode: needed once so DrawSplay can ask them to switch to accessory mode.
+SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", TAG+="uaccess"  # Google
+SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", TAG+="uaccess"  # Samsung
+SUBSYSTEM=="usb", ATTR{idVendor}=="12d1", TAG+="uaccess"  # Huawei
+SUBSYSTEM=="usb", ATTR{idVendor}=="2717", TAG+="uaccess"  # Xiaomi
+SUBSYSTEM=="usb", ATTR{idVendor}=="17ef", TAG+="uaccess"  # Lenovo
+SUBSYSTEM=="usb", ATTR{idVendor}=="0b05", TAG+="uaccess"  # ASUS
+SUBSYSTEM=="usb", ATTR{idVendor}=="1004", TAG+="uaccess"  # LG
+SUBSYSTEM=="usb", ATTR{idVendor}=="054c", TAG+="uaccess"  # Sony
+SUBSYSTEM=="usb", ATTR{idVendor}=="0bb4", TAG+="uaccess"  # HTC
+SUBSYSTEM=="usb", ATTR{idVendor}=="22b8", TAG+="uaccess"  # Motorola
+SUBSYSTEM=="usb", ATTR{idVendor}=="2a70", TAG+="uaccess"  # OnePlus
+SUBSYSTEM=="usb", ATTR{idVendor}=="22d9", TAG+="uaccess"  # OPPO
+SUBSYSTEM=="usb", ATTR{idVendor}=="1949", TAG+="uaccess"  # Amazon
+SUBSYSTEM=="usb", ATTR{idVendor}=="0502", TAG+="uaccess"  # Acer
+SUBSYSTEM=="usb", ATTR{idVendor}=="0955", TAG+="uaccess"  # NVIDIA
+SUBSYSTEM=="usb", ATTR{idVendor}=="2d95", TAG+="uaccess"  # vivo
+SUBSYSTEM=="usb", ATTR{idVendor}=="19d2", TAG+="uaccess"  # ZTE
+SUBSYSTEM=="usb", ATTR{idVendor}=="1bbb", TAG+="uaccess"  # Alcatel/TCL
+SUBSYSTEM=="usb", ATTR{idVendor}=="0fce", TAG+="uaccess"  # Sony Mobile
+SUBSYSTEM=="usb", ATTR{idVendor}=="413c", TAG+="uaccess"  # Dell
+SUBSYSTEM=="usb", ATTR{idVendor}=="2a45", TAG+="uaccess"  # Meizu
+SUBSYSTEM=="usb", ATTR{idVendor}=="1782", TAG+="uaccess"  # Spreadtrum
+SUBSYSTEM=="usb", ATTR{idVendor}=="2207", TAG+="uaccess"  # Rockchip
+SUBSYSTEM=="usb", ATTR{idVendor}=="1f3a", TAG+="uaccess"  # Allwinner
+SUBSYSTEM=="usb", ATTR{idVendor}=="0e8d", TAG+="uaccess"  # MediaTek
+SUBSYSTEM=="usb", ATTR{idVendor}=="05c6", TAG+="uaccess"  # Qualcomm
+SUBSYSTEM=="usb", ATTR{idVendor}=="109b", TAG+="uaccess"  # Hisense
+SUBSYSTEM=="usb", ATTR{idVendor}=="0489", TAG+="uaccess"  # Foxconn
+SUBSYSTEM=="usb", ATTR{idVendor}=="2916", TAG+="uaccess"  # Yota
+SUBSYSTEM=="usb", ATTR{idVendor}=="1d4d", TAG+="uaccess"  # Pegatron
+SUBSYSTEM=="usb", ATTR{idVendor}=="2b0e", TAG+="uaccess"  # Fairphone
+SUBSYSTEM=="usb", ATTR{idVendor}=="0421", TAG+="uaccess"  # Nokia

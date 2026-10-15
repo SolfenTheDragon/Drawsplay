@@ -64,6 +64,7 @@ type settings struct {
 	USBLinkTLS         bool   `json:"usbLinkTLS"`
 	USBLinkAuthToken   string `json:"usbLinkAuthToken,omitempty"`
 	USBLinkMaxBitrate  string `json:"usbLinkMaxBitrate"`
+	AOAEnabled         bool   `json:"aoaEnabled"`
 }
 
 // defaultSettings mirrors the flag defaults in main.go.
@@ -101,6 +102,7 @@ func defaultSettings() settings {
 		USBLinkTLS:            true,
 		USBLinkAuthToken:      "",
 		USBLinkMaxBitrate:     "60M",
+		AOAEnabled:            false,
 	}
 }
 
