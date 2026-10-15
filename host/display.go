@@ -134,11 +134,11 @@ func activeTarget() *captureTarget { return currentTarget.Load() }
 // tablet, which persists it as the new preference.
 var (
 	modeSubsMu    sync.Mutex
-	modeSubs      = map[uint64]func(w, h int){}
+	modeSubs      = map[uint64]func(w, h, fps int){}
 	clearModeSubs = map[uint64]func(){}
 )
 
-func subscribeModeChanges(id uint64, fn func(w, h int)) {
+func subscribeModeChanges(id uint64, fn func(w, h, fps int)) {
 	modeSubsMu.Lock()
 	defer modeSubsMu.Unlock()
 	modeSubs[id] = fn
@@ -150,15 +150,18 @@ func unsubscribeModeChanges(id uint64) {
 	delete(modeSubs, id)
 }
 
-func publishModeChange(w, h int) {
+// publishModeChange also records the mode on the client identity so a session
+// restart keeps it. fps == 0 means only the resolution changed.
+func publishModeChange(w, h, fps int) {
+	setClientPrefMode(w, h, fps)
 	modeSubsMu.Lock()
-	fns := make([]func(w, h int), 0, len(modeSubs))
+	fns := make([]func(w, h, fps int), 0, len(modeSubs))
 	for _, fn := range modeSubs {
 		fns = append(fns, fn)
 	}
 	modeSubsMu.Unlock()
 	for _, fn := range fns {
-		fn(w, h)
+		fn(w, h, fps)
 	}
 }
 

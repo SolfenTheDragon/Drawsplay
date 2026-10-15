@@ -16,9 +16,9 @@ import (
 // decode as zero values, keeping additions backward compatible). See
 // FUNCTIONALITY.md §3 for authoritative examples.
 //
-// Upstream (client -> host) types: "hello", "input", and "key"
+// Upstream (client -> host) types: "hello", "modePrefs", "input", and "key"
 // (physical keyboard events, M5).
-// Downstream (host -> client) types: "displayMode", "clearDisplayMode",
+// Downstream (host -> client) types: "hostInfo", "displayMode", "clearDisplayMode",
 // "sessionPolicy", and "cursor".
 //
 // # Video channel (host -> tablet, port 27184)
@@ -103,11 +103,16 @@ type packet struct {
 	// preferred host-display mode (0 = no preference stored). The host sets
 	// the virtual display to the preference — or the native size by
 	// default — when the session display is created.
-	ScreenWidth  int      `json:"screenWidth"`
-	ScreenHeight int      `json:"screenHeight"`
-	PrefWidth    int      `json:"prefWidth"`
-	PrefHeight   int      `json:"prefHeight"`
-	VideoCodecs  []string `json:"videoCodecs"`
+	ScreenWidth  int `json:"screenWidth"`
+	ScreenHeight int `json:"screenHeight"`
+	PrefWidth    int `json:"prefWidth"`
+	PrefHeight   int `json:"prefHeight"`
+	PrefFPS      int `json:"prefFps"`
+	// HostPrefs (hello): the client keeps display preferences per host and
+	// will answer the host's "hostInfo" with a "modePrefs" packet (which
+	// carries PrefWidth/PrefHeight/PrefFPS).
+	HostPrefs   bool     `json:"hostPrefs"`
+	VideoCodecs []string `json:"videoCodecs"`
 
 	// "key" packets (M5): Action is "down"/"up", Keycode is the Android
 	// KeyEvent keycode, Meta the Android meta-state bits, Chars the
@@ -188,6 +193,16 @@ type hostDisplayModeMsg struct {
 	Type   string `json:"type"` // always "displayMode"
 	Width  int    `json:"width"`
 	Height int    `json:"height"`
+	// FPS is the new capture rate; 0 means unchanged (omitted).
+	FPS int `json:"fps,omitempty"`
+}
+
+// hostInfoMsg identifies this host to a tablet that sent hello with
+// hostPrefs, so it can look up the display mode it remembered for this host.
+type hostInfoMsg struct {
+	Type     string `json:"type"` // always "hostInfo"
+	HostID   string `json:"hostId"`
+	HostName string `json:"hostName,omitempty"`
 }
 
 // hostClearDisplayModeMsg asks the tablet to clear its stored preferred

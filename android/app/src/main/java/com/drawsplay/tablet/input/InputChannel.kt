@@ -34,8 +34,10 @@ class InputChannel(
         fun onConnected()
         fun onWaitingForHost(reason: String?)
         fun onHostCursor(x: Float, y: Float, visible: Boolean)
-        fun onHostDisplayMode(width: Int, height: Int)
+        fun onHostDisplayMode(width: Int, height: Int, fps: Int)
         fun onClearHostDisplayModePreference()
+        /** The host identified itself; the app answers with [sendModePrefs] for that host. */
+        fun onHostInfo(hostId: String)
         fun onSessionPolicy(
             keepAliveOnBackground: Boolean,
             videoScaling: String,
@@ -50,7 +52,8 @@ class InputChannel(
         val nativeWidth: Int,
         val nativeHeight: Int,
         val prefWidth: Int,
-        val prefHeight: Int
+        val prefHeight: Int,
+        val prefFps: Int = 0
     )
 
     @Volatile
@@ -251,7 +254,11 @@ class InputChannel(
                 "displayMode" -> {
                     val w = obj.optInt("width")
                     val h = obj.optInt("height")
-                    if (w > 0 && h > 0) listener.onHostDisplayMode(w, h)
+                    if (w > 0 && h > 0) listener.onHostDisplayMode(w, h, obj.optInt("fps"))
+                }
+                "hostInfo" -> {
+                    val id = obj.optString("hostId")
+                    if (id.isNotEmpty()) listener.onHostInfo(id)
                 }
                 "clearDisplayMode" -> listener.onClearHostDisplayModePreference()
                 "sessionPolicy" -> listener.onSessionPolicy(
@@ -270,6 +277,18 @@ class InputChannel(
             }
         } catch (_: Exception) {
         }
+    }
+
+    /** Reports the display mode remembered for the current host (zeros = none). */
+    fun sendModePrefs(width: Int, height: Int, fps: Int) {
+        if (state.get() != ConnectionState.CONNECTED) return
+        val payload = JSONObject().apply {
+            put("type", "modePrefs")
+            put("prefWidth", width)
+            put("prefHeight", height)
+            put("prefFps", fps)
+        }.toString().toByteArray(Charsets.UTF_8)
+        enqueueBoundary(connectGeneration.get(), payload, UsbMuxFrameCodec.STREAM_CONTROL)
     }
 
     fun sendKey(action: String, keycode: Int, meta: Int, chars: String?) {
@@ -365,8 +384,9 @@ class InputChannel(
             put("supportsLowLatencyDecoderHint", AndroidCompat.supportsLowLatencyDecoderHint)
             put("screenWidth", info?.nativeWidth ?: 0)
             put("screenHeight", info?.nativeHeight ?: 0)
-            put("prefWidth", info?.prefWidth ?: 0)
-            put("prefHeight", info?.prefHeight ?: 0)
+            // Display preferences are kept per host: the host answers with hostInfo and
+            // the app replies with modePrefs for that host.
+            put("hostPrefs", true)
             put("videoCodecs", advertisedVideoCodecs())
             put("inputProtocol", "mux-v1")
             put("timestamp", System.currentTimeMillis())

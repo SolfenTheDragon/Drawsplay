@@ -103,6 +103,20 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 			httpError(w, http.StatusUnprocessableEntity, "%v", err)
 			return
 		}
+		fps := 0
+		if old.FPS != s.FPS {
+			fps = s.FPS
+		}
+		modeW, modeH := 0, 0
+		if old.Width != s.Width || old.Height != s.Height {
+			modeW, modeH = s.Width, s.Height
+		} else if t := activeTarget(); t != nil && fps > 0 {
+			// Only the rate changed: keep the session's current size.
+			modeW, modeH = t.Width, t.Height
+		}
+		if modeW > 0 && modeH > 0 {
+			publishModeChange(modeW, modeH, fps)
+		}
 		restarted := restartActiveVideoSession()
 		inputRestarted := false
 		if old.LocalCursor != s.LocalCursor ||

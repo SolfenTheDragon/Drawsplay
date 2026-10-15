@@ -296,6 +296,7 @@ var globalSettingsStore *settingsStore
 // back to the old configured resolution instead of keeping the user's
 // choice.
 func (st *settingsStore) updateResolution(width, height int) error {
+	setClientPrefMode(width, height, 0)
 	s := st.get()
 	s.Width = width
 	s.Height = height

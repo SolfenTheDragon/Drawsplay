@@ -222,7 +222,11 @@ func serveVideoSession(ctx context.Context, conn net.Conn, store *settingsStore,
 	// handled by the debounce state instead of being rejected for the entire
 	// lifetime of this replacement session.
 	hostSessionOwnership.finishVideoHandoff(transport)
+	// The tablet's hello (native size, remembered mode) can land just after
+	// its video socket connects; the display must be created from it.
+	waitForClientIdentity(sessionCtx, clientHelloWait)
 	opts := store.get().videoOptions()
+	applyClientDisplayDefaults(&opts, activeClientIdentity())
 	if ident := activeClientIdentity(); strings.EqualFold(ident.Platform, "android") && opts.TemporalLayering {
 		// Temporal enhancement-layer dropping can make text look unstable on
 		// Android tablet decode paths; prefer cleaner glyph edges there.
@@ -647,7 +651,7 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		if target.Width > 0 && target.Height > 0 {
 			if lastModeW != 0 && (target.Width != lastModeW || target.Height != lastModeH) {
 				log.Printf("Display mode changed by user to %dx%d; updating tablet preference", target.Width, target.Height)
-				publishModeChange(target.Width, target.Height)
+				publishModeChange(target.Width, target.Height, 0)
 			}
 			lastModeW, lastModeH = target.Width, target.Height
 		}
@@ -669,6 +673,7 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		effOpts.FPS = effectiveCaptureFPS(target, opts.FPS)
 		if lastEffectiveFPS != 0 && effOpts.FPS != lastEffectiveFPS {
 			log.Printf("Capture framerate now following active display refresh: %d fps", effOpts.FPS)
+			publishModeChange(target.Width, target.Height, effOpts.FPS)
 		}
 		lastEffectiveFPS = effOpts.FPS
 		effOpts.Bitrate = rc.current()

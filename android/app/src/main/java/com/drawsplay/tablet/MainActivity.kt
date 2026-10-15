@@ -118,6 +118,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onWaitingForHost(reason: String?) {
+                currentHostId = null
                 runOnUiThread { updateStatus() }
             }
 
@@ -125,8 +126,14 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { hostCursor.updateCursor(x, y, visible) }
             }
 
-            override fun onHostDisplayMode(width: Int, height: Int) {
-                storeDisplayModePreference(width, height)
+            override fun onHostDisplayMode(width: Int, height: Int, fps: Int) {
+                storeDisplayModePreference(width, height, fps)
+            }
+
+            override fun onHostInfo(hostId: String) {
+                currentHostId = hostId
+                val prefs = loadDisplayModePreference(hostId)
+                inputChannel.sendModePrefs(prefs.first, prefs.second, prefs.third)
             }
 
             override fun onClearHostDisplayModePreference() {
@@ -216,6 +223,7 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         updateWiFiDiscoveryState()
         AccessoryTransport.refresh()
+        AccessoryTransport.setPolling(true)
         inputChannel.start()
     }
 
@@ -226,6 +234,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        AccessoryTransport.setPolling(false)
         if (!keepAliveOnBackground || isFinishing) {
             inputChannel.stop()
         }
@@ -271,40 +280,42 @@ class MainActivity : AppCompatActivity() {
         return InputChannel.DisplayInfo(
             nativeWidth = nativeW,
             nativeHeight = nativeH,
-            prefWidth = displayPrefs.getInt("prefWidth", 0),
-            prefHeight = displayPrefs.getInt("prefHeight", 0)
+            prefWidth = 0,
+            prefHeight = 0
         )
     }
 
-    private fun storeDisplayModePreference(width: Int, height: Int) {
-        val saved = displayPrefs.edit()
-            .putInt("prefWidth", width)
-            .putInt("prefHeight", height)
-            .commit()
-        val currentInfo = inputChannel.displayInfo
-        inputChannel.displayInfo =
-            if (currentInfo != null) {
-                currentInfo.copy(prefWidth = width, prefHeight = height)
-            } else {
-                buildDisplayInfo()
-            }
-        if (!saved) {
+    // Display mode preferences are stored per host so two computers never share a choice.
+    @Volatile
+    private var currentHostId: String? = null
+
+    private fun prefKey(hostId: String, field: String) = "host.$hostId.$field"
+
+    private fun loadDisplayModePreference(hostId: String): Triple<Int, Int, Int> = Triple(
+        displayPrefs.getInt(prefKey(hostId, "width"), 0),
+        displayPrefs.getInt(prefKey(hostId, "height"), 0),
+        displayPrefs.getInt(prefKey(hostId, "fps"), 0)
+    )
+
+    private fun storeDisplayModePreference(width: Int, height: Int, fps: Int) {
+        val hostId = currentHostId ?: return
+        // fps == 0 means the host only changed the resolution; keep the stored rate.
+        val editor = displayPrefs.edit()
+            .putInt(prefKey(hostId, "width"), width)
+            .putInt(prefKey(hostId, "height"), height)
+        if (fps > 0) editor.putInt(prefKey(hostId, "fps"), fps)
+        if (!editor.commit()) {
             Log.w(TAG, "Failed to persist preferred display mode ${width}x${height}")
         }
     }
 
     private fun clearDisplayModePreference() {
+        val hostId = currentHostId ?: return
         val saved = displayPrefs.edit()
-            .remove("prefWidth")
-            .remove("prefHeight")
+            .remove(prefKey(hostId, "width"))
+            .remove(prefKey(hostId, "height"))
+            .remove(prefKey(hostId, "fps"))
             .commit()
-        val currentInfo = inputChannel.displayInfo
-        inputChannel.displayInfo =
-            if (currentInfo != null) {
-                currentInfo.copy(prefWidth = 0, prefHeight = 0)
-            } else {
-                buildDisplayInfo()
-            }
         if (!saved) {
             Log.w(TAG, "Failed to clear preferred display mode")
         }

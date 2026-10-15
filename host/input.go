@@ -140,8 +140,8 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 		return err == nil
 	}
 
-	sendDisplayMode := func(w, h int) {
-		if !writeControl(hostDisplayModeMsg{Type: "displayMode", Width: w, Height: h}) {
+	sendDisplayMode := func(w, h, fps int) {
+		if !writeControl(hostDisplayModeMsg{Type: "displayMode", Width: w, Height: h, FPS: fps}) {
 			log.Printf("Display-mode push failed (session=%d)", id)
 		}
 	}
@@ -212,6 +212,11 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			inputOwned = true
 			helloSeen = true
 			handleHello(msg, id)
+			if msg.HostPrefs {
+				if !writeControl(hostInfoMsg{Type: "hostInfo", HostID: hostID(), HostName: hostDisplayName()}) {
+					log.Printf("Host-info push failed (session=%d)", id)
+				}
+			}
 			subscribeModeChanges(id, sendDisplayMode)
 			subscribeModePreferenceClears(id, sendClearDisplayMode)
 			cfg := store.get()
@@ -226,6 +231,9 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 				sendCursor(hostCursorMsg{Type: "cursor", Visible: false})
 			}
 
+			return true
+		case "modePrefs":
+			bindSessionModePrefs(id, msg.PrefWidth, msg.PrefHeight, msg.PrefFPS)
 			return true
 		case "input":
 			if !helloSeen {
@@ -374,9 +382,13 @@ func handleHello(msg packet, id uint64) {
 		Version:      clientVersion,
 		NativeWidth:  msg.ScreenWidth,
 		NativeHeight: msg.ScreenHeight,
+		PrefWidth:    msg.PrefWidth,
+		PrefHeight:   msg.PrefHeight,
+		PrefFPS:      msg.PrefFPS,
+		PrefsPending: msg.HostPrefs,
 	})
 	log.Printf(
-		"HELLO session=%d device=%s platform=%s type=%s clientVersion=%s android=%s app=%s screen=%dx%d pref=%dx%d codecs=%v ts=%d",
+		"HELLO session=%d device=%s platform=%s type=%s clientVersion=%s android=%s app=%s screen=%dx%d pref=%dx%d@%d codecs=%v ts=%d",
 		id,
 		device,
 		platform,
@@ -388,6 +400,7 @@ func handleHello(msg packet, id uint64) {
 		msg.ScreenHeight,
 		msg.PrefWidth,
 		msg.PrefHeight,
+		msg.PrefFPS,
 		msg.VideoCodecs,
 		msg.Timestamp,
 	)
