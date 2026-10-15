@@ -138,6 +138,8 @@ func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"clientVideoStats":        currentClientVideoStats(),
 		"adb":                     currentADBStatus(),
 		"aoa":                     currentAOAStatus(),
+		"adbTunnelEnabled":        api.store.get().ADBTunnelEnabled,
+		"aoaEnabled":              api.store.get().AOAEnabled,
 		"warnings":                currentOperationalWarnings(),
 		"metrics":                 currentOperationalMetrics(),
 		"setup":                   currentSetupChecklist(api.store.get()),

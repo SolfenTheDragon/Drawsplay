@@ -112,6 +112,7 @@ h1 img { width: 36px; height: 36px; border-radius: 10px; }
 }
 .dot.on { background: var(--ok); box-shadow: 0 0 0 4px rgb(61 204 145 / 14%); }
 .status-panel #warnings { margin-top: 14px; }
+.status-panel #connection-info { margin-top: 10px; }
 #metrics-summary {
   margin-top: 15px; padding-top: 12px; border-top: 1px solid var(--border);
   font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -185,6 +186,7 @@ button.danger { background: var(--err); }
 #msg.ok { color: var(--ok); }
 #msg.err { color: var(--err); }
 #warnings { color: var(--warn); white-space: pre-line; }
+#connection-info { white-space: pre-line; }
 .hint { margin-top: .25rem; color: var(--muted); font-size: .78rem; }
 #setup-checklist { display: grid; gap: 10px; }
 .setup-card #setup-checklist { margin-top: 14px; }

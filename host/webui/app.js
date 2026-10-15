@@ -401,6 +401,7 @@ async function refreshStatus() {
     if (setupPrompt) lines.push(setupPrompt);
     $("warnings").hidden = warnings.length === 0;
     $("warnings").textContent = lines.join("\n");
+    renderConnectionInfo(st);
     renderMetrics(st.metrics || {}, v, st.clientVideoStats || null);
     renderSetupChecklist(st.setup || {});
     const inputLockToggle = $("input-lock-toggle");
@@ -423,6 +424,7 @@ async function refreshStatus() {
     $("dot").className = "dot";
     $("status").textContent = "Host unreachable";
     $("warnings").hidden = true;
+    $("connection-info").textContent = "";
     $("metrics-summary").textContent = "";
     $("setup-checklist").textContent = "Host unreachable";
   }
@@ -455,6 +457,34 @@ function showMsg(text, ok) {
   const el = $("msg");
   el.textContent = text;
   el.className = ok ? "ok" : "err";
+}
+
+const AOA_STATE_LABELS = {
+  searching: "looking for a tablet on USB",
+  switching: "switching the tablet to accessory mode",
+  "waiting-app": "tablet found, waiting for the DrawSplay app to open",
+  linked: "linked",
+  error: "error",
+};
+
+// Shows only the connection details for transports that are turned on.
+function renderConnectionInfo(st) {
+  const lines = [];
+  if (st.aoaEnabled) {
+    const aoa = st.aoa || {};
+    const label = AOA_STATE_LABELS[aoa.state] || aoa.state || "unknown";
+    lines.push(`USB accessory: ${label}${aoa.detail ? ` (${aoa.detail})` : ""}`);
+  }
+  if (st.adbTunnelEnabled) {
+    const adb = st.adb || {};
+    const serials = Array.isArray(adb.availableSerials) ? adb.availableSerials : [];
+    const detail = adb.error
+      ? `error: ${adb.error}`
+      : (adb.ready ? `${serials.length} device(s) attached` : "not ready");
+    lines.push(`ADB tunnel: ${detail}${adb.preferredSerial ? `, preferred ${adb.preferredSerial}` : ""}`);
+  }
+  if (!lines.length) lines.push("No USB transport is enabled. Turn on USB accessory or the ADB tunnel in settings.");
+  $("connection-info").textContent = lines.join("\n");
 }
 
 function renderSetupChecklist(setup) {
