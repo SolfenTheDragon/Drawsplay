@@ -131,7 +131,6 @@ jobs:
           if-no-files-found: error
           path: |
             release/drawsplay-host-linux-amd64
-            release/launch-drawsplay-host.sh
             release/install-drawsplay-host-linux.sh
             release/uninstall-drawsplay-host-linux.sh
             release/drawsplay-tray.png
@@ -201,7 +200,6 @@ jobs:
             DrawSplay-host-windows.zip \
             DrawSplay-android-release.zip \
             drawsplay-host-linux-amd64 \
-            launch-drawsplay-host.sh \
             install-drawsplay-host-linux.sh \
             uninstall-drawsplay-host-linux.sh \
             drawsplay-tray.png \
@@ -249,7 +247,7 @@ jobs:
               "\n\n## Downloads\n\n"
               "- **Windows:** `DrawSplay.exe`\n"
               "- **Android:** `DrawSplay.APK`\n"
-              "- **Linux (amd64):** `drawsplay-host-linux-amd64`, `launch-drawsplay-host.sh` and `70-drawsplay-aoa.rules`; use `install-drawsplay-host-linux.sh` to install desktop launchers or `uninstall-drawsplay-host-linux.sh` to remove them\n"
+              "- **Linux (amd64):** `drawsplay-host-linux-amd64`, `install-drawsplay-host-linux.sh`, `drawsplay-tray.png` and `70-drawsplay-aoa.rules`; run `install-drawsplay-host-linux.sh` to install (the host is not meant to be launched without installing) or `uninstall-drawsplay-host-linux.sh` to remove it\n"
               "\nUse `SHA256SUMS.txt` to verify your downloads.\n"
           )
           Path("release/PATCH_NOTES.md").write_text(notes, encoding="utf-8")
@@ -267,7 +265,6 @@ jobs:
             release/DrawSplay-host-windows.zip
             release/DrawSplay-android-release.zip
             release/drawsplay-host-linux-amd64
-            release/launch-drawsplay-host.sh
             release/install-drawsplay-host-linux.sh
             release/uninstall-drawsplay-host-linux.sh
             release/drawsplay-tray.png

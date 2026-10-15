@@ -16,7 +16,7 @@ Use your Android tablet as a touch- and pen-enabled extension of your computer's
 Get the latest [DrawSplay release](https://github.com/SolfenTheDragon/Drawsplay/releases/latest):
 
 - **Windows host:** `DrawSplay.exe`
-- **Linux host (x86-64):** `drawsplay-host-linux-amd64` and `launch-drawsplay-host.sh`; optional `install-drawsplay-host-linux.sh` and `uninstall-drawsplay-host-linux.sh` for menu/desktop launchers
+- **Linux host (x86-64):** `drawsplay-host-linux-amd64` and `install-drawsplay-host-linux.sh` (required); optional `uninstall-drawsplay-host-linux.sh`
 - **Android app:** `DrawSplay.APK`
 
 No source build is required.
@@ -45,16 +45,14 @@ On first run the host sets up `ffmpeg` automatically if needed and may install a
 
 ### Linux
 
-1. Download `drawsplay-host-linux-amd64`, `launch-drawsplay-host.sh`, `70-drawsplay-aoa.rules` and `DrawSplay.APK` into one folder, then run:
+1. Download `drawsplay-host-linux-amd64`, `install-drawsplay-host-linux.sh`, `drawsplay-tray.png`, `70-drawsplay-aoa.rules` and `DrawSplay.APK` into one folder, then run:
    ```bash
-   chmod +x drawsplay-host-linux-amd64 launch-drawsplay-host.sh
-   ./launch-drawsplay-host.sh
+   chmod +x install-drawsplay-host-linux.sh
+   ./install-drawsplay-host-linux.sh
    ```
-   Run it as your normal user, not with `sudo`. On Ubuntu/Debian it installs missing tools and sets up USB/input permissions (asking for your password); log out and back in or restart afterwards if asked. Use `--no-install-deps` to keep system changes manual.
+   Run it as your normal user, not with `sudo`. It installs the host, menu and desktop launchers and start at login; on Ubuntu/Debian it also installs missing tools and sets up USB/input permissions (asking for your password). Log out and back in or restart afterwards if asked. Use `--no-install-deps` to keep system changes manual.
 2. Install the app on the tablet: copy `DrawSplay.APK` to it, open it and allow installs from that source if asked.
-3. For menu and desktop launchers plus start at login, put `install-drawsplay-host-linux.sh` and `drawsplay-tray.png` beside the host and run `./install-drawsplay-host-linux.sh`. Remove it with `./uninstall-drawsplay-host-linux.sh` (settings and logs are kept).
-
-The Linux install script (and the launcher) install the udev rule for USB access automatically when `70-drawsplay-aoa.rules` is beside them (asks for your password); replug the tablet afterwards.
+3. Remove the host with `./uninstall-drawsplay-host-linux.sh` (settings and logs are kept).
 
 For smoother streaming, install your GPU's VA-API driver (for example `intel-media-va-driver-non-free` or `mesa-va-drivers`).
 
@@ -63,7 +61,7 @@ More per-desktop detail (X11/vkms, GNOME, KDE, sway, Hyprland) is in the project
 ## Use
 
 1. Connect the tablet by USB.
-2. Start the host (`DrawSplay.exe` on Windows, `./launch-drawsplay-host.sh` on Linux).
+2. Start the host (`DrawSplay.exe` on Windows, the DrawSplay menu entry or desktop shortcut on Linux).
 3. Open DrawSplay on the tablet.
 
 The tablet connects on its own, shows the extended desktop and sends touch and pen input back. It reconnects after drops and unplugging.
@@ -117,7 +115,7 @@ On Linux the frame rate is limited to 60.
 
 ## Privacy
 
-The host listens only on your computer (localhost) and the settings page is local-only.
+The host listens only on your computer (localhost) and the settings page is local-only. See [PRIVACY.md](PRIVACY.md) for the full privacy policy.
 
 ## License
 
