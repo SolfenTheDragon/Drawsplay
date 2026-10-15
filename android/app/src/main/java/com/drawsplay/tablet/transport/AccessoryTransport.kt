@@ -27,6 +27,8 @@ object AccessoryTransport {
     private const val ACTION_PERMISSION = "com.drawsplay.tablet.USB_ACCESSORY_PERMISSION"
     private const val MANUFACTURER = "DrawSplay"
     private const val MODEL = "Tablet"
+    // Sent by the host when auto-launch is off; not in accessory_filter.xml, so Android does not prompt to open the app.
+    private const val MODEL_MANUAL = "TabletManual"
 
     private val lock = Any()
     private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "accessory-open").apply { isDaemon = true } }
@@ -38,6 +40,7 @@ object AccessoryTransport {
     private var link: AccessoryLink? = null
     private var fd: ParcelFileDescriptor? = null
     private var permissionRequested = false
+    private var poller: java.util.concurrent.ScheduledExecutorService? = null
 
     fun start(context: Context, onAvailabilityChanged: (Boolean) -> Unit) {
         synchronized(lock) {
@@ -76,11 +79,30 @@ object AccessoryTransport {
             r = receiver
             receiver = null
             availability = null
+            poller?.shutdownNow()
+            poller = null
         }
         if (ctx != null && r != null) {
             try { ctx.unregisterReceiver(r) } catch (_: IllegalArgumentException) {}
         }
         closeLink()
+    }
+
+    /**
+     * ATTACHED is only delivered as an activity intent, so poll to notice a replug while the app stays open.
+     * Call with true only while the app is visible; polling is off otherwise to save battery.
+     */
+    fun setPolling(enabled: Boolean) {
+        synchronized(lock) {
+            if (!enabled) {
+                poller?.shutdownNow()
+                poller = null
+                return
+            }
+            if (poller != null || receiver == null) return
+            poller = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { p -> Thread(p, "accessory-poll").apply { isDaemon = true } }
+                .also { it.scheduleWithFixedDelay({ if (!isAttached()) refresh() }, 0, 3, java.util.concurrent.TimeUnit.SECONDS) }
+        }
     }
 
     /** Looks for an attached DrawSplay accessory and opens it. Safe to call repeatedly. */
@@ -104,7 +126,7 @@ object AccessoryTransport {
             manager = usbManager ?: return
             ctx = appContext ?: return
         }
-        val accessory = manager.accessoryList?.firstOrNull { it.manufacturer == MANUFACTURER && it.model == MODEL } ?: return
+        val accessory = manager.accessoryList?.firstOrNull { it.manufacturer == MANUFACTURER && (it.model == MODEL || it.model == MODEL_MANUAL) } ?: return
         if (!manager.hasPermission(accessory)) {
             requestPermission(ctx, manager, accessory)
             return

@@ -40,9 +40,21 @@ func (d *fakeAOADevice) Control(reqType, request byte, value, index uint16, data
 func (d *fakeAOADevice) OpenPipe() (aoaPipe, error) { return d.pipe, nil }
 func (d *fakeAOADevice) Close() error               { return nil }
 
+func TestAOASwitchUsesNonMatchingModelWithoutAutoLaunch(t *testing.T) {
+	dev := &fakeAOADevice{protocol: 2, failString: -1}
+	if err := aoaSwitchToAccessory(dev, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range dev.controls {
+		if c.request == aoaRequestSendString && c.index == aoaStringModel && c.data != aoaModelManual {
+			t.Fatalf("model = %q, want %q", c.data, aoaModelManual)
+		}
+	}
+}
+
 func TestAOASwitchSendsIdentificationThenStart(t *testing.T) {
 	dev := &fakeAOADevice{protocol: 2, failString: -1}
-	if err := aoaSwitchToAccessory(dev); err != nil {
+	if err := aoaSwitchToAccessory(dev, true); err != nil {
 		t.Fatal(err)
 	}
 	if dev.controls[0].request != aoaRequestGetProtocol || dev.controls[0].reqType != aoaReqTypeIn {
@@ -68,10 +80,10 @@ func TestAOASwitchSendsIdentificationThenStart(t *testing.T) {
 }
 
 func TestAOASwitchRejectsUnsupportedAndStalledDevices(t *testing.T) {
-	if err := aoaSwitchToAccessory(&fakeAOADevice{protocol: 0, failString: -1}); !errors.Is(err, errAOANotSupported) {
+	if err := aoaSwitchToAccessory(&fakeAOADevice{protocol: 0, failString: -1}, true); !errors.Is(err, errAOANotSupported) {
 		t.Fatalf("protocol 0 err = %v", err)
 	}
-	if err := aoaSwitchToAccessory(&fakeAOADevice{protocol: 1, failString: aoaStringModel}); err == nil {
+	if err := aoaSwitchToAccessory(&fakeAOADevice{protocol: 1, failString: aoaStringModel}, true); err == nil {
 		t.Fatal("expected error when a string transfer stalls")
 	}
 }
@@ -275,14 +287,14 @@ func TestAOAPollOnceSwitchesThenServes(t *testing.T) {
 	plain := aoaCandidate{VID: 0x04e8, PID: 0x6860, Key: "1-2@5", Open: func() (aoaDeviceHandle, error) { return switched, nil }}
 	scan := func() ([]aoaCandidate, error) { return []aoaCandidate{plain}, nil }
 
-	if served := aoaPollOnce(context.Background(), scan, lastSwitch, func(byte, *aoaConn) {}); served {
+	if served := aoaPollOnce(context.Background(), scan, lastSwitch, true, func(byte, *aoaConn) {}); served {
 		t.Fatal("no link expected before the device re-enumerates")
 	}
 	if len(switched.controls) == 0 || switched.controls[len(switched.controls)-1].request != aoaRequestStart {
 		t.Fatalf("expected the switch sequence, got %+v", switched.controls)
 	}
 	n := len(switched.controls)
-	aoaPollOnce(context.Background(), scan, lastSwitch, func(byte, *aoaConn) {})
+	aoaPollOnce(context.Background(), scan, lastSwitch, true, func(byte, *aoaConn) {})
 	if len(switched.controls) != n {
 		t.Fatal("a device must not be re-probed within the backoff window")
 	}
@@ -300,7 +312,7 @@ func TestAOAPollOnceSwitchesThenServes(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		tabSide.Close()
 	}()
-	served := aoaPollOnce(context.Background(), func() ([]aoaCandidate, error) { return []aoaCandidate{acc}, nil }, lastSwitch,
+	served := aoaPollOnce(context.Background(), func() ([]aoaCandidate, error) { return []aoaCandidate{acc}, nil }, lastSwitch, true,
 		func(kind byte, c *aoaConn) { opened <- kind })
 	if !served {
 		t.Fatal("expected the accessory link to be served")

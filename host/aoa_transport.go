@@ -51,7 +51,7 @@ func runAOATransport(ctx context.Context, store *settingsStore, scan aoaScanFunc
 	ticker := time.NewTicker(aoaScanInterval)
 	defer ticker.Stop()
 	for {
-		if aoaPollOnce(ctx, scan, lastSwitch, onOpen) {
+		if aoaPollOnce(ctx, scan, lastSwitch, store.get().AutoLaunchAndroidApp, onOpen) {
 			// A link just ended; give the tablet a moment before probing again.
 			select {
 			case <-ctx.Done():
@@ -69,7 +69,7 @@ func runAOATransport(ctx context.Context, store *settingsStore, scan aoaScanFunc
 
 // aoaPollOnce scans for devices, switching Android devices into accessory mode
 // and serving one accessory link. It reports whether a link was served.
-func aoaPollOnce(ctx context.Context, scan aoaScanFunc, lastSwitch map[string]time.Time, onOpen func(byte, *aoaConn)) bool {
+func aoaPollOnce(ctx context.Context, scan aoaScanFunc, lastSwitch map[string]time.Time, autoLaunch bool, onOpen func(byte, *aoaConn)) bool {
 	cands, err := scan()
 	if err != nil {
 		throttledLog("aoa-scan", "AOA device scan failed: %v", err)
@@ -129,7 +129,7 @@ func aoaPollOnce(ctx context.Context, scan aoaScanFunc, lastSwitch map[string]ti
 			throttledLog("aoa-open-"+c.Key, "AOA: cannot open %04x:%04x: %v", c.VID, c.PID, err)
 			continue
 		}
-		err = aoaSwitchToAccessory(dev)
+		err = aoaSwitchToAccessory(dev, autoLaunch)
 		_ = dev.Close()
 		if err != nil {
 			setAOAStatus("error", fmt.Sprintf("%04x:%04x did not switch to accessory mode: %v", c.VID, c.PID, err))

@@ -32,6 +32,21 @@
                 android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
                 android:resource="@xml/accessory_filter" />
         </activity>
+        <!-- Silently absorbs the accessory attach event when the host's auto-open is off,
+             so Android neither launches the app nor says "no apps work with this accessory". -->
+        <activity
+            android:name=".AccessoryIgnoreActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
+                android:resource="@xml/accessory_filter_manual" />
+        </activity>
     </application>
 
 </manifest>

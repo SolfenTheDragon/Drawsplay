@@ -39,9 +39,12 @@ const (
 const (
 	aoaManufacturer = "DrawSplay"
 	aoaModel        = "Tablet"
-	aoaDescription  = "DrawSplay tablet display"
-	aoaURI          = "https://github.com/SolfenTheDragon/Drawsplay"
-	aoaSerial       = "drawsplay-aoa"
+	// aoaModelManual deliberately does not match accessory_filter.xml, so
+	// Android does not offer to open the app when the tablet is attached.
+	aoaModelManual = "TabletManual"
+	aoaDescription = "DrawSplay tablet display"
+	aoaURI         = "https://github.com/SolfenTheDragon/Drawsplay"
+	aoaSerial      = "drawsplay-aoa"
 )
 
 var errAOANotSupported = errors.New("device does not support Android Open Accessory")
@@ -110,7 +113,12 @@ func aoaVendorProbeAllowed(vid uint16) bool {
 
 // aoaSwitchToAccessory asks an attached Android device to re-enumerate in
 // accessory mode. The device disappears and returns as 18d1:2d00-2d05.
-func aoaSwitchToAccessory(dev aoaDeviceHandle) error {
+// autoLaunch selects the model string that lets Android offer to launch the app.
+func aoaSwitchToAccessory(dev aoaDeviceHandle, autoLaunch bool) error {
+	model := aoaModel
+	if !autoLaunch {
+		model = aoaModelManual
+	}
 	var proto [2]byte
 	n, err := dev.Control(aoaReqTypeIn, aoaRequestGetProtocol, 0, 0, proto[:])
 	if err != nil {
@@ -124,7 +132,7 @@ func aoaSwitchToAccessory(dev aoaDeviceHandle) error {
 		value string
 	}{
 		{aoaStringManufacturer, aoaManufacturer},
-		{aoaStringModel, aoaModel},
+		{aoaStringModel, model},
 		{aoaStringDescription, aoaDescription},
 		{aoaStringURI, aoaURI},
 		{aoaStringSerial, aoaSerial},
