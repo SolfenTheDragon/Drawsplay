@@ -97,7 +97,7 @@ fi
 if [[ "$WAYLAND_CAPTURE" -eq 1 ]]; then
   commands+=(gst-launch-1.0 gst-inspect-1.0)
 else
-  commands+=(xrandr xdotool)
+  commands+=(xrandr)
 fi
 for cmd in "${commands[@]}"; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -116,7 +116,7 @@ if [[ ${#missing[@]} -gt 0 ]]; then
   if [[ "$WAYLAND_CAPTURE" -eq 1 ]]; then
     echo "  sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-pipewire"
   else
-    echo "  sudo apt install x11-xserver-utils xdotool   # xdotool restores the host cursor after the virtual display appears"
+    echo "  sudo apt install x11-xserver-utils"
   fi
   echo
 fi
