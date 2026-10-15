@@ -27,7 +27,7 @@ No source build is required.
 
 Use the Linux amd64 download on an x86-64 computer. **Wayland is the preferred Linux session**, with X11 as the backup for desktops without a supported Wayland implementation. **Ubuntu 22.04+ with GNOME Wayland** supports an extended desktop on the tablet (see [GNOME Wayland extended display](#gnome-wayland-extended-display)), as do **KDE Plasma 6, sway and Hyprland** (see [KDE Plasma, sway and Hyprland](#kde-plasma-sway-and-hyprland)). **X11 sessions, including Ubuntu Cinnamon/Linux Mint Cinnamon, MATE and Xfce, are the backup: they support an extended desktop once the `vkms` kernel module is loaded** (see [X11 extended display](#x11-extended-display-vkms)); without it they mirror the existing desktop. Other Wayland desktops, such as Cinnamon on Wayland, cannot extend the desktop: the tablet mirrors XWayland's screen, which shows only X11 applications (see [Other Wayland desktops](#other-wayland-desktops)).
 
-Linux needs ADB and ffmpeg. GStreamer with its PipeWire plugin is needed for the GNOME and KDE Plasma Wayland extended display. The X11 backup also needs access to the active X11 display, plus `xrandr` for its extended display and `xdotool` (restores the host cursor after the virtual display appears). Touch and pen input require access to `/dev/uinput`. See the Linux setup below.
+Linux needs ADB and ffmpeg. GStreamer with its PipeWire plugin is needed for the GNOME and KDE Plasma Wayland extended display. The X11 backup also needs access to the active X11 display, plus `xrandr` for its extended display. Touch and pen input require access to `/dev/uinput`. See the Linux setup below.
 
 ---
 
@@ -126,7 +126,7 @@ sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugi
   gstreamer1.0-plugins-ugly gstreamer1.0-pipewire
 ```
 
-For the X11 backup (Cinnamon, MATE, Xfce), install `xrandr` and `xdotool` instead (`sudo apt install x11-xserver-utils xdotool`) and see [X11 extended display](#x11-extended-display-vkms).
+For the X11 backup (Cinnamon, MATE, Xfce), install `xrandr` instead (`sudo apt install x11-xserver-utils`) and see [X11 extended display](#x11-extended-display-vkms).
 
 Restart after setting up permissions. On other distributions, install the equivalent packages using your package manager; the launcher's automatic package installation requires `apt-get`.
 
