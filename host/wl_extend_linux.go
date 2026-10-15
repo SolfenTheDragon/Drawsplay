@@ -436,7 +436,7 @@ func mapWlExtTablet(label string, hd wlExtHandle) bool {
 	}
 	log.Printf("Mapped Drawsplay Pen touch/pen input to %s (%s)", hd.Name(), label)
 	if label == "Muffin" {
-		nudgeX11Pointer()
+		go nudgeX11PointerAfterCapture()
 	}
 	return true
 }
