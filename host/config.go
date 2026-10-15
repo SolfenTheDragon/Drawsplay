@@ -28,23 +28,26 @@ import (
 
 // settings is the user-tunable host configuration.
 type settings struct {
-	ADB                   string `json:"adb"`
-	PreferredADBSerial    string `json:"preferredADBSerial,omitempty"`
-	RequirePreferredADB   bool   `json:"requirePreferredADB"`
-	AllowToolAutoInstall  bool   `json:"allowToolAutoInstall"`
-	AutoLaunchAndroidApp  bool   `json:"autoLaunchAndroidApp"`
-	ZeroCopyCapture       bool   `json:"zeroCopyCapture"`
-	TemporalLayering      bool   `json:"temporalLayering"`
-	FFmpeg                string `json:"ffmpeg"`
-	FPS                   int    `json:"fps"`
-	Bitrate               string `json:"bitrate"`
-	Width                 int    `json:"width"`
-	Height                int    `json:"height"`
-	LocalCursor           bool   `json:"localCursor"`
-	TouchEnabled          bool   `json:"touchEnabled"`
-	PenEnabled            bool   `json:"penEnabled"`
-	KeyboardEnabled       bool   `json:"keyboardEnabled"`
-	KeepAliveOnBackground bool   `json:"keepAliveOnBackground"`
+	ADB                  string `json:"adb"`
+	PreferredADBSerial   string `json:"preferredADBSerial,omitempty"`
+	RequirePreferredADB  bool   `json:"requirePreferredADB"`
+	AllowToolAutoInstall bool   `json:"allowToolAutoInstall"`
+	AutoLaunchAndroidApp bool   `json:"autoLaunchAndroidApp"`
+	ZeroCopyCapture      bool   `json:"zeroCopyCapture"`
+	TemporalLayering     bool   `json:"temporalLayering"`
+	FFmpeg               string `json:"ffmpeg"`
+	FPS                  int    `json:"fps"`
+	Bitrate              string `json:"bitrate"`
+	Width                int    `json:"width"`
+	Height               int    `json:"height"`
+	LocalCursor          bool   `json:"localCursor"`
+	TouchEnabled         bool   `json:"touchEnabled"`
+	PenEnabled           bool   `json:"penEnabled"`
+	// TouchGestures makes Linux fingers a real multi-touch screen (pinch,
+	// two-finger scroll) instead of a pointer, where a one-finger drag selects.
+	TouchGestures         bool `json:"touchGestures"`
+	KeyboardEnabled       bool `json:"keyboardEnabled"`
+	KeepAliveOnBackground bool `json:"keepAliveOnBackground"`
 	// VideoScaling is how the tablet lays the host picture out on its panel
 	// (videoScalingFill, videoScalingFit or videoScalingOriginal).
 	VideoScaling    string `json:"videoScaling"`
@@ -79,6 +82,7 @@ func defaultSettings() settings {
 		LocalCursor:           true,
 		TouchEnabled:          true,
 		PenEnabled:            true,
+		TouchGestures:         true,
 		KeyboardEnabled:       true,
 		KeepAliveOnBackground: false,
 		VideoScaling:          videoScalingFill,

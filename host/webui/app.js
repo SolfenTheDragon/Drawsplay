@@ -350,6 +350,7 @@ async function loadSettings() {
   $("require-adb-serial").checked = !!s.requirePreferredADB;
   $("local-cursor").checked = s.localCursor !== false;
   $("touch-enabled").checked = s.touchEnabled !== false;
+  $("touch-gestures").checked = s.touchGestures !== false;
   $("pen-enabled").checked = s.penEnabled !== false;
   $("keyboard-enabled").checked = s.keyboardEnabled !== false;
   $("keep-alive-on-background").checked = !!s.keepAliveOnBackground;
@@ -575,6 +576,7 @@ $("form").addEventListener("submit", async (ev) => {
       requirePreferredADB: $("require-adb-serial").checked,
       localCursor: $("local-cursor").checked,
       touchEnabled: $("touch-enabled").checked,
+      touchGestures: $("touch-gestures").checked,
       penEnabled: $("pen-enabled").checked,
       keyboardEnabled: $("keyboard-enabled").checked,
       keepAliveOnBackground: $("keep-alive-on-background").checked,

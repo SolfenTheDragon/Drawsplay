@@ -147,7 +147,7 @@ func (t *touchState) slotFor(pointerID int) (int, bool) {
 // That is a display the compositor maps it to, or an X11 output that
 // tabletAbsCoords aims at within the X screen.
 func (l *linuxInjector) useTouchDevice() bool {
-	if l.touchFd < 0 {
+	if l.touchFd < 0 || globalSettingsStore == nil || !globalSettingsStore.get().TouchGestures {
 		return false
 	}
 	t := activeTarget()
