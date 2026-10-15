@@ -24,20 +24,21 @@ No source build is required.
 ## Requirements
 
 - A USB cable between the computer and the tablet
-- **Windows:** Windows 10/11. Internet access on first run if `adb`/`ffmpeg` aren't already present or bundled.
+- **Windows:** Windows 10/11, with the WinUSB driver bound to the tablet (see Install). Internet access on first run if `ffmpeg` isn't already present or bundled.
 - **Linux:** an x86-64 computer with ADB and ffmpeg. Wayland is preferred (GNOME, KDE Plasma 6, sway and Hyprland support an extended desktop); X11 also works and needs the `vkms` kernel module for an extended desktop. Without a virtual display DrawSplay mirrors your screen instead.
-- **Tablet:** an Android device. Developer Options and USB debugging are only needed if you use the optional adb tunnel.
+- **Tablet:** an Android device. The default USB accessory connection needs no Developer options or USB debugging; those are only needed for the optional adb tunnel.
 
 ## Install
 
 ### Windows
 
 1. Put `DrawSplay.exe` and `DrawSplay.APK` in a folder such as `C:\DrawSplay\`.
-2. Install the app on the tablet (connected by USB, accept any USB prompt):
+2. Install the app on the tablet, either by copying `DrawSplay.APK` to it and opening it, or with adb (USB debugging on):
    ```powershell
    adb install -r C:\DrawSplay\DrawSplay.APK
    ```
-3. Start the host:
+3. Bind the WinUSB driver to the tablet so the host can open it over USB; see `packaging/windows/README.md` (the Windows USB accessory path hasn't been tested on hardware yet). Alternatively, enable the adb tunnel below.
+4. Start the host:
    ```powershell
    cd C:\DrawSplay
    .\DrawSplay.exe
@@ -60,7 +61,7 @@ On first run the host sets up `adb`/`ffmpeg` automatically if needed and may ins
    ```
 3. For menu and desktop launchers plus start at login, put `install-drawsplay-host-linux.sh` and `drawsplay-tray.png` beside the host and run `./install-drawsplay-host-linux.sh`. Remove it with `./uninstall-drawsplay-host-linux.sh` (settings and logs are kept).
 
-For a USB-accessory connection that needs no Developer options, install the udev rule from `packaging/linux/70-drawsplay-aoa.rules` into `/etc/udev/rules.d/` and reload udev.
+To let your user open the tablet over USB, install the udev rule from `packaging/linux/70-drawsplay-aoa.rules` into `/etc/udev/rules.d/` and reload udev.
 
 For smoother streaming, install your GPU's VA-API driver (for example `intel-media-va-driver-non-free` or `mesa-va-drivers`).
 
@@ -72,7 +73,11 @@ More per-desktop detail (X11/vkms, GNOME, KDE, sway, Hyprland) is in the project
 2. Start the host (`DrawSplay.exe` on Windows, `./launch-drawsplay-host.sh` on Linux).
 3. Open DrawSplay on the tablet.
 
-The tablet connects on its own, shows the extended desktop and sends touch and pen input back. It reconnects after drops and unplugging.
+The first time, accept the USB prompt on the tablet. The tablet connects on its own, shows the extended desktop and sends touch and pen input back. It reconnects after drops and unplugging.
+
+## Connection mode
+
+By default DrawSplay uses **USB accessory mode** on Windows and Linux: no Developer options or USB debugging, and it ends any adb session on the tablet. The older **adb tunnel** is off by default; to use it, turn on USB debugging on the tablet and enable *ADB tunnel* in Advanced settings on the settings page (or start the host with `-adb-tunnel`).
 
 ## Configuration
 
@@ -100,7 +105,9 @@ On Linux the frame rate is limited to 60.
 
 ## Troubleshooting
 
-**Tablet not listed by ADB.** Run `adb kill-server`, `adb start-server`, `adb devices`, reconnect the USB cable and accept the USB prompt. On Windows with no global adb, start `DrawSplay.exe` once, then use `C:\DrawSplay\runtime\adb\adb.exe devices`.
+**Tablet doesn't connect over USB.** Check the Linux udev rule or the Windows WinUSB driver (see Install), replug the cable and accept the USB prompt on the tablet.
+
+**Tablet not listed by ADB (adb tunnel only).** Run `adb kill-server`, `adb start-server`, `adb devices`, reconnect the USB cable and accept the USB prompt. On Windows with no global adb, start `DrawSplay.exe` once, then use `C:\DrawSplay\runtime\adb\adb.exe devices`.
 
 **Linux: `no permissions` or pen/touch not working.** Check that the Android USB rules are installed and you're in `plugdev`; for input, check the `/dev/uinput` rule and `input` group. Log out and back in afterwards.
 
