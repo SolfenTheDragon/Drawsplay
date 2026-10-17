@@ -144,13 +144,20 @@ func buildCapturePipelines(target captureTarget, opts videoOptions) ([]pipelineS
 		if display == "" {
 			display = ":0"
 		}
+		// Only the VAAPI candidate runs above linuxCaptureFPSCeiling; the other
+		// encoders keep the 60 fps they were tuned and measured at.
+		swOpts := opts
+		if swOpts.FPS > linuxCaptureFPSCeiling {
+			swOpts.FPS = linuxCaptureFPSCeiling
+		}
+		swCapture := x11GrabCaptureArgs(target, display, swOpts.FPS)
 		capture := x11GrabCaptureArgs(target, display, opts.FPS)
-		specs, err := ffmpegSpecs(opts, capture)
+		specs, err := ffmpegSpecs(swOpts, swCapture)
 		if err != nil {
 			return nil, err
 		}
 		width, height := x11CaptureSize(target, display)
-		specs = withX264FrameThreads(specs, opts, capture, x264FrameThreads(width, height, opts.FPS))
+		specs = withX264FrameThreads(specs, swOpts, swCapture, x264FrameThreads(width, height, swOpts.FPS))
 		specs = withVAAPICandidate(specs, opts, capture)
 		specs = withX11VBV(specs, opts)
 		return withAccessUnitWrites(specs, opts), nil
@@ -503,6 +510,17 @@ func globVAAPIRenderNodes() []string {
 // ffmpeg build can convert on the GPU. Replaced in tests.
 var linuxVAAPIProbe = probeVAAPISupport
 
+func init() {
+	x11HighFPSSupported = vaapiX11Usable
+}
+
+// vaapiX11Usable reports whether the h264_vaapi x11grab candidate would be
+// offered for this ffmpeg.
+func vaapiX11Usable(ffmpeg string) bool {
+	_, ok := vaapiX11Spec(videoOptions{FFmpeg: ffmpeg, Codec: "h264", FPS: linuxCaptureFPSCeiling}, nil)
+	return ok
+}
+
 // vaapiScaleFilterUsable inspects `ffmpeg -h filter=scale_vaapi` output.
 //
 // ffmpeg prints "Unknown filter '<name>'." and still **exits 0** for a filter
@@ -593,7 +611,7 @@ func vaapiEncoderArgs(device string, fps int) []string {
 	if gopFrames <= 0 {
 		gopFrames = 120
 	}
-	return []string{
+	args := []string{
 		"-vaapi_device", device,
 		// out_range=tv tags what the VA post-processor actually emits
 		// (limited-range luma); leaving it unset makes ffmpeg advertise full
@@ -608,6 +626,10 @@ func vaapiEncoderArgs(device string, fps int) []string {
 		// while unpaced throughput only dropped 2-4 % (still ~180 fps at
 		// 1080p, three times the 60 fps x11grab is clamped to).
 		"-async_depth", "1",
+		// Explicit level: without it ffmpeg derives one that iHD rejects for
+		// 1080p above 60 fps ("Failed to end picture encode issue: 24").
+		// 5.2 covers 1080p120 and the tablet-native 2960x1848 at 60 fps.
+		"-level", "5.2",
 		// VBR capped by the shared -maxrate/-bufsize (rateControlArgs). CBR
 		// made the driver pad every frame up to the bitrate budget: a static
 		// desktop cost 48.8 KB per frame at 24M versus 2.4 KB with VBR, and
@@ -617,4 +639,12 @@ func vaapiEncoderArgs(device string, fps int) []string {
 		"-bf", "0",
 		"-g", fmt.Sprintf("%d", gopFrames),
 	}
+	if fps > linuxCaptureFPSCeiling {
+		// Above 60 fps the raw H.264 output carries no timestamps and ffmpeg
+		// encodes every grab: measured 234 fps against a 120 fps request.
+		// -r drops the surplus without the frame of lookahead an fps filter
+		// adds.
+		args = append(args, "-r", fmt.Sprintf("%d", fps))
+	}
+	return args
 }

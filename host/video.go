@@ -731,7 +731,7 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		}
 
 		effOpts := opts
-		effOpts.FPS = effectiveCaptureFPS(target, opts.FPS)
+		effOpts.FPS = effectiveCaptureFPS(target, opts.FPS, opts.FFmpeg)
 		if lastEffectiveFPS != 0 && effOpts.FPS != lastEffectiveFPS {
 			log.Printf("Capture framerate now following active display refresh: %d fps", effOpts.FPS)
 			publishModeChange(target.Width, target.Height, effOpts.FPS)

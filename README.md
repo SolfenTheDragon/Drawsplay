@@ -96,7 +96,7 @@ Video setting changes restart the stream automatically.
 - sway / Hyprland: their output commands.
 - KDE Plasma: DrawSplay's settings page.
 
-On Linux the frame rate is limited to 60.
+On Linux the frame rate is limited to 60, except on X11 hosts with VA-API (Intel/AMD) where the tablet may request up to 120.
 
 ## Troubleshooting
 
