@@ -208,21 +208,33 @@ jobs:
           name: linux-release
           path: release
 
+      - name: Bundle per-platform folders
+        working-directory: release
+        env:
+          RELEASE_TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          win="DrawSplay-windows-${RELEASE_TAG}"
+          mkdir "$win"
+          cp "drawsplay_installer_${RELEASE_TAG}.exe" DrawSplay.APK "$win/"
+          zip -r "${win}.zip" "$win"
+
+          lin="DrawSplay-linux-${RELEASE_TAG}"
+          mkdir "$lin"
+          cp drawsplay-host-linux-amd64 install-drawsplay-host-linux.sh \
+            uninstall-drawsplay-host-linux.sh drawsplay-tray.png \
+            70-drawsplay-aoa.rules DrawSplay.APK "$lin/"
+          chmod +x "$lin/drawsplay-host-linux-amd64" "$lin"/*.sh
+          tar -czf "${lin}.tar.gz" "$lin"
+
       - name: Generate SHA-256 checksums
         working-directory: release
         env:
           RELEASE_TAG: ${{ needs.resolve-tag.outputs.tag }}
         run: |
           sha256sum \
-            "drawsplay_installer_${RELEASE_TAG}.exe" \
-            DrawSplay.APK \
-            DrawSplay-host-windows.zip \
-            DrawSplay-android-release.zip \
-            drawsplay-host-linux-amd64 \
-            install-drawsplay-host-linux.sh \
-            uninstall-drawsplay-host-linux.sh \
-            drawsplay-tray.png \
-            70-drawsplay-aoa.rules > SHA256SUMS.txt
+            "DrawSplay-windows-${RELEASE_TAG}.zip" \
+            "DrawSplay-linux-${RELEASE_TAG}.tar.gz" \
+            DrawSplay.APK > SHA256SUMS.txt
 
       - name: Generate release patch notes
         env:
@@ -264,9 +276,9 @@ jobs:
               notes += f"\n\n[Full changelog](https://github.com/{repository}/compare/{previous}...{tag})"
           notes += (
               "\n\n## Downloads\n\n"
-              f"- **Windows:** `drawsplay_installer_{tag}.exe` (run it to install DrawSplay; it adds an uninstaller and Apps & Features entry)\n"
-              "- **Android:** `DrawSplay.APK`\n"
-              "- **Linux (amd64):** `drawsplay-host-linux-amd64`, `install-drawsplay-host-linux.sh`, `drawsplay-tray.png` and `70-drawsplay-aoa.rules`; run `install-drawsplay-host-linux.sh` to install (the host is not meant to be launched without installing) or `uninstall-drawsplay-host-linux.sh` to remove it\n"
+              f"- **Windows:** `DrawSplay-windows-{tag}.zip` (extract the folder and run `drawsplay_installer_{tag}.exe`; it adds an uninstaller and Apps & Features entry)\n"
+              f"- **Linux (amd64):** `DrawSplay-linux-{tag}.tar.gz` (extract the folder and run `./install-drawsplay-host-linux.sh`; run `./uninstall-drawsplay-host-linux.sh` to remove it)\n"
+              "- **Android:** `DrawSplay.APK` (also included in both folders)\n"
               "\nUse `SHA256SUMS.txt` to verify your downloads.\n"
           )
           Path("release/PATCH_NOTES.md").write_text(notes, encoding="utf-8")
@@ -279,13 +291,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           body_path: release/PATCH_NOTES.md
           files: |
-            release/drawsplay_installer_${{ needs.resolve-tag.outputs.tag }}.exe
+            release/DrawSplay-windows-${{ needs.resolve-tag.outputs.tag }}.zip
+            release/DrawSplay-linux-${{ needs.resolve-tag.outputs.tag }}.tar.gz
             release/DrawSplay.APK
-            release/DrawSplay-host-windows.zip
-            release/DrawSplay-android-release.zip
-            release/drawsplay-host-linux-amd64
-            release/install-drawsplay-host-linux.sh
-            release/uninstall-drawsplay-host-linux.sh
-            release/drawsplay-tray.png
-            release/70-drawsplay-aoa.rules
             release/SHA256SUMS.txt

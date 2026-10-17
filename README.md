@@ -15,9 +15,9 @@ Use your Android tablet as a touch- and pen-enabled extension of your computer's
 
 Get the latest [DrawSplay release](https://github.com/SolfenTheDragon/Drawsplay/releases/latest):
 
-- **Windows host:** `drawsplay_installer_vX.Y.Z.exe` (the installer)
-- **Linux host (x86-64):** `drawsplay-host-linux-amd64` and `install-drawsplay-host-linux.sh` (required); optional `uninstall-drawsplay-host-linux.sh`
-- **Android app:** `DrawSplay.APK`
+- **Windows:** `DrawSplay-windows-vX.Y.Z.zip` (a folder with the installer and the APK)
+- **Linux (x86-64):** `DrawSplay-linux-vX.Y.Z.tar.gz` (a folder with the host, install/uninstall scripts, icon, udev rule and the APK)
+- **Android app:** `DrawSplay.APK` (also inside both folders)
 
 No source build is required.
 
@@ -33,7 +33,7 @@ No source build is required.
 ### Windows
 
 1. Install the app on the tablet: copy `DrawSplay.APK` to it, open it and allow installs from that source if asked.
-2. Run `drawsplay_installer_vX.Y.Z.exe`. It asks whether to add a desktop shortcut and whether to start DrawSplay automatically when you sign in, then Windows asks for administrator approval **once**; setup then:
+2. Extract `DrawSplay-windows-vX.Y.Z.zip` and run `drawsplay_installer_vX.Y.Z.exe`. It asks whether to add a desktop shortcut and whether to start DrawSplay automatically when you sign in, then Windows asks for administrator approval **once**; setup then:
    - installs DrawSplay to `C:\Program Files\DrawSplay\` (with `DrawSplay-Uninstall.exe`),
    - installs DrawSplay's bundled virtual display driver and `ffmpeg`,
    - installs a WinUSB driver for the tablet (signed on your PC, so Zadig is not needed) and a helper so newly attached tablets get it without another UAC prompt,
@@ -49,7 +49,7 @@ To run DrawSplay without installing (portable), rename the downloaded file to `D
 
 ### Linux
 
-1. Download `drawsplay-host-linux-amd64`, `install-drawsplay-host-linux.sh`, `drawsplay-tray.png`, `70-drawsplay-aoa.rules` and `DrawSplay.APK` into one folder, then run:
+1. Download and extract `DrawSplay-linux-vX.Y.Z.tar.gz` (`tar -xzf DrawSplay-linux-*.tar.gz`), open the extracted folder, then run:
    ```bash
    chmod +x install-drawsplay-host-linux.sh
    ./install-drawsplay-host-linux.sh
