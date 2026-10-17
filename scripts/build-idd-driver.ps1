@@ -79,7 +79,7 @@ function Resolve-WdkRoot {
     else {
         Write-Host "Restoring Microsoft.Windows.WDK.x64 (latest) ..."
     }
-    & $nuget.Source @nugetArgs
+    & $nuget.Source @nugetArgs | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "nuget install Microsoft.Windows.WDK.x64 failed ($LASTEXITCODE)" }
     $root = Join-Path $pkgDir 'Microsoft.Windows.WDK.x64\c'
     if (-not (Test-Path (Join-Path $root 'Include'))) {
