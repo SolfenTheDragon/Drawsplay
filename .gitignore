@@ -69,6 +69,8 @@ wiki/
 research/
 !/README.md
 !/PRIVACY.md
+!/THIRD-PARTY-NOTICES.md
+!/SECURITY.md
 .github/copilot-instructions.md
 
 # Google Play signing/publishing secrets and docs
