@@ -40,3 +40,5 @@ const (
 func newSessionCongestionGate(captureTarget) *congestionGate {
 	return newCongestionGate(linuxCongestionConfirmations, linuxCongestionWindow)
 }
+
+func limitSessionBitrateKbps(kbps int) int { return kbps }

@@ -107,6 +107,17 @@ func (rc *rateController) current() string {
 	return fmt.Sprintf("%dk", rc.ladder[rc.idx])
 }
 
+// nextLowerKbps returns the rung below the current one, if any.
+func (rc *rateController) nextLowerKbps() (int, bool) {
+	if rc.idx >= len(rc.ladder)-1 {
+		return 0, false
+	}
+	return rc.ladder[rc.idx+1], true
+}
+
+// topKbps returns the ladder's highest rung.
+func (rc *rateController) topKbps() int { return rc.ladder[0] }
+
 // onCongestion records a congestion event. It returns true when the caller
 // should restart the pipeline at the new, lower rate.
 func (rc *rateController) onCongestion() bool {

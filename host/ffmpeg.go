@@ -59,9 +59,23 @@ type capturePipeline struct {
 	fullPipeBound int
 	// inputDone is closed once the spec's Input has returned (nil when the
 	// spec has none); inputErr is why it failed.
-	inputDone chan struct{}
-	inputMu   sync.Mutex
-	inputErr  error
+	inputDone             chan struct{}
+	inputMu               sync.Mutex
+	inputErr              error
+	priorityForeground    bool
+	hasForegroundPriority bool
+}
+
+func (p *capturePipeline) setClientForeground(foreground bool) {
+	if p.hasForegroundPriority && p.priorityForeground == foreground {
+		return
+	}
+	if err := setCaptureProcessPriority(p.cmd, foreground); err != nil {
+		log.Printf("Set capture process priority (foreground=%t): %v", foreground, err)
+		return
+	}
+	p.priorityForeground = foreground
+	p.hasForegroundPriority = true
 }
 
 // startCapturePipeline launches the spec's command and returns a handle
@@ -70,7 +84,7 @@ func startCapturePipeline(ctx context.Context, spec pipelineSpec) (*capturePipel
 	log.Printf("Starting capture pipeline [%s]: %s %s", spec.Name, spec.Cmd, strings.Join(spec.Args, " "))
 
 	cmdCtx, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(cmdCtx, spec.Cmd, spec.Args...)
+	cmd := hiddenCommandContext(cmdCtx, spec.Cmd, spec.Args...)
 	applyCaptureProcessPriority(cmd)
 
 	stdout, err := cmd.StdoutPipe()
@@ -286,6 +300,11 @@ func isZeroCopyInitError(err error) bool {
 	markers := []string{
 		"failed to created derived device context",
 		"failed to configure output pad on parsed_hwmap",
+		// QSV zero-copy on ffmpeg builds whose ddagrab pool is dynamic.
+		"only fixed-size pools can be mapped to qsv frames",
+		"failed to create derived frames context",
+		"error creating a mfx session",
+		"error initializing an internal mfx session",
 	}
 	for _, marker := range markers {
 		if strings.Contains(text, marker) {
@@ -305,7 +324,7 @@ func ffmpegEncodersOutput(ffmpeg string) (string, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-encoders").Output()
+	out, err := hiddenCommandContext(ctx, ffmpeg, "-hide_banner", "-encoders").Output()
 	if err != nil {
 		return "", err
 	}
@@ -327,7 +346,7 @@ func ffmpegFilterHelpOutput(ffmpeg string, filter string) (string, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-h", "filter="+filter).CombinedOutput()
+	out, err := hiddenCommandContext(ctx, ffmpeg, "-hide_banner", "-h", "filter="+filter).CombinedOutput()
 	if err != nil {
 		return "", err
 	}

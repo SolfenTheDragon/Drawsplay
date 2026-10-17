@@ -114,6 +114,19 @@ func rateControlArgs(opts videoOptions) []string {
 	}
 }
 
+// withAccessUnitWrites marks ffmpeg H.264 specs as writing the access-unit
+// pattern described on pipelineSpec.AUWriteChunk, which lets the read loop
+// send each frame's last NAL unit without waiting for the next frame.
+func withAccessUnitWrites(specs []pipelineSpec, opts videoOptions) []pipelineSpec {
+	if strings.EqualFold(opts.Codec, "hevc") || strings.EqualFold(opts.Codec, "h265") {
+		return specs
+	}
+	for i := range specs {
+		specs[i].AUWriteChunk = ffmpegAVIOBufferSize
+	}
+	return specs
+}
+
 // ffmpegSpecs builds one ffmpeg pipelineSpec per detected encoder, sharing
 // the given capture input arguments. Used by both platforms' ffmpeg paths.
 func ffmpegSpecs(opts videoOptions, captureArgs []string) ([]pipelineSpec, error) {

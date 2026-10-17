@@ -79,7 +79,7 @@ func TestSettingsAPIRoundTrip(t *testing.T) {
 	}
 
 	// PUT applies a valid change.
-	body := `{"adb":"adb","preferredADBSerial":"tablet-123","requirePreferredADB":true,"ffmpeg":"ffmpeg","fps":30,"bitrate":"12M","width":2560,"height":1600,"localCursor":false,"touchEnabled":false,"penEnabled":true,"keyboardEnabled":false,"keepAliveOnBackground":true,"videoScaling":"fit","autoLaunchAndroidApp":true,"zeroCopyCapture":false,"temporalLayering":true,"allowToolAutoInstall":false,"noDriverInstall":true}`
+	body := `{"adb":"adb","preferredADBSerial":"tablet-123","requirePreferredADB":true,"ffmpeg":"ffmpeg","fps":30,"bitrate":"12M","width":2560,"height":1600,"touchEnabled":false,"penEnabled":true,"keyboardEnabled":false,"keepAliveOnBackground":true,"videoScaling":"fit","autoLaunchAndroidApp":true,"zeroCopyCapture":false,"temporalLayering":true,"allowToolAutoInstall":false,"noDriverInstall":true}`
 	res = protectedRequest(t, http.MethodPut, srv.URL, "/api/settings", body, token)
 	res.Body.Close()
 	if res.StatusCode != http.StatusOK {
@@ -88,7 +88,7 @@ func TestSettingsAPIRoundTrip(t *testing.T) {
 	got := store.get()
 	if got.FPS != 30 || got.Bitrate != "12M" || got.Width != 2560 || got.Height != 1600 ||
 		got.PreferredADBSerial != "tablet-123" || !got.RequirePreferredADB ||
-		got.LocalCursor || got.TouchEnabled || !got.PenEnabled || got.KeyboardEnabled ||
+		got.TouchEnabled || !got.PenEnabled || got.KeyboardEnabled ||
 		!got.KeepAliveOnBackground || got.VideoScaling != videoScalingFit || !got.AutoLaunchAndroidApp || got.ZeroCopyCapture || !got.TemporalLayering ||
 		got.AllowToolAutoInstall || !got.NoDriverInstall {
 		t.Errorf("store after PUT = %+v", got)
@@ -121,7 +121,7 @@ func TestSettingsAPIPreservesWiFiFieldsWhenFeatureDisabled(t *testing.T) {
 	token := testCSRFToken(t, srv.URL)
 
 	// Simulate a non-Wi-Fi settings save payload from UI while Wi-Fi feature is hidden.
-	body := `{"adb":"adb","ffmpeg":"ffmpeg","fps":75,"bitrate":"16M","width":1920,"height":1080,"localCursor":true,"touchEnabled":true,"penEnabled":true,"keyboardEnabled":true,"keepAliveOnBackground":false,"autoLaunchAndroidApp":false,"zeroCopyCapture":true,"temporalLayering":false,"allowToolAutoInstall":true,"noDriverInstall":false}`
+	body := `{"adb":"adb","ffmpeg":"ffmpeg","fps":75,"bitrate":"16M","width":1920,"height":1080,"touchEnabled":true,"penEnabled":true,"keyboardEnabled":true,"keepAliveOnBackground":false,"autoLaunchAndroidApp":false,"zeroCopyCapture":true,"temporalLayering":false,"allowToolAutoInstall":true,"noDriverInstall":false}`
 	res := protectedRequest(t, http.MethodPut, srv.URL, "/api/settings", body, token)
 	res.Body.Close()
 	if res.StatusCode != http.StatusOK {

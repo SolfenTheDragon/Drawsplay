@@ -53,6 +53,9 @@ type captureTarget struct {
 	// DXGI adapter and output indices (Kind == captureDDAGrab).
 	Adapter int
 	Output  int
+	// PCI vendor ID of that adapter (0 = unknown). Windows orders encoder
+	// candidates so the capture GPU's own encoder is tried first.
+	AdapterVendor uint32
 
 	// PipeWire node ID (Kind == capturePipeWire).
 	Node uint32

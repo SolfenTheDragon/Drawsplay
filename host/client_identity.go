@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +15,8 @@ type clientIdentity struct {
 	Version      string `json:"version"`
 	NativeWidth  int    `json:"nativeWidth,omitempty"`
 	NativeHeight int    `json:"nativeHeight,omitempty"`
+	// RefreshRates the tablet panel supports (Hz, ascending, deduplicated).
+	RefreshRates []int `json:"refreshRates,omitempty"`
 	// Mode the tablet remembered from a previous session (0 = none).
 	PrefWidth  int `json:"prefWidth,omitempty"`
 	PrefHeight int `json:"prefHeight,omitempty"`
@@ -124,6 +128,7 @@ func bindSessionClientIdentity(sessionID uint64, ident clientIdentity) {
 	if ident.NativeHeight < 0 {
 		ident.NativeHeight = 0
 	}
+	ident.RefreshRates = normalizeRefreshRates(ident.RefreshRates)
 	clientIdentityState.mu.Lock()
 	clientIdentityState.session[sessionID] = ident
 	clientIdentityState.active = ident
@@ -143,4 +148,33 @@ func activeClientIdentity() clientIdentity {
 	clientIdentityState.mu.RLock()
 	defer clientIdentityState.mu.RUnlock()
 	return clientIdentityState.active
+}
+
+// Bounds for refresh rates accepted from a client.
+const (
+	minClientRefreshHz = 24
+	maxClientRefreshHz = 240
+)
+
+// normalizeRefreshRates drops implausible values and returns the rates
+// sorted ascending without duplicates (nil when none remain).
+func normalizeRefreshRates(rates []int) []int {
+	var out []int
+	for _, r := range rates {
+		if r < minClientRefreshHz || r > maxClientRefreshHz {
+			continue
+		}
+		out = append(out, r)
+	}
+	sort.Ints(out)
+	return slices.Compact(out)
+}
+
+// maxRefreshRate is the tablet panel's highest refresh rate, or 0 when the
+// client did not report one.
+func (c clientIdentity) maxRefreshRate() int {
+	if len(c.RefreshRates) == 0 {
+		return 0
+	}
+	return c.RefreshRates[len(c.RefreshRates)-1]
 }

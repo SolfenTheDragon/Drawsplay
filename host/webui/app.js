@@ -348,7 +348,6 @@ async function loadSettings() {
   $("adb-tunnel-enabled").checked = !!s.adbTunnelEnabled;
   updateADBVisibility();
   $("require-adb-serial").checked = !!s.requirePreferredADB;
-  $("local-cursor").checked = s.localCursor !== false;
   $("touch-enabled").checked = s.touchEnabled !== false;
   $("touch-gestures").checked = s.touchGestures !== false;
   $("pen-enabled").checked = s.penEnabled !== false;
@@ -373,7 +372,12 @@ async function refreshStatus() {
     ensureNativeResolutionOption(activeClient.nativeWidth, activeClient.nativeHeight);
     const nativeW = Number(activeClient.nativeWidth) || 0;
     const nativeH = Number(activeClient.nativeHeight) || 0;
-    const nativeLabel = nativeW > 0 && nativeH > 0 ? ` (${nativeW}x${nativeH})` : "";
+    const refreshRates = Array.isArray(activeClient.refreshRates) ? activeClient.refreshRates : [];
+    const maxHz = refreshRates.length > 0 ? Math.max(...refreshRates) : 0;
+    const nativeParts = [];
+    if (nativeW > 0 && nativeH > 0) nativeParts.push(`${nativeW}x${nativeH}`);
+    if (maxHz > 0) nativeParts.push(`${refreshRates.join("/")} Hz`);
+    const nativeLabel = nativeParts.length > 0 ? ` (${nativeParts.join(", ")})` : "";
     const activeClientName = [activeClient.platform, activeClient.type]
       .map((x) => String(x || "").trim())
       .filter((x) => x && x !== "unknown")
@@ -574,7 +578,6 @@ $("form").addEventListener("submit", async (ev) => {
       adb: $("adb").value.trim(),
       preferredADBSerial: $("adb-serial").value.trim(),
       requirePreferredADB: $("require-adb-serial").checked,
-      localCursor: $("local-cursor").checked,
       touchEnabled: $("touch-enabled").checked,
       touchGestures: $("touch-gestures").checked,
       penEnabled: $("pen-enabled").checked,
@@ -797,25 +800,6 @@ $("clear-mode-btn").addEventListener("click", async () => {
     btn.disabled = false;
   }
 });
-
-const vddCustomResolutionSetupBtn = $("vdd-custom-resolution-setup-btn");
-if (vddCustomResolutionSetupBtn) {
-  vddCustomResolutionSetupBtn.addEventListener("click", async () => {
-    const btn = vddCustomResolutionSetupBtn;
-    btn.disabled = true;
-    try {
-      const res = await api("/api/vdd/custom-resolution/setup", { method: "POST" });
-      showMsg(
-        `VDD custom-resolution setup complete for ${res.width}x${res.height}. Retry your custom resolution.`,
-        true
-      );
-    } catch (e) {
-      showMsg(e.message, false);
-    } finally {
-      btn.disabled = false;
-    }
-  });
-}
 
 $("save-calibration-btn").addEventListener("click", async () => {
   const device = $("calibration-device").value.trim();

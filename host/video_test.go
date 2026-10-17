@@ -30,6 +30,24 @@ func (d *testNonRecoverableDisplay) Refresh() (captureTarget, error) { return ca
 func (d *testNonRecoverableDisplay) Description() string             { return "nonrecoverable" }
 func (d *testNonRecoverableDisplay) Close()                          {}
 
+type testMirrorDisplay struct{ testNonRecoverableDisplay }
+
+func (d *testMirrorDisplay) Target() captureTarget {
+	return captureTarget{Kind: captureX11Grab}
+}
+
+type testMirrorFallbackDisplay struct {
+	testNonRecoverableDisplay
+	fallback virtualDisplay
+	calls    int
+	err      error
+}
+
+func (d *testMirrorFallbackDisplay) FallbackToMirror() (virtualDisplay, error) {
+	d.calls++
+	return d.fallback, d.err
+}
+
 // mustUnits asserts the exact NAL units and remainder produced by splitAnnexB.
 func mustUnits(t *testing.T, buf []byte, wantUnits [][]byte, wantRest []byte) {
 	t.Helper()
@@ -257,6 +275,31 @@ func TestAttemptDisplayRecoverySkipsUnsupportedDisplays(t *testing.T) {
 	}
 }
 
+func TestRecoverDisplayFallsBackToMirrorAfterRecoveryLimit(t *testing.T) {
+	mirror := &testMirrorDisplay{}
+	display := virtualDisplay(&testMirrorFallbackDisplay{fallback: mirror})
+	attempts := displayRecoveryMaxAttempts
+	if !recoverDisplayOrFallback(&display, &attempts, errors.New("capture recovery exhausted")) {
+		t.Fatal("expected mirror fallback")
+	}
+	if display != mirror {
+		t.Fatal("display was not replaced with the mirror fallback")
+	}
+	if got := currentVideoStatus().DisplayMode; got != "mirror" {
+		t.Fatalf("published display mode = %q, want mirror", got)
+	}
+	setOperationalWarning("display-mode", "")
+	publishVideoDisplay("", "", "", "")
+}
+
+func TestRecoverDisplayReportsMirrorFallbackFailure(t *testing.T) {
+	display := virtualDisplay(&testMirrorFallbackDisplay{err: errors.New("no attached display")})
+	attempts := displayRecoveryMaxAttempts
+	if recoverDisplayOrFallback(&display, &attempts, errors.New("capture recovery exhausted")) {
+		t.Fatal("unexpected success after mirror fallback failed")
+	}
+}
+
 func TestDisplayModeFromTarget(t *testing.T) {
 	cases := []struct {
 		target captureTarget
@@ -264,6 +307,7 @@ func TestDisplayModeFromTarget(t *testing.T) {
 		kind   string
 	}{
 		{target: captureTarget{Kind: captureDDAGrab}, mode: "extend", kind: "ddagrab"},
+		{target: captureTarget{Kind: captureDDAGrab, Mirrored: true}, mode: "mirror", kind: "ddagrab"},
 		{target: captureTarget{Kind: capturePipeWire}, mode: "extend", kind: "pipewire"},
 		{target: captureTarget{Kind: capturePipeWire, Mirrored: true}, mode: "mirror", kind: "pipewire"},
 		{target: captureTarget{Kind: captureScreencopy, OutputName: "HEADLESS-1"}, mode: "extend", kind: "screencopy"},

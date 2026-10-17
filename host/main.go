@@ -1,7 +1,7 @@
 // Drawsplay host service.
 //
 // The host exposes two localhost TCP listeners that client apps reach
-// over USB via `adb reverse`:
+// over USB via AOA by default, or via the optional `adb reverse` transport:
 //
 //	:27183  input channel  â€” newline-delimited JSON from the tablet
 //	                         (see protocol.go / FUNCTIONALITY.md Â§3)
@@ -62,27 +62,58 @@ func main() {
 	aoaEnabled := flag.Bool("aoa-enabled", true, "ADB-free USB transport over Android Open Accessory (no developer mode needed)")
 	adbTunnel := flag.Bool("adb-tunnel", false, "enable the adb reverse tunnel transport (needs USB debugging on the tablet)")
 	ffmpeg := flag.String("ffmpeg", "ffmpeg", "ffmpeg executable path (used for screen capture/encode)")
-	allowToolAutoInstall := flag.Bool("allow-tool-auto-install", true, "allow automatic runtime adb/ffmpeg download when missing (Windows)")
+	allowToolAutoInstall := flag.Bool("allow-tool-auto-install", true, "allow automatic download of the newest ffmpeg when missing (Windows)")
 	fps := flag.Int("fps", 120, "capture frame rate")
 	bitrate := flag.String("bitrate", "24M", "video bitrate at 1080p (ffmpeg syntax, e.g. 24M); scaled by display pixel count and capped at the USB 2.0 link budget")
 	width := flag.Int("width", 1920, "virtual display width (extend mode)")
 	height := flag.Int("height", 1080, "virtual display height (extend mode)")
 	noDriverInstall := flag.Bool("no-driver-install", false, "skip automatic virtual display driver installation (Windows)")
 	keepAliveOnBackground := flag.Bool("keep-alive-on-background", false, "keep tablet session alive while the Android app is backgrounded")
-	vddCustomResolutionAdminSetup := flag.Bool("vdd-custom-resolution-admin-setup", false, "internal: run elevated VDD custom-resolution setup and exit")
-	vddCustomResolutionWidth := flag.Int("vdd-custom-resolution-width", 0, "internal: VDD custom-resolution width for elevated setup")
-	vddCustomResolutionHeight := flag.Int("vdd-custom-resolution-height", 0, "internal: VDD custom-resolution height for elevated setup")
-	vddRestartAdapter := flag.Bool("vdd-restart-adapter", false, "internal: restart the Parsec VDD adapter and exit")
+	driverInstallElevated := flag.Bool("driver-install-elevated", false, "internal: run elevated virtual display driver install and exit")
 	service := flag.String("service", "", "manage login autostart: install | uninstall | status")
-	background := flag.Bool("background", false, "run without a console (used by the login autostart entry)")
+	background := flag.Bool("background", defaultBackgroundMode, "run without a console in the system tray (Windows default; use -background=false for a console run)")
+	install := flag.Bool("install", false, "Windows: install DrawSplay for this PC (one administrator prompt), then start it in the tray")
+	uninstall := flag.Bool("uninstall", false, "Windows: uninstall DrawSplay (also implied when run as DrawSplay-Uninstall.exe)")
+	quiet := flag.Bool("quiet", false, "Windows install/uninstall: no confirmation or result dialogs")
+	keepSettings := flag.Bool("keep-settings", false, "Windows uninstall: keep settings in %APPDATA%\\DrawSplay")
+	removeShared := flag.Bool("remove-shared", false, "Windows uninstall with -quiet: also remove dependencies that may be shared with other software (Parsec virtual display driver, Zadig WinUSB bindings)")
+	desktopShortcut := flag.Bool("desktop-shortcut", false, "Windows install: add a desktop shortcut without asking (with -quiet, an existing one is kept on reinstall)")
+	winusbBind := flag.Bool("winusb-bind-attached", false, "internal: elevated WinUSB driver setup for attached tablets (Windows)")
+	autostart := flag.Bool("autostart", false, "Windows install: start DrawSplay at sign-in without asking (default for a fresh -quiet install)")
+	noAutostart := flag.Bool("no-autostart", false, "Windows install: do not start DrawSplay at sign-in (enable later in settings)")
+	installElevated := flag.String("install-elevated", "", "internal: elevated install phase (result file path)")
+	uninstallElevated := flag.String("uninstall-elevated", "", "internal: elevated uninstall phase (result file path)")
 	flag.Parse()
+	attachParentConsole()
 
-	if runVDDAdminMode(*vddCustomResolutionAdminSetup, *vddCustomResolutionWidth, *vddCustomResolutionHeight, *vddRestartAdapter) {
+	if handled, code := runInstallerMode(installerOptions{
+		Install:           *install,
+		Uninstall:         *uninstall,
+		Quiet:             *quiet,
+		KeepSettings:      *keepSettings,
+		RemoveShared:      *removeShared,
+		DesktopShortcut:   *desktopShortcut,
+		Autostart:         *autostart,
+		NoAutostart:       *noAutostart,
+		SkipVDD:           *noDriverInstall,
+		InstallElevated:   *installElevated,
+		WinUSBBind:        *winusbBind,
+		UninstallElevated: *uninstallElevated,
+		NoArgs:            len(os.Args) == 1,
+	}); handled {
+		os.Exit(code)
+	}
+
+	if runDriverInstallAdminMode(*driverInstallElevated) {
 		return
 	}
 
 	if *service != "" {
 		os.Exit(runServiceCommand(*service))
+	}
+	if handOffToRunningInstance(*background) {
+		// Already running in the tray: just open its settings page.
+		return
 	}
 	if *background {
 		// May respawn the process hidden and exit (Windows); the hidden

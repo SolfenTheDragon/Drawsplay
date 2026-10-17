@@ -199,14 +199,6 @@
           <strong>Connection & security controls</strong>
           <div class="hint">Control trusted-device behavior, app launch, and whether sessions persist while the Android app is backgrounded.</div>
           <div class="toggle-row">
-            <span>Low-latency local cursor</span>
-            <label class="switch">
-              <input id="local-cursor" type="checkbox">
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="hint">The local cursor is smoother on a static Windows desktop. Disable it to embed the cursor in the captured video instead.</div>
-          <div class="toggle-row">
             <span>Allow keyboard passthrough</span>
             <label class="switch">
               <input id="keyboard-enabled" type="checkbox">
@@ -327,12 +319,6 @@
         <button id="download-diagnostics-btn" type="button">Download diagnostics</button>
     </div>
 
-    <div class="panel dashboard-card" data-windows-only>
-        <div class="eyebrow">WINDOWS</div>
-        <h2>Parsec VDD custom resolutions</h2>
-        <div class="hint">If custom VDD resolutions fail because HKLM is protected, run this one-time admin setup and approve UAC once.</div>
-        <button id="vdd-custom-resolution-setup-btn" type="button">Enable custom-resolution registry access (Admin)</button>
-    </div>
     </div>
 
     <div class="action-stack">

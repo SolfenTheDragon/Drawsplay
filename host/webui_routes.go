@@ -73,7 +73,6 @@ func (api webUIAPI) register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/autostart", securePost(api.csrfToken, api.handleAutostart))
 	mux.HandleFunc("/api/stop", securePost(api.csrfToken, api.handleStop))
 	mux.HandleFunc("/api/tablet/clear-display-mode", securePost(api.csrfToken, api.handleClearDisplayMode))
-	mux.HandleFunc("/api/vdd/custom-resolution/setup", securePost(api.csrfToken, api.handleVDDCustomResolutionSetup))
 	mux.HandleFunc("/api/session/input-lock", securePost(api.csrfToken, api.handleSessionInputLock))
 	mux.HandleFunc("/api/session/disconnect", securePost(api.csrfToken, api.handleSessionDisconnect))
 	mux.HandleFunc("/api/session/reconnect-video", securePost(api.csrfToken, api.handleSessionReconnectVideo))
@@ -119,8 +118,7 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		restarted := restartActiveVideoSession()
 		inputRestarted := false
-		if old.LocalCursor != s.LocalCursor ||
-			old.TouchEnabled != s.TouchEnabled ||
+		if old.TouchEnabled != s.TouchEnabled ||
 			old.PenEnabled != s.PenEnabled ||
 			old.TouchGestures != s.TouchGestures ||
 			old.KeepAliveOnBackground != s.KeepAliveOnBackground ||
@@ -128,8 +126,8 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 			inputRestarted = restartActiveInputSessions()
 		}
 		runBackgroundPreflight(api.store.get())
-		log.Printf("Settings updated via web UI: fps=%d bitrate=%s %dx%d localCursor=%v touch=%v pen=%v keyboard=%v keepAliveOnBackground=%v videoScaling=%s preferredADBSerial=%q requirePreferredADB=%v autoLaunchAndroidApp=%v zeroCopyCapture=%v temporalLayering=%v allowToolAutoInstall=%v noDriverInstall=%v (videoRestarted=%v inputRestarted=%v)",
-			s.FPS, s.Bitrate, s.Width, s.Height, s.LocalCursor, s.TouchEnabled, s.PenEnabled,
+		log.Printf("Settings updated via web UI: fps=%d bitrate=%s %dx%d touch=%v pen=%v keyboard=%v keepAliveOnBackground=%v videoScaling=%s preferredADBSerial=%q requirePreferredADB=%v autoLaunchAndroidApp=%v zeroCopyCapture=%v temporalLayering=%v allowToolAutoInstall=%v noDriverInstall=%v (videoRestarted=%v inputRestarted=%v)",
+			s.FPS, s.Bitrate, s.Width, s.Height, s.TouchEnabled, s.PenEnabled,
 			s.KeyboardEnabled, s.KeepAliveOnBackground, s.VideoScaling, s.PreferredADBSerial, s.RequirePreferredADB, s.AutoLaunchAndroidApp, s.ZeroCopyCapture, s.TemporalLayering, s.AllowToolAutoInstall,
 			s.NoDriverInstall, restarted, inputRestarted)
 		writeJSON(w, map[string]any{

@@ -35,6 +35,35 @@ type congestionGate struct {
 	now           func() time.Time // injectable clock for tests
 	seen          int
 	firstSeen     time.Time
+	// settleUntil ignores reports until this time: the first stats after an
+	// encoder (re)start describe the restart hiccup, not the link. Zero
+	// (the default) disables it.
+	settleUntil time.Time
+	// floorDivisor refuses ladder steps below top/floorDivisor
+	// (0 = down to the ladder floor).
+	floorDivisor int
+}
+
+// withSettle makes the gate ignore reports for d after now.
+func (g *congestionGate) withSettle(d time.Duration) *congestionGate {
+	g.settleUntil = g.now().Add(d)
+	return g
+}
+
+// withFloorDivisor makes the gate refuse ladder steps below 1/div of the
+// ladder's top rate.
+func (g *congestionGate) withFloorDivisor(div int) *congestionGate {
+	g.floorDivisor = div
+	return g
+}
+
+// allowsStepDown reports whether the gate permits rc's next lower rung.
+func (g *congestionGate) allowsStepDown(rc *rateController) bool {
+	if g == nil || g.floorDivisor <= 0 {
+		return true
+	}
+	next, ok := rc.nextLowerKbps()
+	return ok && next >= rc.topKbps()/g.floorDivisor
 }
 
 // newCongestionGate builds a gate that fires once confirmations reports have
@@ -55,6 +84,9 @@ func (g *congestionGate) observe() bool {
 		return true
 	}
 	t := g.now()
+	if t.Before(g.settleUntil) {
+		return false
+	}
 	if g.seen > 0 && g.window > 0 && t.Sub(g.firstSeen) > g.window {
 		// The earlier reports belong to an episode that resolved on its
 		// own; they must not add up with this one.
@@ -97,7 +129,7 @@ func adaptToLinkFeedback(monitor *sessionMonitor, rc *rateController, temporal *
 			log.Printf("Temporal adaptation enabled (%s): dropping non-reference enhancement frames", spec.Name)
 			return congestionActionAdapted
 		}
-		if gate.observe() && rc.onCongestion() {
+		if gate.observe() && gate.allowsStepDown(rc) && rc.onCongestion() {
 			return congestionActionRestart
 		}
 	} else if temporal != nil && spec.SupportsTemporalDrop && temporal.onClean() {

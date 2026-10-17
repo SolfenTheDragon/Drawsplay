@@ -68,11 +68,10 @@ const (
 
 // videoOptions carries the user-tunable video settings from main.
 type videoOptions struct {
-	FFmpeg      string
-	Codec       string
-	FPS         int
-	Bitrate     string
-	LocalCursor bool
+	FFmpeg  string
+	Codec   string
+	FPS     int
+	Bitrate string
 	// Windows-only: try NVENC zero-copy capture path before readback.
 	ZeroCopyCapture bool
 	// Prefer temporal layering profiles that allow runtime enhancement-drop
@@ -429,6 +428,9 @@ func displayModeFromTarget(target captureTarget) (mode, captureKind string) {
 	captureKind = string(target.Kind)
 	switch target.Kind {
 	case captureDDAGrab:
+		if target.Mirrored {
+			return "mirror", captureKind
+		}
 		return "extend", captureKind
 	case capturePipeWire, captureScreencopy:
 		// A Wayland virtual output, unless it mirrors another display.
@@ -521,6 +523,10 @@ type sessionRecoverableDisplay interface {
 	Recover() error
 }
 
+type sessionMirrorFallbackDisplay interface {
+	FallbackToMirror() (virtualDisplay, error)
+}
+
 func attemptDisplayRecovery(display virtualDisplay, attempts *int, cause error) bool {
 	if *attempts >= displayRecoveryMaxAttempts {
 		return false
@@ -536,6 +542,63 @@ func attemptDisplayRecovery(display virtualDisplay, attempts *int, cause error) 
 	}
 	*attempts++
 	return true
+}
+
+func recoverDisplayOrFallback(display *virtualDisplay, attempts *int, cause error) bool {
+	if attemptDisplayRecovery(*display, attempts, cause) {
+		return true
+	}
+	fallbackDisplay, ok := (*display).(sessionMirrorFallbackDisplay)
+	if !ok {
+		return false
+	}
+	mirror, err := fallbackDisplay.FallbackToMirror()
+	if err != nil {
+		log.Printf("Display mirror fallback failed: %v", err)
+		return false
+	}
+	if mirror == nil {
+		log.Printf("Display mirror fallback returned no display")
+		return false
+	}
+	displayMode, captureKind := displayModeFromTarget(mirror.Target())
+	log.Printf("Falling back to %s after repeated capture loss", mirror.Description())
+	*display = mirror
+	setActiveTarget(nil)
+	publishVideoDisplay(displayMode, captureKind, mirror.Description(), resolutionControlOf(mirror.Target()))
+	setOperationalWarning("display-mode", "Virtual display capture failed repeatedly; streaming a mirror instead")
+	return true
+}
+
+// userModeTracker detects mid-session resolution changes on the session
+// display, which can only come from the user (the host sets the mode once,
+// at display creation) and so become the tablet's stored preference.
+//
+// With ignoreDisplaySwaps, a display replaced by self-recovery or mirror
+// fallback starts a new baseline instead of reading as a user change, and a
+// mirrored target never reports one: its mode is the host monitor's, not
+// the tablet's.
+type userModeTracker struct {
+	ignoreDisplaySwaps bool
+	width, height      int
+}
+
+func (t *userModeTracker) observe(target captureTarget) bool {
+	if target.Width <= 0 || target.Height <= 0 {
+		return false
+	}
+	changed := t.width != 0 && (target.Width != t.width || target.Height != t.height)
+	t.width, t.height = target.Width, target.Height
+	if t.ignoreDisplaySwaps && target.Mirrored {
+		return false
+	}
+	return changed
+}
+
+func (t *userModeTracker) displayReplaced() {
+	if t.ignoreDisplaySwaps {
+		t.width, t.height = 0, 0
+	}
 }
 
 func isTransientCaptureError(err error) bool {
@@ -596,7 +659,7 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
-	defer display.Close()
+	defer func() { display.Close() }()
 	log.Printf("Display for session: %s", display.Description())
 	mode, captureKind := displayModeFromTarget(display.Target())
 	publishVideoDisplay(mode, captureKind, display.Description(), resolutionControlOf(display.Target()))
@@ -626,7 +689,7 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 	var recovery captureRecoveryState
 	displayRecoveryAttempts := 0
 	topKbps := 0
-	lastModeW, lastModeH := 0, 0
+	modeTracker := userModeTracker{ignoreDisplaySwaps: modeBaselineIgnoresDisplaySwaps}
 	lastEffectiveFPS := 0
 
 	for {
@@ -635,7 +698,8 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		target, err := display.Refresh()
 		if err != nil {
 			if recoveryErr := waitForCaptureRecovery(ctx, &recovery, err); recoveryErr != nil {
-				if attemptDisplayRecovery(display, &displayRecoveryAttempts, recoveryErr) {
+				if recoverDisplayOrFallback(&display, &displayRecoveryAttempts, recoveryErr) {
+					modeTracker.displayReplaced()
 					recovery.reset()
 					continue
 				}
@@ -648,19 +712,16 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		// A mid-session resolution change can only come from the user (the
 		// host sets the mode once, at display creation): push it to the
 		// tablet so it becomes the stored preference for future sessions.
-		if target.Width > 0 && target.Height > 0 {
-			if lastModeW != 0 && (target.Width != lastModeW || target.Height != lastModeH) {
-				log.Printf("Display mode changed by user to %dx%d; updating tablet preference", target.Width, target.Height)
-				publishModeChange(target.Width, target.Height, 0)
-			}
-			lastModeW, lastModeH = target.Width, target.Height
+		if modeTracker.observe(target) {
+			log.Printf("Display mode changed by user to %dx%d; updating tablet preference", target.Width, target.Height)
+			publishModeChange(target.Width, target.Height, 0)
 		}
 
 		// Scale the bitrate budget with the display's pixel count so
 		// quality per pixel stays roughly constant across resolutions
 		// (-bitrate is the 1080p reference). Rebuilt on mid-session mode
 		// changes; adaptation state resets, which a modeset warrants.
-		if kb := scaledBitrateKbps(opts.Bitrate, target.Width, target.Height); kb != topKbps {
+		if kb := limitSessionBitrateKbps(scaledBitrateKbps(opts.Bitrate, target.Width, target.Height)); kb != topKbps {
 			if topKbps != 0 {
 				log.Printf("Display mode is %dx%d: bitrate ladder rescaled to top %dk",
 					target.Width, target.Height, kb)
@@ -724,11 +785,14 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 				if encoderName == "" {
 					encoderName = spec.Name
 				}
-				if isZeroCopyInitError(err) && strings.Contains(spec.Name, "_zerocopy") {
+				zeroCopySpec := strings.Contains(spec.Name, "_zerocopy")
+				if zeroCopySpec && isZeroCopyInitError(err) {
 					markZeroCopyBlocked(effOpts.FFmpeg, encoderName)
 					log.Printf("Disabling zero-copy probe for %s on this host (startup failed)", encoderName)
 				}
-				if isPermanentEncoderInitError(err) {
+				// A zero-copy failure says nothing about the readback path of
+				// the same encoder, which is tried next.
+				if !zeroCopySpec && isPermanentEncoderInitError(err) {
 					markEncoderUnavailable(effOpts.FFmpeg, encoderName)
 					log.Printf("Marking encoder %s unavailable on this host (startup failed)", encoderName)
 				}
@@ -761,7 +825,8 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		if restart {
 			if recoveryCause != nil {
 				if recoveryErr := waitForCaptureRecovery(ctx, &recovery, recoveryCause); recoveryErr != nil {
-					if attemptDisplayRecovery(display, &displayRecoveryAttempts, recoveryErr) {
+					if recoverDisplayOrFallback(&display, &displayRecoveryAttempts, recoveryErr) {
+						modeTracker.displayReplaced()
 						recovery.reset()
 						continue
 					}
@@ -778,7 +843,8 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		// wait and retry rather than dropping the session.
 		if len(goodSpecs) > 0 {
 			if recoveryErr := waitForCaptureRecovery(ctx, &recovery, lastErr); recoveryErr != nil {
-				if attemptDisplayRecovery(display, &displayRecoveryAttempts, recoveryErr) {
+				if recoverDisplayOrFallback(&display, &displayRecoveryAttempts, recoveryErr) {
+					modeTracker.displayReplaced()
 					recovery.reset()
 					continue
 				}
@@ -1014,6 +1080,11 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 	}()
 	flushTicker := time.NewTicker(nalTailFlushInterval)
 	defer flushTicker.Stop()
+	updateCapturePriority := func() {
+		if stats := monitor.stats(); stats != nil && stats.AppForeground != nil {
+			pipeline.setClientForeground(*stats.AppForeground)
+		}
+	}
 	for {
 		if !produced.Load() && time.Now().After(startDeadline) {
 			return false, fmt.Errorf("encoder produced no output: %s", pipeline.errorTail())
@@ -1026,6 +1097,7 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 				pipeline.stop()
 				return produced.Load(), errPrivacyModeChanged
 			}
+			updateCapturePriority()
 			if len(buf) > 0 && !lastChunkAt.IsZero() && time.Since(lastChunkAt) >= nalTailFlushInterval {
 				tail, ok := flushAnnexBTail(buf)
 				if ok {

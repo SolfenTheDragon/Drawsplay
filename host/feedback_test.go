@@ -90,3 +90,10 @@ func TestSessionMonitorIgnoresStallBacklogBeingDrained(t *testing.T) {
 		t.Fatalf("stale frames after take = %d, want 0", got)
 	}
 }
+
+func TestSessionMonitorReadsAppForegroundState(t *testing.T) {
+	mon := feedStatsLines(t, `{"type":"stats","appForeground":false}`)
+	if stats := mon.stats(); stats == nil || stats.AppForeground == nil || *stats.AppForeground {
+		t.Fatalf("app foreground state = %#v, want false", stats)
+	}
+}

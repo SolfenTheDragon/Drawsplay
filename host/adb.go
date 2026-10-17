@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"log"
 	"math/rand/v2"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -38,7 +37,7 @@ var (
 func ensureADBAvailable(adbPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, adbPath, "start-server")
+	cmd := hiddenCommandContext(ctx, adbPath, "start-server")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("start-server failed: %w (%s)", err, string(out))
@@ -171,7 +170,7 @@ func runADBCommand(ctx context.Context, adbPath, serial string, args ...string) 
 	fullArgs := make([]string, 0, len(args)+2)
 	fullArgs = append(fullArgs, "-s", serial)
 	fullArgs = append(fullArgs, args...)
-	out, err := exec.CommandContext(cmdCtx, adbPath, fullArgs...).CombinedOutput()
+	out, err := hiddenCommandContext(cmdCtx, adbPath, fullArgs...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v: %w (%s)", fullArgs, err, strings.TrimSpace(string(out)))
 	}
@@ -232,12 +231,12 @@ func shouldRestartADBServer(err error, failures int) bool {
 func restartADBServerBestEffort(adbPath string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	stopCmd := exec.CommandContext(ctx, adbPath, "kill-server")
+	stopCmd := hiddenCommandContext(ctx, adbPath, "kill-server")
 	if out, err := stopCmd.CombinedOutput(); err != nil {
 		log.Printf("ADB server restart (kill-server) failed: %v (%s)", err, strings.TrimSpace(string(out)))
 		return
 	}
-	startCmd := exec.CommandContext(ctx, adbPath, "start-server")
+	startCmd := hiddenCommandContext(ctx, adbPath, "start-server")
 	if out, err := startCmd.CombinedOutput(); err != nil {
 		log.Printf("ADB server restart (start-server) failed: %v (%s)", err, strings.TrimSpace(string(out)))
 		return
@@ -302,7 +301,7 @@ func currentADBStatus() adbStatusInfo {
 func attachedDeviceSerials(ctx context.Context, adbPath string) ([]string, error) {
 	cmdCtx, cancel := context.WithTimeout(ctx, adbCommandTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(cmdCtx, adbPath, "devices").CombinedOutput()
+	out, err := hiddenCommandContext(cmdCtx, adbPath, "devices").CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("adb devices: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
@@ -364,7 +363,7 @@ func assertReverseRules(ctx context.Context, adbPath string, serials []string, p
 		for _, port := range ports {
 			arg := fmt.Sprintf("tcp:%d", port)
 			cmdCtx, cancel := context.WithTimeout(ctx, adbCommandTimeout)
-			cmd := exec.CommandContext(cmdCtx, adbPath, "-s", serial, "reverse", arg, arg)
+			cmd := hiddenCommandContext(cmdCtx, adbPath, "-s", serial, "reverse", arg, arg)
 			out, err := cmd.CombinedOutput()
 			cancel()
 			if err != nil && firstErr == nil {

@@ -13,9 +13,10 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	cfg := store.get()
 	runDependencyPreflight(cfg)
 	ensureX11VirtualDisplayAsync("host start")
-	ensureVDDDriver(cfg.NoDriverInstall)
+	ensureVirtualDisplayDriver(cfg.NoDriverInstall)
 
-	// Keep both channel ports reverse-tunneled for the life of the process.
+	// Maintain the optional legacy ADB transport while allowing settings to
+	// enable or disable it at runtime. It is off by default; AOA is primary.
 	go maintainADBReverse(ctx, store, inputPort, videoPort)
 
 	// Settings web UI (localhost only; best-effort like the video channel).
@@ -32,7 +33,7 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	// behavior and performance stay unchanged.
 	go startWiFiTransport(ctx, store)
 
-	// Optional ADB-free USB transport over Android Open Accessory.
+	// Default USB transport: Android Open Accessory, without ADB or debugging.
 	startAOATransport(ctx, store)
 
 	// Input channel (blocking; owns process lifetime).
@@ -46,7 +47,7 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	}
 	defer ln.Close()
 	log.Printf("Input listener on %s", addr)
-	log.Printf("Waiting for client (USB accessory or adb reverse)")
+	log.Printf("Waiting for client (USB accessory; ADB reverse is opt-in)")
 
 	go func() {
 		<-ctx.Done()

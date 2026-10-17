@@ -1,6 +1,24 @@
 package main
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
+
+func TestClientRefreshRates(t *testing.T) {
+	bindSessionClientIdentity(902, clientIdentity{Platform: "android", RefreshRates: []int{120, 60, 0, 999, 60, 24, 96}})
+	defer unbindSessionClientIdentity(902)
+	got := activeClientIdentity()
+	if want := []int{24, 60, 96, 120}; !slices.Equal(got.RefreshRates, want) {
+		t.Fatalf("RefreshRates = %v, want %v", got.RefreshRates, want)
+	}
+	if got.maxRefreshRate() != 120 {
+		t.Fatalf("maxRefreshRate = %d, want 120", got.maxRefreshRate())
+	}
+	if (clientIdentity{}).maxRefreshRate() != 0 {
+		t.Fatal("maxRefreshRate without rates should be 0")
+	}
+}
 
 func TestApplyClientDisplayDefaults(t *testing.T) {
 	base := videoOptions{Width: 1920, Height: 1080, FPS: 120}
