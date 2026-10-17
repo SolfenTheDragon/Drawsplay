@@ -220,6 +220,20 @@
             </label>
           </div>
           <div class="toggle-row">
+            <span>Capture X11 at up to 120 fps (samples the 60 Hz desktop twice; lower latency, about 2x encoder CPU)</span>
+            <label class="switch">
+              <input id="x11-high-rate-capture" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <span>Pause capture while the screen is idle (Linux X11; saves CPU, bitrate and tablet decoding)</span>
+            <label class="switch">
+              <input id="idle-capture-gate" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
             <span>Auto-launch Android app on USB connect</span>
             <label class="switch">
               <input id="auto-launch-android-app" type="checkbox">

@@ -341,6 +341,25 @@ func TestScreencopySpecsReadFramesFromTheirInput(t *testing.T) {
 	}
 }
 
+func TestX11GrabIdleGateOnlyWhenEnabled(t *testing.T) {
+	ffmpeg := withFakeFFmpegEncoders(t, "ffmpeg-x11-gate", " V..... libx264 \n")
+	withFakeVAAPIProbe(t, "", false)
+	target := x11TestTarget()
+	target.Rect = displayRect{X: 0, Y: 0, W: 1920, H: 1080}
+	for _, on := range []bool{false, true} {
+		opts := videoOptions{FPS: 60, Bitrate: "24M", Codec: "h264", FFmpeg: ffmpeg, IdleGate: on}
+		specs, err := buildCapturePipelines(target, opts)
+		if err != nil || len(specs) == 0 {
+			t.Fatalf("buildCapturePipelines: %v", err)
+		}
+		for _, sp := range specs {
+			if (sp.IdleGate != nil) != on {
+				t.Errorf("IdleGate set=%v with setting=%v", sp.IdleGate != nil, on)
+			}
+		}
+	}
+}
+
 func TestBuildCapturePipelinesX11GrabUsesClampedFPS(t *testing.T) {
 	ffmpeg := withFakeFFmpegEncoders(t, "ffmpeg-x11-clamp", " V..... libx264 \n")
 	withFakeVAAPIProbe(t, "", false)

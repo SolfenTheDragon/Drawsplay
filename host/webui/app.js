@@ -354,6 +354,8 @@ async function loadSettings() {
   $("keyboard-enabled").checked = s.keyboardEnabled !== false;
   $("keep-alive-on-background").checked = !!s.keepAliveOnBackground;
   $("pen-prediction").checked = !!s.penPrediction;
+  $("idle-capture-gate").checked = !!s.idleCaptureGate;
+  $("x11-high-rate-capture").checked = !!s.x11HighRateCapture;
   $("video-scaling").value = s.videoScaling || "fill";
   $("auto-launch-android-app").checked = !!s.autoLaunchAndroidApp;
   $("zero-copy-capture").checked = !!s.zeroCopyCapture;
@@ -585,6 +587,8 @@ $("form").addEventListener("submit", async (ev) => {
       keyboardEnabled: $("keyboard-enabled").checked,
       keepAliveOnBackground: $("keep-alive-on-background").checked,
       penPrediction: $("pen-prediction").checked,
+      idleCaptureGate: $("idle-capture-gate").checked,
+      x11HighRateCapture: $("x11-high-rate-capture").checked,
       videoScaling: $("video-scaling").value,
       autoLaunchAndroidApp: $("auto-launch-android-app").checked,
       zeroCopyCapture: $("zero-copy-capture").checked,

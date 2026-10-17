@@ -160,6 +160,15 @@ func buildCapturePipelines(target captureTarget, opts videoOptions) ([]pipelineS
 		specs = withX264FrameThreads(specs, swOpts, swCapture, x264FrameThreads(width, height, swOpts.FPS))
 		specs = withVAAPICandidate(specs, opts, capture)
 		specs = withX11VBV(specs, opts)
+		if opts.IdleGate && !target.Rect.empty() {
+			for i := range specs {
+				specs[i].IdleGate = &idleGateSpec{
+					Display: display,
+					X:       target.Rect.X, Y: target.Rect.Y,
+					W: target.Rect.W &^ 1, H: target.Rect.H &^ 1,
+				}
+			}
+		}
 		return withAccessUnitWrites(specs, opts), nil
 	case captureScreencopy:
 		capture := screencopyCaptureArgs(target, opts.FPS)
