@@ -64,8 +64,26 @@ func waitForClientIdentity(ctx context.Context, timeout time.Duration) {
 	}
 }
 
-// defaultClientFPS is the capture rate used until a tablet has a stored preference.
+// defaultClientFPS is the capture rate used until a tablet has a stored
+// preference and when it reports no refresh rates.
 const defaultClientFPS = 60
+
+// firstConnectFPS is the rate for a tablet with no stored preference: its
+// panel's highest refresh rate at native size (so every presented frame is a
+// fresh one), bounded by what this platform can capture, else 60.
+func firstConnectFPS(ident clientIdentity) int {
+	hz := ident.maxRefreshRate()
+	if hz <= 0 {
+		return defaultClientFPS
+	}
+	if hz > platformFirstConnectFPSCeiling {
+		hz = platformFirstConnectFPSCeiling
+	}
+	if hz < defaultClientFPS {
+		return defaultClientFPS
+	}
+	return hz
+}
 
 // setClientPrefMode records a mode the user chose (OS display settings or web
 // UI) so a session restart keeps it. fps == 0 leaves the rate unchanged.
@@ -98,7 +116,7 @@ func applyClientDisplayDefaults(opts *videoOptions, ident clientIdentity) {
 	if ident.PrefWidth > 0 && ident.PrefHeight > 0 {
 		opts.Width, opts.Height = ident.PrefWidth, ident.PrefHeight
 	}
-	opts.FPS = defaultClientFPS
+	opts.FPS = firstConnectFPS(ident)
 	if ident.PrefFPS > 0 {
 		opts.FPS = ident.PrefFPS
 	}

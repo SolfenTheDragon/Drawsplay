@@ -1,6 +1,7 @@
 ﻿package com.drawsplay.tablet.input
 
 import android.os.Build
+import android.os.Process
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import com.drawsplay.tablet.AndroidCompat
@@ -43,7 +44,8 @@ class InputChannel(
             wifiEnabled: Boolean,
             wifiAuthToken: String,
             wifiTlsRequired: Boolean,
-            wifiTlsFingerprint: String
+            wifiTlsFingerprint: String,
+            penPrediction: Boolean
         )
     }
 
@@ -62,26 +64,52 @@ class InputChannel(
 
     private enum class ConnectionState { STOPPED, WAITING, CONNECTED }
 
-    private sealed class Outbound {
-        abstract val generation: Long
-        abstract val payloads: List<ByteArray>
-        abstract val streamId: Byte
-
-        class Boundary(
-            override val generation: Long,
-            override val payloads: List<ByteArray>,
-            override val streamId: Byte
-        ) : Outbound()
-
-        class Moves(
-            override val generation: Long,
-            override val payloads: List<ByteArray>,
-            val action: String,
-            override val streamId: Byte
-        ) : Outbound()
+    private enum class MoveKind {
+        /** Not coalescible (down/up/button/key...): always delivered in order. */
+        BOUNDARY,
+        /** Hover: only the latest position matters. */
+        LATEST_ONLY,
+        /** Contact stroke: queued samples are merged so stroke resolution survives a backlog. */
+        MERGE
     }
 
-    private val ioExecutor = Executors.newSingleThreadScheduledExecutor()
+    private sealed class Outbound {
+        abstract val generation: Long
+        abstract val streamId: Byte
+
+        /** Pre-serialized control/key payloads. */
+        class Raw(
+            override val generation: Long,
+            val payloads: List<ByteArray>,
+            override val streamId: Byte
+        ) : Outbound()
+
+        /**
+         * Input samples; JSON serialization is deferred to the IO thread so the
+         * UI thread only enqueues.
+         */
+        class Input(
+            override val generation: Long,
+            val events: List<InputEventPacket>,
+            val action: String,
+            val kind: MoveKind
+        ) : Outbound() {
+            override val streamId: Byte = UsbMuxFrameCodec.STREAM_INPUT
+        }
+    }
+
+    // The IO thread carries every pen sample; run it at display priority so
+    // it is not delayed behind background work between the UI handoff and the
+    // socket write.
+    private val ioExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread({
+            try {
+                Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY)
+            } catch (_: Exception) {
+            }
+            runnable.run()
+        }, "input-io")
+    }
     private val lifecycleLock = Any()
     private val state = AtomicReference(ConnectionState.STOPPED)
     private val connectGeneration = AtomicLong(0L)
@@ -201,24 +229,33 @@ class InputChannel(
     fun send(events: List<InputEventPacket>) {
         if (state.get() != ConnectionState.CONNECTED || events.isEmpty()) return
         val generation = connectGeneration.get()
-        val payloads = events.map { eventToPayload(it) }
         val firstAction = events.first().action
-        val coalescible = (firstAction == "move" || firstAction == "hover_move") &&
-            events.all { it.action == firstAction }
-        val entry: Outbound =
-            if (coalescible) {
-                Outbound.Moves(generation, payloads, firstAction, UsbMuxFrameCodec.STREAM_INPUT)
-            } else {
-                Outbound.Boundary(generation, payloads, UsbMuxFrameCodec.STREAM_INPUT)
-            }
+        val uniform = events.all { it.action == firstAction }
+        val kind = when {
+            uniform && firstAction == "hover_move" -> MoveKind.LATEST_ONLY
+            uniform && firstAction == "move" -> MoveKind.MERGE
+            else -> MoveKind.BOUNDARY
+        }
+        val entry = Outbound.Input(generation, events, firstAction, kind)
 
         val shouldSchedule: Boolean
         synchronized(queueLock) {
             val last = sendQueue.lastOrNull()
-            if (entry is Outbound.Moves && last is Outbound.Moves &&
-                last.generation == generation && last.action == entry.action
+            if (kind != MoveKind.BOUNDARY && last is Outbound.Input &&
+                last.generation == generation && last.kind == kind && last.action == firstAction
             ) {
-                sendQueue[sendQueue.size - 1] = entry
+                sendQueue[sendQueue.size - 1] =
+                    if (kind == MoveKind.MERGE) {
+                        val merged = last.events + events
+                        Outbound.Input(
+                            generation,
+                            if (merged.size > MAX_MERGED_SAMPLES) merged.takeLast(MAX_MERGED_SAMPLES) else merged,
+                            firstAction,
+                            kind
+                        )
+                    } else {
+                        entry
+                    }
             } else {
                 sendQueue.addLast(entry)
                 trimQueueLocked()
@@ -268,7 +305,8 @@ class InputChannel(
                     obj.optBoolean("wifiEnabled", false),
                     obj.optString("wifiAuthToken", ""),
                     obj.optBoolean("wifiTlsRequired", false),
-                    obj.optString("wifiTlsFingerprint", "")
+                    obj.optString("wifiTlsFingerprint", ""),
+                    obj.optBoolean("penPrediction", false)
                 )
             }
         } catch (_: Exception) {
@@ -304,7 +342,7 @@ class InputChannel(
     private fun enqueueBoundary(generation: Long, payload: ByteArray, streamId: Byte) {
         val shouldSchedule: Boolean
         synchronized(queueLock) {
-            sendQueue.addLast(Outbound.Boundary(generation, listOf(payload), streamId))
+            sendQueue.addLast(Outbound.Raw(generation, listOf(payload), streamId))
             trimQueueLocked()
             shouldSchedule = !drainScheduled
             if (shouldSchedule) drainScheduled = true
@@ -316,7 +354,7 @@ class InputChannel(
     // batches, then oldest remaining entries if only boundary events remain.
     private fun trimQueueLocked() {
         while (sendQueue.size > MAX_QUEUED_BATCHES) {
-            val victim = sendQueue.indexOfFirst { it is Outbound.Moves }
+            val victim = sendQueue.indexOfFirst { it is Outbound.Input && it.kind != MoveKind.BOUNDARY }
             if (victim >= 0) {
                 sendQueue.removeAt(victim)
             } else {
@@ -338,7 +376,11 @@ class InputChannel(
             }
             if (!isGenerationActiveOnIoThread(entry.generation)) continue
             try {
-                writePayloadsOnIoThread(entry.streamId, entry.payloads)
+                val payloads = when (entry) {
+                    is Outbound.Raw -> entry.payloads
+                    is Outbound.Input -> entry.events.map { eventToPayload(it) }
+                }
+                writePayloadsOnIoThread(entry.streamId, payloads)
             } catch (e: Exception) {
                 synchronized(queueLock) { drainScheduled = false }
                 handleIoFailure(e, entry.generation)
@@ -436,9 +478,12 @@ class InputChannel(
 
     private fun writePayloadsOnIoThread(streamId: Byte, payloads: List<ByteArray>) {
         val out = output ?: throw IllegalStateException("output is not connected")
+        // One socket write per batch: each frame is otherwise a header write
+        // plus a payload write, i.e. separate packets with TCP_NODELAY/TLS.
+        val batch = java.io.ByteArrayOutputStream(payloads.sumOf { it.size + UsbMuxFrameCodec.HEADER_SIZE })
         for (payload in payloads) {
             UsbMuxFrameCodec.writeFrame(
-                out,
+                batch,
                 UsbMuxFrameCodec.Frame(
                     streamId = streamId,
                     flags = 0,
@@ -447,6 +492,7 @@ class InputChannel(
                 )
             )
         }
+        batch.writeTo(out)
         out.flush()
     }
 
@@ -518,5 +564,6 @@ class InputChannel(
         private const val RECONNECT_DELAY_MS = 1000L
         private const val FALLBACK_RACE_DELAY_MS = 200L
         private const val MAX_QUEUED_BATCHES = 32
+        private const val MAX_MERGED_SAMPLES = 512
     }
 }

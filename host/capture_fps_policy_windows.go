@@ -14,7 +14,10 @@ func shouldRespectWindowsResolutionSetting() bool {
 	return strings.EqualFold(strings.TrimSpace(ident.Platform), "android")
 }
 
-func effectiveCaptureFPS(target captureTarget, configuredFPS int) int {
+// platformFirstConnectFPSCeiling bounds the default rate for a new tablet.
+const platformFirstConnectFPSCeiling = 240
+
+func effectiveCaptureFPS(target captureTarget, configuredFPS int, ffmpeg string) int {
 	if !shouldRespectWindowsResolutionSetting() {
 		return configuredFPS
 	}

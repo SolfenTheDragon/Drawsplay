@@ -258,24 +258,54 @@ func specNames(specs []pipelineSpec) []string {
 }
 
 func TestEffectiveCaptureFPSClampsX11Grab(t *testing.T) {
-	// ffmpeg's x11grab free-runs at ~470-490 fps when asked for 120, which
-	// drives congestion-based bitrate-ladder collapse and restart churn.
-	// The X11 mirror is bounded by the same 60 Hz desktop refresh the
-	// PipeWire path is already clamped to.
-	if got := effectiveCaptureFPS(x11TestTarget(), 120); got != 60 {
+	// Without a hardware encoder that sustains it, the X11 path is bounded by
+	// the 60 Hz desktop refresh the PipeWire path is already clamped to.
+	withFakeVAAPIProbe(t, "", false)
+	if got := effectiveCaptureFPS(x11TestTarget(), 120, "ffmpeg"); got != 60 {
 		t.Fatalf("x11grab fps clamp = %d, want 60", got)
 	}
-	if got := effectiveCaptureFPS(x11TestTarget(), 60); got != 60 {
+	if got := effectiveCaptureFPS(x11TestTarget(), 60, "ffmpeg"); got != 60 {
 		t.Fatalf("x11grab fps passthrough at 60 = %d, want 60", got)
 	}
-	if got := effectiveCaptureFPS(x11TestTarget(), 30); got != 30 {
+	if got := effectiveCaptureFPS(x11TestTarget(), 30, "ffmpeg"); got != 30 {
 		t.Fatalf("x11grab fps passthrough below the clamp = %d, want 30", got)
 	}
-	if got := effectiveCaptureFPS(captureTarget{Kind: capturePipeWire}, 120); got != 60 {
+	if got := effectiveCaptureFPS(captureTarget{Kind: capturePipeWire}, 120, "ffmpeg"); got != 60 {
 		t.Fatalf("pipewire fps clamp regressed = %d, want 60", got)
 	}
-	if got := effectiveCaptureFPS(captureTarget{Kind: captureScreencopy}, 120); got != 60 {
+	if got := effectiveCaptureFPS(captureTarget{Kind: captureScreencopy}, 120, "ffmpeg"); got != 60 {
 		t.Fatalf("screencopy fps clamp = %d, want 60", got)
+	}
+}
+
+func TestEffectiveCaptureFPSAllowsHighRateX11WithVAAPI(t *testing.T) {
+	ffmpeg := withFakeFFmpegEncoders(t, "ffmpeg-x11-120", " V..... h264_vaapi \n V..... libx264 \n")
+	withFakeVAAPIProbe(t, "/dev/dri/renderD128", true)
+
+	if got := effectiveCaptureFPS(x11TestTarget(), 120, ffmpeg); got != 120 {
+		t.Fatalf("x11grab+VAAPI fps = %d, want 120", got)
+	}
+	if got := effectiveCaptureFPS(x11TestTarget(), 240, ffmpeg); got != 120 {
+		t.Fatalf("x11grab+VAAPI fps ceiling = %d, want 120", got)
+	}
+	if got := effectiveCaptureFPS(captureTarget{Kind: capturePipeWire}, 120, ffmpeg); got != 60 {
+		t.Fatalf("pipewire must stay at 60, got %d", got)
+	}
+
+	opts := videoOptions{FPS: 120, Bitrate: "24M", Codec: "h264", FFmpeg: ffmpeg}
+	specs, err := buildCapturePipelines(x11TestTarget(), opts)
+	if err != nil {
+		t.Fatalf("buildCapturePipelines: %v", err)
+	}
+	for _, spec := range specs {
+		joined := strings.Join(spec.Args, " ")
+		if spec.BaseEncoder == vaapiH264Encoder {
+			if !strings.Contains(joined, "-framerate 120") || !strings.Contains(joined, "-level 5.2") || !strings.Contains(joined, "-r 120") {
+				t.Errorf("vaapi spec not 120 fps with a level: %s", joined)
+			}
+		} else if !strings.Contains(joined, "-framerate 60") {
+			t.Errorf("%s fallback must stay at 60 fps: %s", spec.BaseEncoder, joined)
+		}
 	}
 }
 
@@ -311,12 +341,31 @@ func TestScreencopySpecsReadFramesFromTheirInput(t *testing.T) {
 	}
 }
 
+func TestX11GrabIdleGateOnlyWhenEnabled(t *testing.T) {
+	ffmpeg := withFakeFFmpegEncoders(t, "ffmpeg-x11-gate", " V..... libx264 \n")
+	withFakeVAAPIProbe(t, "", false)
+	target := x11TestTarget()
+	target.Rect = displayRect{X: 0, Y: 0, W: 1920, H: 1080}
+	for _, on := range []bool{false, true} {
+		opts := videoOptions{FPS: 60, Bitrate: "24M", Codec: "h264", FFmpeg: ffmpeg, IdleGate: on}
+		specs, err := buildCapturePipelines(target, opts)
+		if err != nil || len(specs) == 0 {
+			t.Fatalf("buildCapturePipelines: %v", err)
+		}
+		for _, sp := range specs {
+			if (sp.IdleGate != nil) != on {
+				t.Errorf("IdleGate set=%v with setting=%v", sp.IdleGate != nil, on)
+			}
+		}
+	}
+}
+
 func TestBuildCapturePipelinesX11GrabUsesClampedFPS(t *testing.T) {
 	ffmpeg := withFakeFFmpegEncoders(t, "ffmpeg-x11-clamp", " V..... libx264 \n")
 	withFakeVAAPIProbe(t, "", false)
 
 	target := x11TestTarget()
-	opts := videoOptions{FPS: effectiveCaptureFPS(target, 120), Bitrate: "24M", Codec: "h264", FFmpeg: ffmpeg}
+	opts := videoOptions{FPS: effectiveCaptureFPS(target, 120, "ffmpeg"), Bitrate: "24M", Codec: "h264", FFmpeg: ffmpeg}
 	specs, err := buildCapturePipelines(target, opts)
 	if err != nil {
 		t.Fatalf("buildCapturePipelines: %v", err)

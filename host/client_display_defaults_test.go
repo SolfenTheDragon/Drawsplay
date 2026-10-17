@@ -30,6 +30,14 @@ func TestApplyClientDisplayDefaults(t *testing.T) {
 		t.Fatalf("first connect = %dx%d@%d, want native 2560x1600@60", opts.Width, opts.Height, opts.FPS)
 	}
 
+	panel := android
+	panel.RefreshRates = []int{60, 120}
+	opts = base
+	applyClientDisplayDefaults(&opts, panel)
+	if want := min(120, platformFirstConnectFPSCeiling); opts.FPS != want {
+		t.Fatalf("first connect on 120 Hz panel = %d fps, want %d", opts.FPS, want)
+	}
+
 	android.PrefWidth, android.PrefHeight, android.PrefFPS = 1920, 1200, 90
 	opts = base
 	applyClientDisplayDefaults(&opts, android)

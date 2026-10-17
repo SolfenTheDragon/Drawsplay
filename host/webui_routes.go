@@ -122,6 +122,7 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 			old.PenEnabled != s.PenEnabled ||
 			old.TouchGestures != s.TouchGestures ||
 			old.KeepAliveOnBackground != s.KeepAliveOnBackground ||
+			old.PenPrediction != s.PenPrediction ||
 			old.VideoScaling != s.VideoScaling {
 			inputRestarted = restartActiveInputSessions()
 		}

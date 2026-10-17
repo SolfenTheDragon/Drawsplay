@@ -220,13 +220,13 @@ class VideoDecoder(
 
         // Placeholder size: decoders take the real dimensions from the SPS in
         // csd-0; 0x0 fails configuration on some devices.
-        val format = MediaFormat.createVideoFormat(
+        fun buildFormat(vendorKeys: Boolean): MediaFormat? = MediaFormat.createVideoFormat(
             if (codecName == "hevc") MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC,
             1920,
             1080
         ).apply {
             if (codecName == "hevc") {
-                val vpsData = vps ?: return
+                val vpsData = vps ?: return null
                 val joined = ByteArray(vpsData.size + spsData.size + ppsData.size)
                 System.arraycopy(vpsData, 0, joined, 0, vpsData.size)
                 System.arraycopy(spsData, 0, joined, vpsData.size, spsData.size)
@@ -246,7 +246,15 @@ class VideoDecoder(
             if (AndroidCompat.supportsLowLatencyDecoderHint) {
                 setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
             }
+            if (vendorKeys) {
+                // SoC-specific switches that disable output reordering/queueing
+                // on decoders that ignore the standard key. Unknown keys are
+                // ignored by most codecs; if one is rejected, configure is
+                // retried without them below.
+                for ((key, value) in VENDOR_LOW_LATENCY_KEYS) setInteger(key, value)
+            }
         }
+        val format = buildFormat(vendorKeys = true) ?: return
 
         val useSoftware = consecutiveHwFailures >= MAX_HW_FAILURES
         val created = try {
@@ -259,7 +267,27 @@ class VideoDecoder(
         usingSoftwareDecoder = useSoftware
         try {
             created.setCallback(RenderPacedCallback())
-            created.configure(format, surface, null, 0)
+            try {
+                created.configure(format, surface, null, 0)
+            } catch (e: Exception) {
+                Log.w(TAG, "Decoder rejected vendor low-latency keys; retrying without them", e)
+                // A failed configure leaves the codec uninitialized, so a
+                // fresh instance is needed for the retry.
+                val plain = buildFormat(vendorKeys = false) ?: throw e
+                try {
+                    created.release()
+                } catch (_: Exception) {
+                }
+                val retry = createDecoder(useSoftware, codecName)
+                retry.setCallback(RenderPacedCallback())
+                retry.configure(plain, surface, null, 0)
+                retry.start()
+                codec = retry
+                usingSoftwareDecoder = useSoftware
+                applySurfaceFrameRateHint()
+                Log.i(TAG, "Decoder configured: ${retry.name} (software=$useSoftware, no vendor keys)")
+                return
+            }
             created.start()
         } catch (e: Exception) {
             Log.e(TAG, "Decoder configure/start failed (software=$useSoftware)", e)
@@ -565,6 +593,14 @@ class VideoDecoder(
         private const val HEVC_NAL_SPS = 33
         private const val HEVC_NAL_PPS = 34
         private const val MAX_PENDING_NALS = 128
+
+        private val VENDOR_LOW_LATENCY_KEYS = listOf(
+            "vendor.qti-ext-dec-low-latency.enable" to 1,
+            "vendor.rtc-ext-dec-low-latency.enable" to 1,
+            "vendor.low-latency.enable" to 1,
+            "vendor.hisi-ext-low-latency-video-dec.video-scene-for-low-latency-req" to 1,
+            "vendor.hisi-ext-low-latency-video-dec.video-scene-for-low-latency-rdy" to -1
+        )
 
         /**
          * Pictures waiting ahead of a newly arrived keyframe before they are

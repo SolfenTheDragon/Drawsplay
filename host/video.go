@@ -80,6 +80,11 @@ type videoOptions struct {
 	// Requested virtual display size (extend mode).
 	Width  int
 	Height int
+	// IdleGate pauses X11 capture while the screen is static (setting
+	// idleCaptureGate; Linux x11grab only).
+	IdleGate bool
+	// X11HighRate allows x11grab capture above 60 fps (setting x11HighRateCapture).
+	X11HighRate bool
 }
 
 // runVideoListener accepts video sessions until ctx is cancelled. If the
@@ -731,7 +736,10 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		}
 
 		effOpts := opts
-		effOpts.FPS = effectiveCaptureFPS(target, opts.FPS)
+		effOpts.FPS = effectiveCaptureFPS(target, opts.FPS, opts.FFmpeg)
+		if target.Kind == captureX11Grab && !opts.X11HighRate && effOpts.FPS > 60 {
+			effOpts.FPS = 60
+		}
 		if lastEffectiveFPS != 0 && effOpts.FPS != lastEffectiveFPS {
 			log.Printf("Capture framerate now following active display refresh: %d fps", effOpts.FPS)
 			publishModeChange(target.Width, target.Height, effOpts.FPS)
@@ -964,6 +972,11 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 		return false, err
 	}
 	defer pipeline.stop()
+	if spec.IdleGate != nil && pipeline.cmd != nil {
+		// Deferred after pipeline.stop so it runs first and resumes a paused
+		// process before it is stopped.
+		defer startIdleGate(ctx, pipeline.cmd.Process, spec.IdleGate)()
+	}
 
 	// Watcher: the pump below spends its life blocked in stdout.Read, which
 	// cannot notice a dead client or a stalled-but-alive encoder on its own

@@ -21,7 +21,16 @@ import (
 const ffmpegAVIOBufferSize = 32768
 
 // pipelineSpec is one runnable capture/encode candidate.
+// idleGateSpec asks runEncodePipeline to pause the capture process while the
+// X11 area it records is idle (see startIdleGate).
+type idleGateSpec struct {
+	Display    string
+	X, Y, W, H int
+}
+
 type pipelineSpec struct {
+	// IdleGate, when set, pauses the process while the screen is static.
+	IdleGate *idleGateSpec
 	// Name identifies the encoder for logs and the client config packet
 	// (e.g. "h264_nvenc", "x264enc").
 	Name string

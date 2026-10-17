@@ -47,6 +47,19 @@ type settings struct {
 	TouchGestures         bool `json:"touchGestures"`
 	KeyboardEnabled       bool `json:"keyboardEnabled"`
 	KeepAliveOnBackground bool `json:"keepAliveOnBackground"`
+	// PenPrediction makes the tablet extrapolate stylus hover motion a few
+	// milliseconds ahead so the host cursor tracks the pen with less lag.
+	PenPrediction bool `json:"penPrediction"`
+	// IdleCaptureGate pauses the Linux X11 capture process while the screen is
+	// static (no damage, no pointer movement) and resumes it on the first
+	// change, cutting idle CPU, bitrate and tablet decode work. Off by
+	// default; turning it off restores continuous capture.
+	IdleCaptureGate bool `json:"idleCaptureGate"`
+	// X11HighRateCapture lets Linux X11 capture run above 60 fps (up to the
+	// tablet's rate) when VAAPI can sustain it, sampling the 60 Hz desktop
+	// twice per frame to cut capture-phase latency at about 2x encoder CPU.
+	// Off clamps X11 capture to 60 fps.
+	X11HighRateCapture bool `json:"x11HighRateCapture"`
 	// VideoScaling is how the tablet lays the host picture out on its panel
 	// (videoScalingFill, videoScalingFit or videoScalingOriginal).
 	VideoScaling    string `json:"videoScaling"`
@@ -83,6 +96,8 @@ func defaultSettings() settings {
 		TouchGestures:         true,
 		KeyboardEnabled:       true,
 		KeepAliveOnBackground: false,
+		PenPrediction:         true,
+		X11HighRateCapture:    true,
 		VideoScaling:          videoScalingFill,
 		NoDriverInstall:       false,
 		WifiEnabled:           false,
@@ -352,5 +367,7 @@ func (s settings) videoOptions() videoOptions {
 		Height:           s.Height,
 		ZeroCopyCapture:  s.ZeroCopyCapture,
 		TemporalLayering: s.TemporalLayering,
+		IdleGate:         s.IdleCaptureGate,
+		X11HighRate:      s.X11HighRateCapture,
 	}
 }

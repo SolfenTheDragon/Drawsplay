@@ -142,8 +142,10 @@ class MainActivity : AppCompatActivity() {
                 wifiEnabled: Boolean,
                 wifiAuthToken: String,
                 wifiTlsRequired: Boolean,
-                wifiTlsFingerprint: String
+                wifiTlsFingerprint: String,
+                penPrediction: Boolean
             ) {
+                inputPad.penPredictionEnabled = penPrediction
                 applySessionPolicy(
                     keepAliveOnBackground,
                     wifiEnabled,
@@ -412,7 +414,13 @@ class MainActivity : AppCompatActivity() {
      * keeps pen/touch presentation latency low.
      */
     private fun requestHighRefreshMode() {
-        val bestMode = currentDisplay()?.supportedModes?.maxByOrNull { it.refreshRate } ?: return
+        val panel = currentDisplay() ?: return
+        val current = panel.mode
+        // Only modes at the panel's current resolution: a faster mode at a
+        // lower resolution would silently downscale the picture.
+        val bestMode = panel.supportedModes
+            .filter { it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight }
+            .maxByOrNull { it.refreshRate } ?: return
         val attrs = window.attributes
         attrs.preferredDisplayModeId = bestMode.modeId
         attrs.preferredRefreshRate = bestMode.refreshRate
