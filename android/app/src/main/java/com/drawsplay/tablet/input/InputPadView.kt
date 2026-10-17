@@ -2,7 +2,9 @@
 
 import android.content.Context
 import android.os.SystemClock
+import android.os.Build
 import android.util.AttributeSet
+import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 
@@ -62,6 +64,15 @@ class InputPadView(context: Context, attrs: AttributeSet? = null) : View(context
         }
 
     private val predictor = PenPredictor()
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        // The MotionEvent overload only covers touch gestures; the source
+        // overload also unbatches stylus hover, which is otherwise vsync-aligned.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            requestUnbufferedDispatch(InputDevice.SOURCE_CLASS_POINTER)
+        }
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         predictor.reset()
