@@ -96,7 +96,7 @@ Video setting changes restart the stream automatically.
 - sway / Hyprland: their output commands.
 - KDE Plasma: DrawSplay's settings page.
 
-On Linux the frame rate is limited to 60, except on X11 hosts with VA-API (Intel/AMD) where the tablet may request up to 120. The settings page can turn that 120 fps capture off, and can pause X11 capture while the screen is idle (saves CPU and bandwidth; off by default).
+On Linux the frame rate is limited to 60, except on X11 hosts with VA-API (Intel/AMD) where the tablet may request up to 120. The settings page can turn that 120 fps capture off, and can pause X11 capture while the screen is idle (saves CPU and bandwidth; off by default). Some compositors, such as Muffin, report damage for the whole X screen, so any animation on any monitor keeps capture running.
 
 ## Troubleshooting
 
