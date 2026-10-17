@@ -60,6 +60,16 @@ $cl = Join-Path $clDir 'cl.exe'
 $link = Join-Path $clDir 'link.exe'
 if (-not (Test-Path $cl)) { Die "cl.exe not found at $cl" }
 
+# The WDK package may ship a different SDK version folder than the installed SDK.
+$wdkSdkVersion = $SdkVersion
+if (-not (Test-Path (Join-Path $WdkRoot "Include\$wdkSdkVersion\um\iddcx\$IddCxVersion"))) {
+    $match = Get-ChildItem (Join-Path $WdkRoot 'Include') -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path (Join-Path $_.FullName "um\iddcx\$IddCxVersion") } |
+        Sort-Object Name | Select-Object -Last 1
+    if ($match) { $wdkSdkVersion = $match.Name }
+}
+Write-Host "WDK SDK version: $wdkSdkVersion"
+
 # --- Include directories -------------------------------------------------
 $sdkInc = Join-Path $SdkRoot "Include\$SdkVersion"
 $incs = @(
@@ -69,7 +79,7 @@ $incs = @(
     (Join-Path $sdkInc 'shared'),
     (Join-Path $sdkInc 'winrt'),
     (Join-Path $WdkRoot "Include\wdf\umdf\$UmdfVersion"),
-    (Join-Path $WdkRoot "Include\$SdkVersion\um\iddcx\$IddCxVersion")
+    (Join-Path $WdkRoot "Include\$wdkSdkVersion\um\iddcx\$IddCxVersion")
 )
 foreach ($i in $incs) { if (-not (Test-Path $i)) { Die "Missing include dir: $i" } }
 
@@ -80,7 +90,7 @@ $libs = @(
     (Join-Path $sdkLib "ucrt\$Arch"),
     (Join-Path $sdkLib "um\$Arch"),
     (Join-Path $WdkRoot "Lib\wdf\umdf\$Arch\$UmdfVersion"),
-    (Join-Path $WdkRoot "Lib\$SdkVersion\um\$Arch\iddcx\$IddCxVersion")
+    (Join-Path $WdkRoot "Lib\$wdkSdkVersion\um\$Arch\iddcx\$IddCxVersion")
 )
 foreach ($l in $libs) { if (-not (Test-Path $l)) { Die "Missing lib dir: $l" } }
 
