@@ -75,6 +75,7 @@ type displayOutput struct {
 	AdapterIndex int
 	OutputIndex  int
 	AdapterName  string
+	VendorID     uint32 // PCI vendor of the adapter (see gpuVendor*)
 	DeviceName   string // GDI name, e.g. \\.\DISPLAY3
 	Attached     bool
 	Rect         dxgiRect
@@ -139,6 +140,7 @@ func enumerateOutputs() ([]displayOutput, error) {
 				AdapterIndex: a,
 				OutputIndex:  o,
 				AdapterName:  adapterName,
+				VendorID:     adapterDesc.VendorID,
 				DeviceName:   windows.UTF16ToString(desc.DeviceName[:]),
 				Attached:     desc.AttachedToDesktop != 0,
 				Rect:         desc.DesktopCoordinates,

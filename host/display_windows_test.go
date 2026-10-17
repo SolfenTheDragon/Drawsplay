@@ -3,6 +3,7 @@
 package main
 
 import "testing"
+import "time"
 
 func testDisplayOutput(name string, adapter, output int, attached bool) displayOutput {
 	return displayOutput{
@@ -63,5 +64,38 @@ func TestResolveVDDOutputRejectsAmbiguousReplacement(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("ambiguous replacement unexpectedly resolved")
+	}
+}
+
+func TestMirrorFallbackPrefersPreSessionDisplay(t *testing.T) {
+	outputs := []displayOutput{
+		testDisplayOutput(`\\.\DISPLAY38`, 0, 1, true),
+		testDisplayOutput(`\\.\DISPLAY1`, 0, 0, true),
+	}
+	display, err := newMirrorDisplayForBaseline(outputs, map[string]bool{`\\.\DISPLAY1`: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := display.(*mirrorDisplay).output.DeviceName; got != `\\.\DISPLAY1` {
+		t.Fatalf("mirror output = %s, want pre-session display DISPLAY1", got)
+	}
+	if !display.Target().Mirrored {
+		t.Fatal("mirror capture target is not marked as mirrored")
+	}
+}
+
+func TestVDDCaptureFallbackCooldown(t *testing.T) {
+	now := time.Now()
+	baseline := map[string]bool{`\\.\DISPLAY1`: true}
+	markVDDCaptureFallback(now, baseline)
+	until, gotBaseline, active := vddCaptureFallbackActive(now.Add(time.Second))
+	if !active || !until.Equal(now.Add(vddCaptureFallbackCooldown)) {
+		t.Fatalf("cooldown = (%s, %v), want active until %s", until, active, now.Add(vddCaptureFallbackCooldown))
+	}
+	if !gotBaseline[`\\.\DISPLAY1`] {
+		t.Fatalf("cooldown baseline = %v, want %v", gotBaseline, baseline)
+	}
+	if _, _, active := vddCaptureFallbackActive(until); active {
+		t.Fatal("cooldown must expire at its deadline")
 	}
 }
