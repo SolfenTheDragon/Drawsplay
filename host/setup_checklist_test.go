@@ -32,3 +32,14 @@ func TestDefaultsPreferAOAOverADB(t *testing.T) {
 		t.Fatalf("want AOA on and ADB tunnel off by default, got aoa=%v adb=%v", d.AOAEnabled, d.ADBTunnelEnabled)
 	}
 }
+
+func TestAOASetupChecklistExplainsMissingWindowsDriver(t *testing.T) {
+	item := aoaSetupItem("windows", aoaStatusInfo{
+		State:  "error",
+		Detail: "WinUSB is not bound to USB device 04e8:6860",
+	})
+	if item.OK || item.Detail == "" || !containsFold(item.Action, "installer") ||
+		!containsFold(item.Action, "accessory mode") {
+		t.Fatalf("Windows AOA driver error is not actionable: %+v", item)
+	}
+}

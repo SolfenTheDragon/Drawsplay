@@ -6,44 +6,61 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
 
-const winusbInstallTimeout = 2 * time.Minute
+const winusbInstallTimeout = 3 * time.Minute
 
 var winusbInstallAttempts sync.Map // "vid:pid" -> struct{}
 
-// ensureWinUSBDriver installs WinUSB for one VID/PID through an elevated
-// pnputil (UAC prompt), at most once per identity per host run. It reports
-// whether the install succeeded so the caller can rescan. Disabled by
-// -no-driver-install, like the display driver.
+// ensureWinUSBDriver binds DrawSplay's signed WinUSB package to an attached
+// tablet identity that has no WinUSB interface. Installed hosts run the
+// elevated helper task registered by -install (no prompt); a portable host
+// elevates itself once per identity ever (persisted in
+// %APPDATA%\DrawSplay\winusb-attempts.json). It reports whether the install
+// succeeded so the caller can rescan. This is independent of
+// -no-driver-install, which controls only the virtual display driver.
 func ensureWinUSBDriver(vid, pid uint16) bool {
-	if loadSettings().NoDriverInstall {
-		return false
-	}
 	key := fmt.Sprintf("%04x:%04x", vid, pid)
 	if _, loaded := winusbInstallAttempts.LoadOrStore(key, struct{}{}); loaded {
 		return false
 	}
 
-	dir, err := os.MkdirTemp("", "drawsplay-winusb-")
-	if err != nil {
-		log.Printf("AOA: create temp dir for %s WinUSB INF: %v", key, err)
-		return false
-	}
-	defer os.RemoveAll(dir)
-	inf := filepath.Join(dir, "drawsplay-winusb.inf")
-	if err := os.WriteFile(inf, []byte(aoaWinUSBInf(vid, pid)), 0o600); err != nil {
-		log.Printf("AOA: write WinUSB INF for %s: %v", key, err)
-		return false
+	if m, installed := loadInstallManifest(); installed {
+		if m.WinUSBTask == "" {
+			log.Printf("AOA: WinUSB is not bound to %s and no driver helper task is registered; rerun the DrawSplay installer", key)
+			return false
+		}
+		log.Printf("AOA: installing the signed WinUSB driver for %s", key)
+		if err := runHelperTask(m.WinUSBTask, winusbBindResultName, winusbInstallTimeout); err != nil {
+			log.Printf("AOA: WinUSB driver setup for %s failed: %v", key, err)
+			return false
+		}
+		return true
 	}
 
-	log.Printf("AOA: installing WinUSB driver for %s (approve the UAC prompt)", key)
-	args := `/add-driver "` + inf + `" /install`
-	if err := runElevatedAndWait(filepath.Join(os.Getenv("SystemRoot"), "System32", "pnputil.exe"), args, winusbInstallTimeout); err != nil {
-		log.Printf("AOA: WinUSB install for %s failed: %v (the INF must be signed or accepted by Windows)", key, err)
+	stateDir, stateErr := userStateDir()
+	if stateErr == nil && winusbAttemptRecorded(stateDir, key) {
+		log.Printf("AOA: WinUSB install for %s was already attempted; not prompting again (install DrawSplay with -install to bind it automatically)", key)
+		return false
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		log.Printf("AOA: installing the signed WinUSB driver for %s (approve the UAC prompt)", key)
+		err = runElevatedAndWait(exe, "-winusb-bind-attached", winusbInstallTimeout)
+	}
+	result := "installed"
+	if err != nil {
+		result = "failed: " + err.Error()
+	}
+	if stateErr == nil {
+		if recErr := recordWinUSBAttempt(stateDir, key, result, time.Now()); recErr != nil {
+			log.Printf("AOA: could not persist WinUSB attempt for %s: %v", key, recErr)
+		}
+	}
+	if err != nil {
+		log.Printf("AOA: WinUSB driver setup for %s failed: %v", key, err)
 		return false
 	}
 	return true

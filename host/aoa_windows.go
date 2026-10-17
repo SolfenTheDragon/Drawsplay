@@ -21,7 +21,7 @@ import (
 // both the tablet's original device (to send the AOA switch requests) and the
 // accessory device (18d1:2d00-2d05) must have WinUSB bound, for example with
 // libwdi or a driver package from the installer (see packaging/windows/README.md).
-// Devices without WinUSB are reported with an actionable log line and skipped.
+// Devices without WinUSB are reported with an actionable error and skipped.
 
 var (
 	setupapiDLL = windows.NewLazySystemDLL("setupapi.dll")
@@ -78,9 +78,13 @@ func openWinUSB(path string) (*winusbDevice, error) {
 	if err != nil {
 		return nil, err
 	}
+	// WinUsb_Initialize requires the device handle to have been opened with
+	// FILE_FLAG_OVERLAPPED, even though WinUsb_ReadPipe/WritePipe are called
+	// here with a NULL OVERLAPPED (WinUSB then blocks internally). Without
+	// this flag WinUsb_Initialize fails with ERROR_INVALID_HANDLE.
 	h, err := windows.CreateFile(p, windows.GENERIC_READ|windows.GENERIC_WRITE,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING,
-		windows.FILE_ATTRIBUTE_NORMAL, 0)
+		windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_OVERLAPPED, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
@@ -243,16 +247,23 @@ func parseUSBHardwareID(ids []string) (vid, pid uint16, ok bool) {
 	return 0, 0, false
 }
 
-// aoaScanDevices lists attached USB devices of interest that have a WinUSB
-// interface registered. Devices of interest without WinUSB are reported once.
-func aoaScanDevices() ([]aoaCandidate, error) {
+// aoaUSBDevice is one attached USB device of interest (an accessory-mode
+// device or a known Android vendor) and its registered WinUSB interfaces.
+type aoaUSBDevice struct {
+	VID, PID    uint16
+	Instance    string
+	WinUSBPaths []string
+}
+
+// aoaListUSBDevices enumerates attached USB devices of interest.
+func aoaListUSBDevices() ([]aoaUSBDevice, error) {
 	set, err := windows.SetupDiGetClassDevsEx(nil, "USB", 0, windows.DIGCF_PRESENT|windows.DIGCF_ALLCLASSES, 0, "")
 	if err != nil {
 		return nil, fmt.Errorf("enumerate USB devices: %w", err)
 	}
 	defer set.Close()
 
-	var out []aoaCandidate
+	var out []aoaUSBDevice
 	for i := 0; ; i++ {
 		info, err := windows.SetupDiEnumDeviceInfo(set, i)
 		if err != nil {
@@ -275,13 +286,31 @@ func aoaScanDevices() ([]aoaCandidate, error) {
 		if err != nil {
 			continue
 		}
-		paths := winusbInterfacePaths(set, info, instance)
+		out = append(out, aoaUSBDevice{VID: vid, PID: pid, Instance: instance, WinUSBPaths: winusbInterfacePaths(set, info, instance)})
+	}
+	return out, nil
+}
+
+// aoaScanDevices lists attached USB devices of interest that have a WinUSB
+// interface registered. Devices of interest without WinUSB are reported once.
+func aoaScanDevices() ([]aoaCandidate, error) {
+	devices, err := aoaListUSBDevices()
+	if err != nil {
+		return nil, err
+	}
+
+	var out []aoaCandidate
+	var missingDriver string
+	for _, dev := range devices {
+		vid, pid, instance, paths := dev.VID, dev.PID, dev.Instance, dev.WinUSBPaths
+		cand := aoaCandidate{VID: vid, PID: pid}
 		if len(paths) == 0 {
 			if ensureWinUSBDriver(vid, pid) {
 				// Rebinding is asynchronous; the next scan picks the device up.
 				log.Printf("AOA: WinUSB installed for %04x:%04x; waiting for the device to rebind", vid, pid)
 			} else {
-				throttledLog("aoa-nowinusb-"+instance, "AOA: %04x:%04x has no WinUSB interface; bind the WinUSB driver to it (see packaging/windows/README.md)", vid, pid)
+				missingDriver = fmt.Sprintf("WinUSB is not bound to USB device %04x:%04x; reconnect the tablet so DrawSplay can install its signed WinUSB driver, or rerun the DrawSplay installer (see packaging/windows/README.md)", vid, pid)
+				throttledLog("aoa-nowinusb-"+instance, "AOA: %s", missingDriver)
 			}
 			continue
 		}
@@ -289,6 +318,9 @@ func aoaScanDevices() ([]aoaCandidate, error) {
 		path := paths[0]
 		cand.Open = func() (aoaDeviceHandle, error) { return openWinUSB(path) }
 		out = append(out, cand)
+	}
+	if len(out) == 0 && missingDriver != "" {
+		return nil, errors.New(missingDriver)
 	}
 	return out, nil
 }

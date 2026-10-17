@@ -76,3 +76,6 @@ research/
 *.keystore
 play-*.json
 play-store/
+
+# DrawSplay IddCx driver build outputs (built per-machine / in CI from the WDK NuGet)
+drivers/windows/idd/out/

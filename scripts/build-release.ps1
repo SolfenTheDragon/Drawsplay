@@ -1,5 +1,8 @@
 param(
-  [string]$Configuration = "Release"
+  [string]$Configuration = "Release",
+  # Release version for the installer name (drawsplay_installer_<Version>.exe);
+  # defaults to the latest v* tag, or "dev".
+  [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,6 +11,23 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
 New-Item -ItemType Directory -Force -Path "release" | Out-Null
+
+if ([string]::IsNullOrWhiteSpace($Version)) {
+  $Version = (git describe --tags --abbrev=0 --match "v*" 2>$null)
+  if (-not $? -or [string]::IsNullOrWhiteSpace($Version)) {
+    $Version = "dev"
+  }
+}
+$Version = $Version.Trim()
+if ($Version -ne "dev" -and -not $Version.StartsWith("v")) {
+  $Version = "v$Version"
+}
+if ($Version -notmatch '^(dev|v[0-9A-Za-z.\-]+)$') {
+  throw "Invalid release version: $Version"
+}
+# The Windows release asset is the installer: it installs DrawSplay (and its
+# DrawSplay-Uninstall.exe) into Program Files when launched.
+$installerName = "drawsplay_installer_$Version.exe"
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -115,9 +135,16 @@ function Copy-FileWithRetry {
   return $false
 }
 
+Write-Host "Staging IddCx virtual display driver..."
+& "$PSScriptRoot\build-idd-driver.ps1"
+if (-not $?) {
+  throw "IddCx driver staging failed"
+}
+
 Write-Host "Building host..."
 Set-Location "$repoRoot\host"
-go build -o host.exe .
+# GUI subsystem: the host runs in the system tray and never opens a console.
+go build -ldflags "-H=windowsgui" -o host.exe .
 if (-not $?) {
   throw "Host build failed"
 }
@@ -132,12 +159,12 @@ if (-not $?) {
 
 Set-Location $repoRoot
 $hostBuildPath = "host\host.exe"
-$hostReleasePath = "release\DrawSplay.exe"
+$hostReleasePath = "release\$installerName"
 $apkBuildPath = "android\app\build\outputs\apk\release\app-release.apk"
 $apkReleasePath = "release\DrawSplay.APK"
 
 if (-not (Copy-FileWithRetry -SourcePath $hostBuildPath -DestinationPath $hostReleasePath)) {
-  Write-Warning "Could not overwrite release\DrawSplay.exe because it is in use; packaging host\host.exe instead."
+  Write-Warning "Could not overwrite release\$installerName because it is in use; packaging host\host.exe instead."
   $hostReleasePath = $hostBuildPath
 }
 
@@ -147,11 +174,11 @@ if (-not (Copy-FileWithRetry -SourcePath $apkBuildPath -DestinationPath $apkRele
 }
 
 Write-Host "Creating release archives..."
-New-SingleFileZip -SourcePath $hostReleasePath -DestinationZipPath "release\DrawSplay-host-windows.zip" -EntryName "DrawSplay.exe"
+New-SingleFileZip -SourcePath $hostReleasePath -DestinationZipPath "release\DrawSplay-host-windows.zip" -EntryName $installerName
 New-SingleFileZip -SourcePath $apkReleasePath -DestinationZipPath "release\DrawSplay-android-release.zip" -EntryName "DrawSplay.APK"
 
 $hashTargets = @(
-  @{ Path = $hostReleasePath; Label = "release/DrawSplay.exe" },
+  @{ Path = $hostReleasePath; Label = "release/$installerName" },
   @{ Path = $apkReleasePath; Label = "release/DrawSplay.APK" },
   @{ Path = "release\DrawSplay-host-windows.zip"; Label = "release/DrawSplay-host-windows.zip" },
   @{ Path = "release\DrawSplay-android-release.zip"; Label = "release/DrawSplay-android-release.zip" }
