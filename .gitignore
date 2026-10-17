@@ -71,6 +71,7 @@ research/
 !/PRIVACY.md
 !/THIRD-PARTY-NOTICES.md
 !/SECURITY.md
+!/CONTRIBUTING.md
 .github/copilot-instructions.md
 
 # Google Play signing/publishing secrets and docs
