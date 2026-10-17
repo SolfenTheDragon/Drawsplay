@@ -309,19 +309,6 @@ func withX11VBV(specs []pipelineSpec, opts videoOptions) []pipelineSpec {
 	return specs
 }
 
-// withAccessUnitWrites marks ffmpeg H.264 specs as writing the access-unit
-// pattern described on pipelineSpec.AUWriteChunk, which lets the read loop
-// send each frame's last NAL unit without waiting for the next frame.
-func withAccessUnitWrites(specs []pipelineSpec, opts videoOptions) []pipelineSpec {
-	if strings.EqualFold(opts.Codec, "hevc") || strings.EqualFold(opts.Codec, "h265") {
-		return specs
-	}
-	for i := range specs {
-		specs[i].AUWriteChunk = ffmpegAVIOBufferSize
-	}
-	return specs
-}
-
 // gstAUWriteChunk is the pipelineSpec.AUWriteChunk of every gst-launch spec.
 // fdsink writes each buffer (one access unit, as h264parse alignment=au
 // emits) with a single writev(2), resumed only after a partial write on a

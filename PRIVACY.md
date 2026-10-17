@@ -27,7 +27,7 @@ On the computer, DrawSplay stores settings (bitrate, resolution, input toggles, 
 
 - The host listens only on localhost (`127.0.0.1`) for the tablet channels and the settings web page. The tablet reaches them over USB.
 - **Wi-Fi mode is off by default.** If you enable it, the host listens on your local network, protected by TLS and a pairing token, and advertises itself via DNS-SD (`_drawsplay._tcp`). Traffic stays on your local network.
-- On Windows only, if `ffmpeg` or `adb` is missing and automatic tool download is enabled, the host downloads pinned, checksum-verified copies from their public distribution sites. Your IP address is visible to those servers as with any download; no DrawSplay data is sent. You can disable automatic downloads in the settings page.
+- On Windows only, the installer downloads the newest ffmpeg release compatible with your Windows version and CPU architecture from GitHub (gyan.dev essentials builds, or BtbN builds as a fallback / for ARM64), verifying the SHA-256 published with the release. The host does the same at runtime if ffmpeg is missing and automatic tool download is enabled. adb is never downloaded. Your IP address is visible to those servers as with any download; no DrawSplay data is sent. You can disable automatic downloads in the settings page.
 - On Linux, the install script may use your package manager (`apt`) to install dependencies.
 
 ## Permissions
@@ -37,7 +37,7 @@ On the computer, DrawSplay stores settings (bitrate, resolution, input toggles, 
 
 ## Third parties
 
-DrawSplay does not share data with third parties. It uses open-source components (such as ffmpeg, GStreamer, and the Parsec VDD virtual display driver on Windows) that run locally on your computer.
+DrawSplay does not share data with third parties. It uses open-source components (such as ffmpeg, GStreamer, and DrawSplay's bundled IddCx virtual display driver on Windows) that run locally on your computer.
 
 ## Children
 

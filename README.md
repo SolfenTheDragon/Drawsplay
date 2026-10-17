@@ -15,7 +15,7 @@ Use your Android tablet as a touch- and pen-enabled extension of your computer's
 
 Get the latest [DrawSplay release](https://github.com/SolfenTheDragon/Drawsplay/releases/latest):
 
-- **Windows host:** `DrawSplay.exe`
+- **Windows host:** `drawsplay_installer_vX.Y.Z.exe` (the installer)
 - **Linux host (x86-64):** `drawsplay-host-linux-amd64` and `install-drawsplay-host-linux.sh` (required); optional `uninstall-drawsplay-host-linux.sh`
 - **Android app:** `DrawSplay.APK`
 
@@ -24,7 +24,7 @@ No source build is required.
 ## Requirements
 
 - A USB cable between the computer and the tablet
-- **Windows:** Windows 10/11, with the WinUSB driver bound to the tablet (see Install). Internet access on first run if `ffmpeg` isn't already present or bundled.
+- **Windows:** Windows 10/11 (the extended display needs Windows 10 version 1903 or later; any NVIDIA, AMD or Intel GPU works), with the WinUSB driver bound to the tablet (see Install). Internet access during install: the installer downloads the newest ffmpeg build compatible with your Windows version and CPU (SHA-256 verified). adb is not needed or downloaded.
 - **Linux:** an x86-64 computer with ffmpeg. Wayland is preferred (GNOME, KDE Plasma 6, sway and Hyprland support an extended desktop); X11 also works and needs the `vkms` kernel module for an extended desktop. Without a virtual display DrawSplay mirrors your screen instead.
 - **Tablet:** an Android device. No Developer options or USB debugging are needed.
 
@@ -32,16 +32,20 @@ No source build is required.
 
 ### Windows
 
-1. Put `DrawSplay.exe` and `DrawSplay.APK` in a folder such as `C:\DrawSplay\`.
-2. Install the app on the tablet: copy `DrawSplay.APK` to it, open it and allow installs from that source if asked.
-3. Bind the WinUSB driver to the tablet so the host can open it over USB; see `packaging/windows/README.md` (this path hasn't been tested on hardware yet).
-4. Start the host:
-   ```powershell
-   cd C:\DrawSplay
-   .\DrawSplay.exe
-   ```
+1. Install the app on the tablet: copy `DrawSplay.APK` to it, open it and allow installs from that source if asked.
+2. Run `drawsplay_installer_vX.Y.Z.exe`. It asks whether to add a desktop shortcut and whether to start DrawSplay automatically when you sign in, then Windows asks for administrator approval **once**; setup then:
+   - installs DrawSplay to `C:\Program Files\DrawSplay\` (with `DrawSplay-Uninstall.exe`),
+   - installs DrawSplay's bundled virtual display driver and `ffmpeg`,
+   - installs a WinUSB driver for the tablet (signed on your PC, so Zadig is not needed) and a helper so newly attached tablets get it without another UAC prompt,
+   - stores settings, logs and install state in `%APPDATA%\DrawSplay\`, adds Start Menu shortcuts (and a desktop shortcut if you choose it) and, if you choose it, starts DrawSplay at sign-in (changeable later on the settings page).
 
-On first run the host sets up `ffmpeg` automatically if needed and may install a virtual display driver and, when you plug in the tablet, the WinUSB driver for it (approve the UAC prompts).
+   For an unattended install run `drawsplay_installer_vX.Y.Z.exe -install -quiet`, adding `-desktop-shortcut` and/or `-no-autostart` (or `-autostart`) as wanted; a quiet reinstall keeps the existing shortcut and sign-in setting.
+3. DrawSplay runs in the **system tray** (no console window). Right-click the tray icon to open settings, start/stop, or exit.
+4. If the tablet isn't detected, unplug and reconnect it; DrawSplay binds its WinUSB driver to the tablet automatically (normal mode first, then accessory mode). If it still isn't detected, rerun the installer. This replaces the tablet's file-transfer/ADB USB driver while DrawSplay's driver is bound; uninstalling DrawSplay restores it.
+
+To uninstall, use **Apps & Features**, the **Uninstall DrawSplay** Start Menu shortcut, or `C:\Program Files\DrawSplay\DrawSplay-Uninstall.exe` (add `-quiet` for no dialogs, `-keep-settings` to keep `%APPDATA%\DrawSplay`). The uninstaller also removes DrawSplay's dependencies: the bundled ffmpeg, WinUSB drivers DrawSplay installed (and their signing certificate), and DrawSplay's own virtual display driver. Components that other software may also use (a legacy Parsec driver when the Parsec app is installed, Zadig WinUSB bindings) are removed only if you confirm (`-remove-shared` with `-quiet`).
+
+To run DrawSplay without installing (portable), rename the downloaded file to `DrawSplay.exe`, run it and choose **No** when it offers to install; it then asks for administrator approval only when a driver is first needed, and never twice for the same USB device. For a console with live logs, run `DrawSplay.exe -background=false` from a terminal.
 
 ### Linux
 
@@ -86,7 +90,7 @@ Video setting changes restart the stream automatically.
 
 **Resolution and refresh rate.** The first time a tablet connects to a computer it uses the tablet's native resolution at 60 fps. Changes you make are remembered by the tablet, separately for each computer.
 
-- Windows: use **Windows Display Settings**.
+- Windows: use **Windows Display Settings**. The tablet's native resolution is offered at its panel's highest refresh rate (for example 120 Hz), and DrawSplay never streams faster than the tablet's screen can show.
 - GNOME Wayland: **Settings > Displays**.
 - X11: your desktop's display settings (the `Virtual-1-1` display).
 - sway / Hyprland: their output commands.
@@ -107,9 +111,9 @@ On Linux the frame rate is limited to 60.
 
 **Multi-touch gestures don't work in an X11 app.** Some apps need touch enabled; for Firefox start it with `MOZ_USE_XINPUT2=1 firefox`.
 
-**Black screen or no video.** Check `ffmpeg -version` (or `C:\DrawSplay\runtime\ffmpeg\ffmpeg.exe -version`), keep the host and tablet app open, and try a lower bitrate or resolution on the settings page.
+**Black screen or no video.** Check `ffmpeg -version` (or `"C:\Program Files\DrawSplay\runtime\ffmpeg\ffmpeg.exe" -version`), keep the host and tablet app open, and try a lower bitrate or resolution on the settings page.
 
-**Windows: no extended display.** Restart `DrawSplay.exe` as a normal user and approve the UAC prompt; reboot if Windows asks. If custom resolutions are missing, run **Enable custom-resolution registry access (Admin)** once on the settings page, then reconnect.
+**Windows: no extended display.** Run the installer (or `"C:\Program Files\DrawSplay\DrawSplay.exe" -install`) again to repair the driver setup (one UAC prompt); reboot if Windows asks. If custom resolutions are missing, run **Enable custom-resolution registry access (Admin)** once on the settings page, then reconnect.
 
 **Tablet shows no prompt / doesn't open when plugged in.** Turn on **Auto-launch Android app on USB connect** on the settings page, or open the app manually.
 
@@ -120,3 +124,5 @@ The host listens only on your computer (localhost) and the settings page is loca
 ## License
 
 DrawSplay is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).
+
+DrawSplay bundles a Windows virtual display driver derived from Microsoft's IddCx sample under the Microsoft Public License (MS-PL); see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
