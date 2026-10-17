@@ -18,6 +18,9 @@ package main
 // the requested rate is 60.
 const linuxCaptureFPSCeiling = 60
 
+// platformFirstConnectFPSCeiling bounds the default rate for a new tablet.
+const platformFirstConnectFPSCeiling = linuxCaptureFPSCeiling
+
 func effectiveCaptureFPS(target captureTarget, configuredFPS int) int {
 	switch target.Kind {
 	case capturePipeWire, captureX11Grab, captureScreencopy:

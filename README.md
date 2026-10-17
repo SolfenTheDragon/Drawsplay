@@ -7,7 +7,7 @@ Use your Android tablet as a touch- and pen-enabled extension of your computer's
 - Extended desktop on the tablet (mirroring when a virtual display isn't available)
 - Touch, multi-touch and pen input, including pressure, tilt and buttons
 - Connects automatically over USB; no IP addresses or pairing codes
-- Tablet's native resolution and 60 fps by default, remembered per computer
+- Tablet's native resolution and highest refresh rate by default (60 fps on Linux), remembered per computer
 - Local settings page for bitrate, input toggles and diagnostics
 - Windows and Linux hosts
 
@@ -88,7 +88,7 @@ While the host is running, open `http://127.0.0.1:27180` to:
 
 Video setting changes restart the stream automatically.
 
-**Resolution and refresh rate.** The first time a tablet connects to a computer it uses the tablet's native resolution at 60 fps. Changes you make are remembered by the tablet, separately for each computer.
+**Resolution and refresh rate.** The first time a tablet connects to a computer it uses the tablet's native resolution at its highest refresh rate (60 fps on Linux hosts). Changes you make are remembered by the tablet, separately for each computer.
 
 - Windows: use **Windows Display Settings**. The tablet's native resolution is offered at its panel's highest refresh rate (for example 120 Hz), and DrawSplay never streams faster than the tablet's screen can show.
 - GNOME Wayland: **Settings > Displays**.

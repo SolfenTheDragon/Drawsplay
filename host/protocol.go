@@ -219,6 +219,7 @@ type hostClearDisplayModeMsg struct {
 type hostSessionPolicyMsg struct {
 	Type                  string `json:"type"` // always "sessionPolicy"
 	KeepAliveOnBackground bool   `json:"keepAliveOnBackground"`
+	PenPrediction         bool   `json:"penPrediction"`
 	VideoScaling          string `json:"videoScaling,omitempty"`
 	WifiEnabled           bool   `json:"wifiEnabled"`
 	WifiAuthToken         string `json:"wifiAuthToken,omitempty"`

@@ -14,6 +14,9 @@ func shouldRespectWindowsResolutionSetting() bool {
 	return strings.EqualFold(strings.TrimSpace(ident.Platform), "android")
 }
 
+// platformFirstConnectFPSCeiling bounds the default rate for a new tablet.
+const platformFirstConnectFPSCeiling = 240
+
 func effectiveCaptureFPS(target captureTarget, configuredFPS int) int {
 	if !shouldRespectWindowsResolutionSetting() {
 		return configuredFPS

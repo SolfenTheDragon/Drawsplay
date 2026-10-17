@@ -47,6 +47,9 @@ type settings struct {
 	TouchGestures         bool `json:"touchGestures"`
 	KeyboardEnabled       bool `json:"keyboardEnabled"`
 	KeepAliveOnBackground bool `json:"keepAliveOnBackground"`
+	// PenPrediction makes the tablet extrapolate stylus hover motion a few
+	// milliseconds ahead so the host cursor tracks the pen with less lag.
+	PenPrediction bool `json:"penPrediction"`
 	// VideoScaling is how the tablet lays the host picture out on its panel
 	// (videoScalingFill, videoScalingFit or videoScalingOriginal).
 	VideoScaling    string `json:"videoScaling"`
@@ -83,6 +86,7 @@ func defaultSettings() settings {
 		TouchGestures:         true,
 		KeyboardEnabled:       true,
 		KeepAliveOnBackground: false,
+		PenPrediction:         true,
 		VideoScaling:          videoScalingFill,
 		NoDriverInstall:       false,
 		WifiEnabled:           false,

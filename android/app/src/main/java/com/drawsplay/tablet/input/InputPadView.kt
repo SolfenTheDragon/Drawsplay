@@ -48,7 +48,23 @@ class InputPadView(context: Context, attrs: AttributeSet? = null) : View(context
     /** Called on the UI thread with each batch of captured samples. */
     var onInputBatch: ((List<InputEventPacket>) -> Unit)? = null
 
+    /**
+     * Host-controlled (web UI "Pen motion prediction"). When on, each stylus
+     * hover-move batch ends with one extrapolated sample so the host cursor
+     * leads the pen by a few milliseconds. Contact strokes are never
+     * predicted: injected ink cannot be retracted.
+     */
+    @Volatile
+    var penPredictionEnabled: Boolean = false
+        set(value) {
+            field = value
+            if (!value) predictor.reset()
+        }
+
+    private val predictor = PenPredictor()
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        predictor.reset()
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             // Deliver input events as they arrive instead of batching them to
             // the display refresh; this removes up to a frame of input latency
@@ -97,12 +113,26 @@ class InputPadView(context: Context, attrs: AttributeSet? = null) : View(context
         }
 
         val packets = if (event.actionMasked == MotionEvent.ACTION_HOVER_MOVE) {
-            collectMoveSamples(event, actionName)
+            withPrediction(event, collectMoveSamples(event, actionName))
         } else {
+            predictor.reset()
             listOf(packetForPointer(event, actionName, 0))
         }
         onInputBatch?.invoke(packets)
         return true
+    }
+
+    private fun withPrediction(event: MotionEvent, samples: List<InputEventPacket>): List<InputEventPacket> {
+        if (!penPredictionEnabled || event.pointerCount != 1 ||
+            event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS
+        ) {
+            predictor.reset()
+            return samples
+        }
+        for (sample in samples) predictor.record(sample.x, sample.y, sample.timestampMs)
+        val predicted = predictor.predict() ?: return samples
+        val clamped = PenPredictor.clampToView(predicted, width, height)
+        return samples + samples.last().copy(x = clamped.x, y = clamped.y)
     }
 
     /**
