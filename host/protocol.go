@@ -19,7 +19,7 @@ import (
 // Upstream (client -> host) types: "hello", "modePrefs", "input", and "key"
 // (physical keyboard events, M5).
 // Downstream (host -> client) types: "hostInfo", "displayMode", "clearDisplayMode",
-// "sessionPolicy", and "cursor".
+// and "sessionPolicy".
 //
 // # Video channel (host -> tablet, port 27184)
 //
@@ -108,6 +108,9 @@ type packet struct {
 	PrefWidth    int `json:"prefWidth"`
 	PrefHeight   int `json:"prefHeight"`
 	PrefFPS      int `json:"prefFps"`
+	// ScreenRefreshRates (hello): refresh rates (Hz, rounded) the tablet
+	// panel supports at its native resolution. Optional; older clients omit it.
+	ScreenRefreshRates []int `json:"screenRefreshRates"`
 	// HostPrefs (hello): the client keeps display preferences per host and
 	// will answer the host's "hostInfo" with a "modePrefs" packet (which
 	// carries PrefWidth/PrefHeight/PrefFPS).
@@ -223,17 +226,6 @@ type hostSessionPolicyMsg struct {
 	WifiTLSFingerprint    string `json:"wifiTlsFingerprint,omitempty"`
 }
 
-// hostCursorMsg is pushed over the input channel so Android can render the
-// pointer locally at input cadence instead of relying on DXGI's intermittently
-// refreshed hardware-cursor metadata. X/Y are normalized to the active
-// streamed display.
-type hostCursorMsg struct {
-	Type    string  `json:"type"` // always "cursor"
-	X       float64 `json:"x"`
-	Y       float64 `json:"y"`
-	Visible bool    `json:"visible"`
-}
-
 // videoConfigMsg is the JSON payload of a config packet on the video channel.
 type videoConfigMsg struct {
 	Codec      string   `json:"codec"`
@@ -318,6 +310,9 @@ type clientStatsMsg struct {
 	// dropped before decoding, because newer ones were already queued: it
 	// was catching up after a stall rather than keeping pace.
 	StaleFrames int64 `json:"staleFrames,omitempty"`
+	// AppForeground is omitted by legacy clients; Windows uses it to adjust
+	// the capture process scheduling priority for background keep-alive.
+	AppForeground *bool `json:"appForeground,omitempty"`
 }
 
 // videoAuthMsg is an optional first upstream line on Wi-Fi video sessions.

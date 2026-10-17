@@ -41,7 +41,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class VideoChannel(
     private val listener: VideoChannelListener,
-    private val endpointSelector: HostEndpointSelector
+    private val endpointSelector: HostEndpointSelector,
+    private val isAppForeground: () -> Boolean = { true }
 ) {
 
     /** Owner-facing status callbacks. Invoked on the reader thread. */
@@ -223,6 +224,7 @@ class VideoChannel(
                         put("refreshHz", decoder.displayRefreshHz())
                         put("renderMode", decoder.renderMode)
                         put("pacingGuardrail", decoder.pacingGuardrailApplied)
+                        put("appForeground", isAppForeground())
                     }.toString() + "\n"
                     output.write(line.toByteArray(Charsets.UTF_8))
                     output.flush()
@@ -315,4 +317,3 @@ class VideoChannel(
         private const val MAX_PACKET_BYTES = 8 * 1024 * 1024
     }
 }
-

@@ -198,7 +198,7 @@ func aoaSetupItem(hostOS string, st aoaStatusInfo) setupCheckItem {
 			item.Action = "Install the udev rule so your user can open the tablet, then reconnect it."
 			item.Command = "sudo cp packaging/linux/70-drawsplay-aoa.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger"
 		} else {
-			item.Action = "Bind a WinUSB driver to the tablet (see packaging/windows/README.md), then reconnect it."
+			item.Action = "Reconnect the tablet so DrawSplay can install its signed WinUSB driver (in normal mode and again after it re-enumerates in accessory mode). If it still fails, rerun the DrawSplay installer."
 		}
 	default:
 		item.Detail = "No tablet detected"

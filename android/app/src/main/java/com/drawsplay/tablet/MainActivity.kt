@@ -25,7 +25,6 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.drawsplay.tablet.input.InputChannel
 import com.drawsplay.tablet.input.InputPadView
-import com.drawsplay.tablet.input.HostCursorView
 import com.drawsplay.tablet.transport.AccessoryTransport
 import com.drawsplay.tablet.transport.HostEndpointSelector
 import com.drawsplay.tablet.transport.WiFiDiscoveryManager
@@ -59,7 +58,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusOverlay: FrameLayout
     private lateinit var statusText: TextView
     private lateinit var inputPad: InputPadView
-    private lateinit var hostCursor: HostCursorView
 
     private lateinit var inputChannel: InputChannel
     private lateinit var videoChannel: VideoChannel
@@ -68,6 +66,9 @@ class MainActivity : AppCompatActivity() {
     private var backgroundSink: ImageReader? = null
     @Volatile
     private var pendingForegroundSurface: Surface? = null
+
+    @Volatile
+    private var appForeground = false
 
     @Volatile
     private var keepAliveOnBackground = false
@@ -94,7 +95,6 @@ class MainActivity : AppCompatActivity() {
         statusOverlay = findViewById(R.id.statusOverlay)
         statusText = findViewById(R.id.statusText)
         inputPad = findViewById(R.id.inputPad)
-        hostCursor = findViewById(R.id.hostCursor)
 
         Log.i(TAG, "Android runtime profile: sdk=${AndroidCompat.sdkInt}, " +
             "windowMetrics=${AndroidCompat.supportsWindowMetrics}, " +
@@ -120,10 +120,6 @@ class MainActivity : AppCompatActivity() {
             override fun onWaitingForHost(reason: String?) {
                 currentHostId = null
                 runOnUiThread { updateStatus() }
-            }
-
-            override fun onHostCursor(x: Float, y: Float, visible: Boolean) {
-                runOnUiThread { hostCursor.updateCursor(x, y, visible) }
             }
 
             override fun onHostDisplayMode(width: Int, height: Int, fps: Int) {
@@ -181,7 +177,7 @@ class MainActivity : AppCompatActivity() {
                     applyVideoLayout()
                 }
             }
-        }, endpointSelector)
+        }, endpointSelector) { appForeground }
         wifiDiscoveryManager = WiFiDiscoveryManager(
             this,
             endpointSelector,
@@ -221,6 +217,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        appForeground = true
         updateWiFiDiscoveryState()
         AccessoryTransport.refresh()
         AccessoryTransport.setPolling(true)
@@ -234,6 +231,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        appForeground = false
         AccessoryTransport.setPolling(false)
         if (!keepAliveOnBackground || isFinishing) {
             inputChannel.stop()
@@ -277,11 +275,19 @@ class MainActivity : AppCompatActivity() {
         val physicalHeight = mode?.physicalHeight ?: fallbackBounds.height()
         val nativeW = maxOf(physicalWidth, physicalHeight)
         val nativeH = minOf(physicalWidth, physicalHeight)
+        val refreshRates = currentDisplay()?.supportedModes
+            ?.filter { maxOf(it.physicalWidth, it.physicalHeight) == nativeW && minOf(it.physicalWidth, it.physicalHeight) == nativeH }
+            ?.map { Math.round(it.refreshRate) }
+            ?.filter { it > 0 }
+            ?.distinct()
+            ?.sorted()
+            .orEmpty()
         return InputChannel.DisplayInfo(
             nativeWidth = nativeW,
             nativeHeight = nativeH,
             prefWidth = 0,
-            prefHeight = 0
+            prefHeight = 0,
+            refreshRates = refreshRates
         )
     }
 
@@ -323,7 +329,7 @@ class MainActivity : AppCompatActivity() {
 
     // --- Video scaling ---
     //
-    // The surface, input pad and cursor overlay share videoFrame, so resizing
+    // The surface and input pad share videoFrame, so resizing
     // it keeps touch/pen coordinates mapped onto the displayed picture. The
     // mode is remembered so the last choice applies before the host's policy
     // arrives on the next launch.

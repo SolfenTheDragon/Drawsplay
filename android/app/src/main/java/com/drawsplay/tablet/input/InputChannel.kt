@@ -33,7 +33,6 @@ class InputChannel(
     interface InputChannelListener {
         fun onConnected()
         fun onWaitingForHost(reason: String?)
-        fun onHostCursor(x: Float, y: Float, visible: Boolean)
         fun onHostDisplayMode(width: Int, height: Int, fps: Int)
         fun onClearHostDisplayModePreference()
         /** The host identified itself; the app answers with [sendModePrefs] for that host. */
@@ -53,7 +52,9 @@ class InputChannel(
         val nativeHeight: Int,
         val prefWidth: Int,
         val prefHeight: Int,
-        val prefFps: Int = 0
+        val prefFps: Int = 0,
+        // Refresh rates (Hz, rounded, ascending) the panel supports at its native size.
+        val refreshRates: List<Int> = emptyList()
     )
 
     @Volatile
@@ -269,11 +270,6 @@ class InputChannel(
                     obj.optBoolean("wifiTlsRequired", false),
                     obj.optString("wifiTlsFingerprint", "")
                 )
-                "cursor" -> listener.onHostCursor(
-                    obj.optDouble("x", 0.0).toFloat(),
-                    obj.optDouble("y", 0.0).toFloat(),
-                    obj.optBoolean("visible", false)
-                )
             }
         } catch (_: Exception) {
         }
@@ -384,6 +380,9 @@ class InputChannel(
             put("supportsLowLatencyDecoderHint", AndroidCompat.supportsLowLatencyDecoderHint)
             put("screenWidth", info?.nativeWidth ?: 0)
             put("screenHeight", info?.nativeHeight ?: 0)
+            info?.refreshRates?.takeIf { it.isNotEmpty() }?.let {
+                put("screenRefreshRates", JSONArray(it))
+            }
             // Display preferences are kept per host: the host answers with hostInfo and
             // the app replies with modePrefs for that host.
             put("hostPrefs", true)

@@ -82,8 +82,6 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 	defer unregisterInputConnection(id)
 	defer unbindSessionDevice(id)
 	defer unbindSessionClientIdentity(id)
-	sessionCtx, cancelSession := context.WithCancel(ctx)
-	defer cancelSession()
 	inputOwned := false
 	defer func() {
 		if inputOwned {
@@ -172,16 +170,6 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 	defer unsubscribeModeChanges(id)
 	defer unsubscribeModePreferenceClears(id)
 
-	var cursorWriteFailure sync.Once
-	sendCursor := func(msg hostCursorMsg) {
-		if writeControl(msg) {
-			return
-		}
-		cursorWriteFailure.Do(func() {
-			log.Printf("Cursor push failed (session=%d)", id)
-		})
-	}
-
 	helloSeen := false
 	onMsg := func(msg packet) bool {
 		msg.normalizeAliases()
@@ -225,14 +213,9 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			} else {
 				sendSessionPolicy(cfg.KeepAliveOnBackground, cfg.VideoScaling, false, "")
 			}
-			if cfg.LocalCursor {
-				go runCursorPublisher(sessionCtx, sendCursor)
-			} else {
-				sendCursor(hostCursorMsg{Type: "cursor", Visible: false})
-			}
-
 			return true
 		case "modePrefs":
+			log.Printf("Tablet remembered mode (session=%d): %dx%d@%d", id, msg.PrefWidth, msg.PrefHeight, msg.PrefFPS)
 			bindSessionModePrefs(id, msg.PrefWidth, msg.PrefHeight, msg.PrefFPS)
 			return true
 		case "input":
@@ -382,13 +365,14 @@ func handleHello(msg packet, id uint64) {
 		Version:      clientVersion,
 		NativeWidth:  msg.ScreenWidth,
 		NativeHeight: msg.ScreenHeight,
+		RefreshRates: msg.ScreenRefreshRates,
 		PrefWidth:    msg.PrefWidth,
 		PrefHeight:   msg.PrefHeight,
 		PrefFPS:      msg.PrefFPS,
 		PrefsPending: msg.HostPrefs,
 	})
 	log.Printf(
-		"HELLO session=%d device=%s platform=%s type=%s clientVersion=%s android=%s app=%s screen=%dx%d pref=%dx%d@%d codecs=%v ts=%d",
+		"HELLO session=%d device=%s platform=%s type=%s clientVersion=%s android=%s app=%s screen=%dx%d refreshRates=%v pref=%dx%d@%d codecs=%v ts=%d",
 		id,
 		device,
 		platform,
@@ -398,6 +382,7 @@ func handleHello(msg packet, id uint64) {
 		msg.App,
 		msg.ScreenWidth,
 		msg.ScreenHeight,
+		msg.ScreenRefreshRates,
 		msg.PrefWidth,
 		msg.PrefHeight,
 		msg.PrefFPS,

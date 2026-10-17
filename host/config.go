@@ -40,7 +40,6 @@ type settings struct {
 	Bitrate              string `json:"bitrate"`
 	Width                int    `json:"width"`
 	Height               int    `json:"height"`
-	LocalCursor          bool   `json:"localCursor"`
 	TouchEnabled         bool   `json:"touchEnabled"`
 	PenEnabled           bool   `json:"penEnabled"`
 	// TouchGestures makes Linux fingers a real multi-touch screen (pinch,
@@ -79,7 +78,6 @@ func defaultSettings() settings {
 		AutoLaunchAndroidApp:  false,
 		ZeroCopyCapture:       true,
 		TemporalLayering:      false,
-		LocalCursor:           true,
 		TouchEnabled:          true,
 		PenEnabled:            true,
 		TouchGestures:         true,
@@ -352,7 +350,6 @@ func (s settings) videoOptions() videoOptions {
 		Bitrate:          s.Bitrate,
 		Width:            s.Width,
 		Height:           s.Height,
-		LocalCursor:      s.LocalCursor,
 		ZeroCopyCapture:  s.ZeroCopyCapture,
 		TemporalLayering: s.TemporalLayering,
 	}

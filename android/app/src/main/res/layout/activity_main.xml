@@ -2,8 +2,8 @@
 <!--
   View stack (back to front): video surface, transparent input pad, status
   overlay. The pad exactly covers the surface so input coordinates map 1:1
-  onto displayed host pixels; videoFrame keeps the surface, pad and cursor
-  together when MainActivity resizes it for the host's scaling setting. See
+  onto displayed host pixels; videoFrame keeps the surface and pad together
+  when MainActivity resizes it for the host's scaling setting. See
   MainActivity for lifecycle wiring.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -28,12 +28,6 @@
             android:layout_height="match_parent"
             android:background="@android:color/transparent" />
 
-        <com.drawsplay.tablet.input.HostCursorView
-            android:id="@+id/hostCursor"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:clickable="false"
-            android:focusable="false" />
     </FrameLayout>
 
     <!-- Opaque: also hides the last decoded frame when the stream drops. -->
@@ -68,4 +62,3 @@
     </FrameLayout>
 
 </FrameLayout>
-
