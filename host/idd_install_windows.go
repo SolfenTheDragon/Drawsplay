@@ -30,7 +30,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-//go:embed driver/idd/DrawSplayIdd.dll driver/idd/DrawSplayIdd.inf driver/idd/DrawSplayIdd.cat
+//go:embed driver/idd
 var embeddedDriver embed.FS
 
 const (
