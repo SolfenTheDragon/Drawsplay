@@ -60,6 +60,10 @@ type pipelineSpec struct {
 	// an ffmpeg "pipe:0" input) until ctx ends or it fails; its standard
 	// input then closes, which ends the process.
 	Input func(ctx context.Context, w io.Writer) error
+	// Framed marks a native helper whose stdout is length-prefixed frames
+	// (native/drawsplay-media/PROTOCOL.md) rather than a raw Annex-B stream;
+	// see runFramedPipeline.
+	Framed bool
 }
 
 // parseBitrateKbps converts an ffmpeg-style bitrate string ("8M", "2500k",

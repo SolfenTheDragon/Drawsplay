@@ -40,6 +40,15 @@ body {
   color: var(--text);
   font: 14px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
 }
+footer {
+  text-align: center;
+  color: var(--muted, #888);
+  font-size: 12px;
+  padding: 16px 0;
+}
+footer a {
+  color: inherit;
+}
 main {
   width: 100%;
   max-width: 1440px;

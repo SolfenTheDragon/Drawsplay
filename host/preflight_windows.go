@@ -14,4 +14,4 @@ func x11VirtualDisplayReady() bool { return false }
 
 func refreshX11VkmsWarning() {}
 
-func ensureX11VirtualDisplayAsync(reason string) {}
+func ensureX11VirtualDisplayAsync(reason string, mayPrompt bool) {}

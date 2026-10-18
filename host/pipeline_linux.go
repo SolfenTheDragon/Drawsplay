@@ -169,7 +169,7 @@ func buildCapturePipelines(target captureTarget, opts videoOptions) ([]pipelineS
 				}
 			}
 		}
-		return withAccessUnitWrites(specs, opts), nil
+		return withNativeHelperCandidate(withAccessUnitWrites(specs, opts), opts, target, display), nil
 	case captureScreencopy:
 		capture := screencopyCaptureArgs(target, opts.FPS)
 		specs, err := ffmpegSpecs(opts, capture)
@@ -494,8 +494,6 @@ func gstPipeWireSpecs(target captureTarget, opts videoOptions) []pipelineSpec {
 // candidate cheaper than software encoding. Converting on the CPU first
 // (format=nv12,hwupload) costs more than libx264 does, so the filter order
 // here is load-bearing, not cosmetic.
-
-const vaapiH264Encoder = "h264_vaapi"
 
 // vaapiScaleFilter carries the GPU-side colour conversion.
 const vaapiScaleFilter = "scale_vaapi"

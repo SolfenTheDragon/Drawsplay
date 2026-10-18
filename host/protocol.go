@@ -59,6 +59,12 @@ const (
 const (
 	videoPacketConfig = 0
 	videoPacketNAL    = 1
+	// videoPacketTile (2), videoPacketMode (3) and videoPacketFrameMeta (4)
+	// are only sent to clients that advertised the matching videoFeatures
+	// entry in their hello (see native_media.go).
+	videoPacketTile      = 2
+	videoPacketMode      = 3
+	videoPacketFrameMeta = 4
 )
 
 // packet is the union of all input-channel packet fields.
@@ -116,6 +122,12 @@ type packet struct {
 	// carries PrefWidth/PrefHeight/PrefFPS).
 	HostPrefs   bool     `json:"hostPrefs"`
 	VideoCodecs []string `json:"videoCodecs"`
+	// VideoFeatures (hello): optional video-channel extensions the client
+	// understands ("tile1", "meta1").
+	VideoFeatures []string `json:"videoFeatures"`
+	// InputSeq (input): per-session monotonically increasing sequence the
+	// host echoes back in frame metadata to measure input-to-photon latency.
+	InputSeq uint32 `json:"sq"`
 
 	// "key" packets (M5): Action is "down"/"up", Keycode is the Android
 	// KeyEvent keycode, Meta the Android meta-state bits, Chars the
@@ -235,6 +247,9 @@ type videoConfigMsg struct {
 	FPS        int      `json:"fps"`
 	Bitrate    string   `json:"bitrate"`
 	Pacing     string   `json:"pacing,omitempty"`
+	// CaptureMode is "damage" when frames are produced on screen damage
+	// rather than a fixed tick, so the client should present immediately.
+	CaptureMode string `json:"captureMode,omitempty"`
 }
 
 var (
@@ -296,13 +311,16 @@ func negotiateVideoCodec() string {
 // channel (client → host, newline-delimited JSON; see feedback.go). All
 // counters are per-interval deltas, not cumulative.
 type clientStatsMsg struct {
-	Type            string  `json:"type"` // always "stats"
-	IntervalMs      int64   `json:"intervalMs"`
-	FramesReceived  int64   `json:"framesReceived"`
-	FramesRendered  int64   `json:"framesRendered"`
-	AvgDecodeMs     float64 `json:"avgDecodeMs"`
-	QueuedFrames    int     `json:"queuedFrames"`
-	AvgPresentMs    float64 `json:"avgPresentMs,omitempty"`
+	Type           string  `json:"type"` // always "stats"
+	IntervalMs     int64   `json:"intervalMs"`
+	FramesReceived int64   `json:"framesReceived"`
+	FramesRendered int64   `json:"framesRendered"`
+	AvgDecodeMs    float64 `json:"avgDecodeMs"`
+	QueuedFrames   int     `json:"queuedFrames"`
+	AvgPresentMs   float64 `json:"avgPresentMs,omitempty"`
+	// EchoMs is the tablet's recent median input-to-frame echo latency
+	// (input sent until a frame carrying its sequence arrived); 0 = unknown.
+	EchoMs          float64 `json:"echoMs,omitempty"`
 	FrameDrops      int64   `json:"frameDrops,omitempty"`
 	RefreshHz       float64 `json:"refreshHz,omitempty"`
 	RenderMode      string  `json:"renderMode,omitempty"`

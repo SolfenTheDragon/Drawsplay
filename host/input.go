@@ -391,6 +391,7 @@ func handleHello(msg packet, id uint64) {
 		msg.Timestamp,
 	)
 	publishClientVideoCodecs(msg.VideoCodecs)
+	publishClientVideoFeatures(msg.VideoFeatures)
 }
 
 func normalizeClientIdentity(msg packet) (string, string, string) {
@@ -432,6 +433,7 @@ func handleInput(msg *packet, id uint64, events *eventLogger, inj injector, stor
 		msg.Y = y * float32(msg.Height)
 	}
 	inj.inject(msg)
+	noteInputInjected(msg.InputSeq)
 	if eventDiagnosticsEnabled() {
 		events.enqueue(fmt.Sprintf(
 			"INPUT session=%d action=%s x=%.2f y=%.2f pressure=%.3f tilt=%.2f orient=%.2f buttons=%d tool=%s pointer=%d/%d area=%dx%d ts=%d",

@@ -144,7 +144,7 @@ if (-not $?) {
 Write-Host "Building host..."
 Set-Location "$repoRoot\host"
 # GUI subsystem: the host runs in the system tray and never opens a console.
-go build -ldflags "-H=windowsgui" -o host.exe .
+go build -ldflags "-H=windowsgui -X main.version=$Version" -o host.exe .
 if (-not $?) {
   throw "Host build failed"
 }

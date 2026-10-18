@@ -157,6 +157,7 @@ func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"autostart":               enabled,
 		"autostartImplementation": autostartImplementation(),
 		"hostOS":                  runtime.GOOS,
+		"version":                 hostVersion(),
 		"featureFlags":            map[string]bool{"wifi": wifiFeatureEnabled()},
 		"activeClient":            activeClientIdentity(),
 		"activeInputDevice":       activeInputDevice(),

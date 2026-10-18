@@ -147,6 +147,7 @@ jobs:
             release/DrawSplay-android-release.zip
 
   build-linux:
+    needs: resolve-tag
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -159,9 +160,11 @@ jobs:
 
       - name: Build Linux host
         working-directory: host
+        env:
+          RELEASE_TAG: ${{ needs.resolve-tag.outputs.tag }}
         run: |
           mkdir -p ../release
-          go build -trimpath -o ../release/drawsplay-host-linux-amd64 .
+          go build -trimpath -ldflags "-X main.version=${RELEASE_TAG}" -o ../release/drawsplay-host-linux-amd64 .
           chmod +x ../release/drawsplay-host-linux-amd64
           cp ../scripts/install-host-linux.sh ../release/install-drawsplay-host-linux.sh
           cp ../scripts/uninstall-host-linux.sh ../release/uninstall-drawsplay-host-linux.sh

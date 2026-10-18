@@ -23,7 +23,7 @@ func withVkmsSetupTest(t *testing.T, loaded, available bool, load func(f *fakeXr
 	vkmsOutputPoll = time.Millisecond
 	vkmsIsLoaded = func() bool { return loaded }
 	vkmsIsAvailable = func() bool { return available }
-	vkmsLoadPrivileged = func() error {
+	vkmsLoadPrivileged = func(bool) error {
 		calls.Add(1)
 		if err := load(f); err != nil {
 			return err
@@ -45,7 +45,7 @@ func withVkmsSetupTest(t *testing.T, loaded, available bool, load func(f *fakeXr
 
 func TestEnsureX11VirtualDisplayLoadsVkms(t *testing.T) {
 	f, calls := withVkmsSetupTest(t, false, true, func(*fakeXrandr) error { return nil })
-	ensureX11VirtualDisplay("test")
+	ensureX11VirtualDisplay("test", true)
 	if calls.Load() != 1 {
 		t.Fatalf("load calls = %d, want 1", calls.Load())
 	}
@@ -57,8 +57,8 @@ func TestEnsureX11VirtualDisplayLoadsVkms(t *testing.T) {
 
 func TestEnsureX11VirtualDisplaySkipsWhenOutputExists(t *testing.T) {
 	_, calls := withVkmsSetupTest(t, false, true, func(*fakeXrandr) error { return nil })
-	ensureX11VirtualDisplay("first")
-	ensureX11VirtualDisplay("second")
+	ensureX11VirtualDisplay("first", true)
+	ensureX11VirtualDisplay("second", true)
 	if calls.Load() != 1 {
 		t.Fatalf("load calls = %d, want 1", calls.Load())
 	}
@@ -71,7 +71,7 @@ func TestEnsureX11VirtualDisplayDoesNotLoadWhenNotNeeded(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, calls := withVkmsSetupTest(t, c.loaded, c.available, func(*fakeXrandr) error { return nil })
-			ensureX11VirtualDisplay("test")
+			ensureX11VirtualDisplay("test", true)
 			if calls.Load() != 0 {
 				t.Fatalf("load calls = %d, want 0", calls.Load())
 			}
@@ -82,23 +82,23 @@ func TestEnsureX11VirtualDisplayDoesNotLoadWhenNotNeeded(t *testing.T) {
 func TestEnsureX11VirtualDisplaySkipsWhenOutputIsChosen(t *testing.T) {
 	_, calls := withVkmsSetupTest(t, false, true, func(*fakeXrandr) error { return nil })
 	t.Setenv(x11OutputEnv, "HDMI-1")
-	ensureX11VirtualDisplay("test")
+	ensureX11VirtualDisplay("test", true)
 	if calls.Load() != 0 {
 		t.Fatalf("loaded vkms although %s is set", x11OutputEnv)
 	}
 }
 
-func TestEnsureX11VirtualDisplayBacksOffAfterADeclinedPrompt(t *testing.T) {
+func TestEnsureX11VirtualDisplayBacksOffAfterAFailedLoad(t *testing.T) {
 	_, calls := withVkmsSetupTest(t, false, true, func(*fakeXrandr) error { return errVkmsPromptDeclined })
-	ensureX11VirtualDisplay("first")
-	ensureX11VirtualDisplay("second")
+	ensureX11VirtualDisplay("first", true)
+	ensureX11VirtualDisplay("second", true)
 	if calls.Load() != 1 {
 		t.Fatalf("load calls = %d, want 1 (cooldown after a declined prompt)", calls.Load())
 	}
 	vkmsSetup.mu.Lock()
-	vkmsSetup.lastFail = time.Now().Add(-2 * vkmsPromptCooldown)
+	vkmsSetup.lastFail = time.Now().Add(-2 * vkmsRetryCooldown)
 	vkmsSetup.mu.Unlock()
-	ensureX11VirtualDisplay("third")
+	ensureX11VirtualDisplay("third", true)
 	if calls.Load() != 2 {
 		t.Fatalf("load calls = %d, want 2 after the cooldown", calls.Load())
 	}
@@ -109,7 +109,7 @@ func TestEnsureX11VirtualDisplayIgnoresNonX11Sessions(t *testing.T) {
 	t.Setenv("XDG_SESSION_TYPE", "wayland")
 	t.Setenv("WAYLAND_DISPLAY", "wayland-0")
 	t.Setenv("DISPLAY", "")
-	ensureX11VirtualDisplay("test")
+	ensureX11VirtualDisplay("test", true)
 	if calls.Load() != 0 {
 		t.Fatalf("load calls = %d on a Wayland session", calls.Load())
 	}

@@ -60,6 +60,10 @@ type settings struct {
 	// twice per frame to cut capture-phase latency at about 2x encoder CPU.
 	// Off clamps X11 capture to 60 fps.
 	X11HighRateCapture bool `json:"x11HighRateCapture"`
+	// NativeMediaHelper selects the optional native capture/encode helper
+	// ("auto", "on", "off"; empty is auto). It only ever adds a candidate in
+	// front of the ffmpeg ones, which remain the fallback.
+	NativeMediaHelper string `json:"nativeMediaHelper"`
 	// VideoScaling is how the tablet lays the host picture out on its panel
 	// (videoScalingFill, videoScalingFit or videoScalingOriginal).
 	VideoScaling    string `json:"videoScaling"`
@@ -369,5 +373,6 @@ func (s settings) videoOptions() videoOptions {
 		TemporalLayering: s.TemporalLayering,
 		IdleGate:         s.IdleCaptureGate,
 		X11HighRate:      s.X11HighRateCapture,
+		NativeMedia:      s.NativeMediaHelper,
 	}
 }
