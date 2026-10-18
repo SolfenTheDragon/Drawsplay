@@ -368,6 +368,15 @@ async function refreshStatus() {
   try {
     const st = await api("/api/status");
     applyResolutionPolicy(st);
+    const versionEl = document.getElementById("host-version");
+    if (versionEl && st.version) {
+      versionEl.textContent = st.version;
+      if (/^v\d+\.\d+\.\d+$/.test(st.version)) {
+        versionEl.href = "https://github.com/SolfenTheDragon/Drawsplay/releases/tag/" + st.version;
+      } else {
+        versionEl.removeAttribute("href");
+      }
+    }
     applyPlatformVisibility(st.hostOS);
     applyFeatureVisibility(st.featureFlags || {});
     const v = st.video || {};

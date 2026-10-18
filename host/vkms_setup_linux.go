@@ -5,8 +5,9 @@ package main
 // Automatic setup of the X11 virtual display: loads the vkms kernel module
 // when an X11 session has no virtual RandR output. It runs when the host
 // starts and whenever a tablet is newly connected. Loading a module needs
-// root, so when sudo wants a password the user gets a graphical prompt
-// (polkit, or a zenity/kdialog password dialog).
+// root: the host uses root or passwordless sudo, and when a tablet connects it
+// may show one polkit password prompt, which also configures vkms to load at
+// boot. It never prompts at login.
 
 import (
 	"bytes"
@@ -21,18 +22,15 @@ import (
 )
 
 const (
-	// vkmsPromptCooldown keeps a declined or failed attempt from prompting
-	// again on every reconnect.
-	vkmsPromptCooldown = 2 * time.Minute
-	vkmsOutputWait     = 5 * time.Second
-	vkmsPasswordTries  = 3
-
-	// Newer kernels create no virtual device unless create_default_dev=1;
-	// older kernels reject that parameter, so fall back to a plain load.
-	vkmsLoadScript = "modprobe vkms create_default_dev=1 || modprobe vkms"
+	// vkmsRetryCooldown keeps a failed attempt from repeating on every
+	// reconnect.
+	vkmsRetryCooldown = 2 * time.Minute
+	vkmsOutputWait    = 5 * time.Second
 )
 
 var errVkmsPromptDeclined = errors.New("the password prompt was dismissed")
+
+var errVkmsNeedsRoot = errors.New("loading vkms needs root and passwordless sudo is unavailable")
 
 // Seams for tests.
 var (
@@ -49,20 +47,22 @@ var vkmsSetup struct {
 }
 
 // ensureX11VirtualDisplayAsync makes sure an X11 session has a virtual
-// output, in the background. reason is for the log.
-func ensureX11VirtualDisplayAsync(reason string) {
+// output, in the background. reason is for the log. mayPrompt allows a
+// one-time graphical password prompt; it is only set when a tablet connects,
+// never at login.
+func ensureX11VirtualDisplayAsync(reason string, mayPrompt bool) {
 	if !x11SessionActive() {
 		return
 	}
-	go ensureX11VirtualDisplay(reason)
+	go ensureX11VirtualDisplay(reason, mayPrompt)
 }
 
-func ensureX11VirtualDisplay(reason string) {
+func ensureX11VirtualDisplay(reason string, mayPrompt bool) {
 	if !x11SessionActive() || strings.TrimSpace(os.Getenv(x11OutputEnv)) != "" {
 		return
 	}
 	vkmsSetup.mu.Lock()
-	if vkmsSetup.running || (!vkmsSetup.lastFail.IsZero() && time.Since(vkmsSetup.lastFail) < vkmsPromptCooldown) {
+	if vkmsSetup.running || (!vkmsSetup.lastFail.IsZero() && time.Since(vkmsSetup.lastFail) < vkmsRetryCooldown) {
 		vkmsSetup.mu.Unlock()
 		return
 	}
@@ -91,9 +91,11 @@ func ensureX11VirtualDisplay(reason string) {
 		return
 	}
 	log.Printf("X11 has no virtual display (%s); loading the vkms kernel module", reason)
-	if err := vkmsLoadPrivileged(); err != nil {
-		failed = true
-		log.Printf("Could not load vkms: %v; the tablet will mirror the desktop", err)
+	if err := vkmsLoadPrivileged(mayPrompt); err != nil {
+		// A no-prompt attempt that lacked root must not start the cooldown,
+		// or it would block the prompt when a tablet connects soon after.
+		failed = mayPrompt || !errors.Is(err, errVkmsNeedsRoot)
+		log.Printf("Could not load vkms automatically: %v; the tablet will mirror the desktop", err)
 		return
 	}
 	deadline := time.Now().Add(vkmsOutputWait)
@@ -133,80 +135,59 @@ func settleNewX11Output() {
 	}
 }
 
-// loadVkmsPrivileged loads vkms as root: directly, through passwordless
-// sudo, through a polkit prompt, or through sudo with a password dialog.
-func loadVkmsPrivileged() error {
-	script := vkmsLoadScript
+// vkmsLoadCommands are tried in order. Newer kernels create no virtual device
+// unless create_default_dev=1; older kernels reject that parameter, so fall
+// back to a plain load.
+var vkmsLoadCommands = [][]string{
+	{"modprobe", "vkms", "create_default_dev=1"},
+	{"modprobe", "vkms"},
+}
+
+// vkmsLoadAndPersistScript loads vkms and, on success, configures it to load
+// at boot so the prompt is needed only once.
+const vkmsLoadAndPersistScript = `(modprobe vkms create_default_dev=1 || modprobe vkms) && {
+[ -e /etc/modprobe.d/drawsplay-vkms.conf ] || echo 'options vkms create_default_dev=1' > /etc/modprobe.d/drawsplay-vkms.conf
+[ -e /etc/modules-load.d/drawsplay-vkms.conf ] || echo vkms > /etc/modules-load.d/drawsplay-vkms.conf
+true
+}`
+
+// loadVkmsPrivileged loads vkms as root: directly, through passwordless sudo,
+// or, when mayPrompt is set, through one polkit (pkexec) password prompt that
+// also makes vkms load at boot. Without mayPrompt it never prompts.
+func loadVkmsPrivileged(mayPrompt bool) error {
 	env := append(os.Environ(), "PATH="+os.Getenv("PATH")+":/usr/sbin:/sbin")
-	run := func(stdin string, name string, args ...string) error {
-		cmd := exec.Command(name, args...)
+	run := func(argv ...string) error {
+		cmd := exec.Command(argv[0], argv[1:]...)
 		cmd.Env = env
-		if stdin != "" {
-			cmd.Stdin = strings.NewReader(stdin)
-		}
 		var out bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &out
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("%s: %w (%s)", name, err, strings.TrimSpace(out.String()))
+			return fmt.Errorf("%s: %w (%s)", strings.Join(argv, " "), err, strings.TrimSpace(out.String()))
 		}
 		return nil
 	}
 	if os.Geteuid() == 0 {
-		return run("", "sh", "-c", script)
+		return run("sh", "-c", vkmsLoadAndPersistScript)
 	}
-	sudo, sudoErr := exec.LookPath("sudo")
-	if sudoErr == nil {
-		if err := run("", sudo, "-n", "sh", "-c", script); err == nil {
-			return nil
+	if sudo, err := exec.LookPath("sudo"); err == nil {
+		for _, argv := range vkmsLoadCommands {
+			if run(append([]string{sudo, "-n"}, argv...)...) == nil {
+				return nil
+			}
 		}
 	}
-	if pkexec, err := exec.LookPath("pkexec"); err == nil {
-		err = run("", pkexec, "sh", "-c", script)
-		if err == nil {
-			return nil
-		}
-		var ee *exec.ExitError
-		// 126: the user dismissed the prompt or is not authorized.
-		if errors.As(err, &ee) && ee.ExitCode() == 126 {
-			return errVkmsPromptDeclined
-		}
-		log.Printf("pkexec could not load vkms (%v); trying a password dialog", err)
+	if !mayPrompt {
+		return errVkmsNeedsRoot
 	}
-	if sudoErr != nil {
-		return errors.New("neither sudo nor pkexec is available")
-	}
-	for attempt := 0; attempt < vkmsPasswordTries; attempt++ {
-		prompt := "DrawSplay needs your password to load the vkms kernel module so the tablet can extend your desktop."
-		if attempt > 0 {
-			prompt = "Wrong password, try again. " + prompt
-		}
-		password, err := askPasswordDialog(prompt)
-		if err != nil {
-			return err
-		}
-		if err := run(password+"\n", sudo, "-S", "-p", "", "sh", "-c", script); err == nil {
-			return nil
-		} else if attempt == vkmsPasswordTries-1 {
-			return err
-		}
-	}
-	return errVkmsPromptDeclined
-}
-
-// askPasswordDialog shows a graphical password prompt and returns what the
-// user typed.
-func askPasswordDialog(text string) (string, error) {
-	var cmd *exec.Cmd
-	if zenity, err := exec.LookPath("zenity"); err == nil {
-		cmd = exec.Command(zenity, "--password", "--title=DrawSplay", "--text="+text)
-	} else if kdialog, err := exec.LookPath("kdialog"); err == nil {
-		cmd = exec.Command(kdialog, "--title", "DrawSplay", "--password", text)
-	} else {
-		return "", errors.New("no graphical password prompt available (install zenity or kdialog)")
-	}
-	out, err := cmd.Output()
+	pkexec, err := exec.LookPath("pkexec")
 	if err != nil {
-		return "", errVkmsPromptDeclined
+		return errors.New("pkexec is not available; run \"sudo modprobe vkms create_default_dev=1\" and configure vkms to load at boot")
 	}
-	return strings.TrimRight(string(out), "\r\n"), nil
+	err = run(pkexec, "sh", "-c", vkmsLoadAndPersistScript)
+	var ee *exec.ExitError
+	// 126: the user dismissed the prompt or is not authorized.
+	if errors.As(err, &ee) && ee.ExitCode() == 126 {
+		return errVkmsPromptDeclined
+	}
+	return err
 }

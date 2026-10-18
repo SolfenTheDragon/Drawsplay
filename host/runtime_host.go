@@ -12,7 +12,7 @@ import (
 func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) error {
 	cfg := store.get()
 	runDependencyPreflight(cfg)
-	ensureX11VirtualDisplayAsync("host start")
+	ensureX11VirtualDisplayAsync("host start", false)
 	ensureVirtualDisplayDriver(cfg.NoDriverInstall)
 
 	// Maintain the optional legacy ADB transport while allowing settings to

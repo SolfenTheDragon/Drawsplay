@@ -104,6 +104,7 @@ func aoaPollOnce(ctx context.Context, scan aoaScanFunc, lastSwitch map[string]ti
 			continue
 		}
 		log.Printf("AOA: accessory %04x:%04x open, waiting for the tablet app", c.VID, c.PID)
+		ensureX11VirtualDisplayAsync("tablet connected over USB accessory", true)
 		setAOAStatus("waiting-app", "Accept the USB prompt on the tablet and open DrawSplay.")
 		link := newAOALink(pipe)
 		err = link.serve(ctx, func(kind byte, conn *aoaConn) {

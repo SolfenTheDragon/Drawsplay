@@ -110,7 +110,7 @@ func maintainADBReverse(ctx context.Context, store *settingsStore, ports ...int)
 			failureLogged = false
 			log.Printf("ADB reverse ready for ports %v on %v", ports, targets)
 			if len(targets) > 0 {
-				ensureX11VirtualDisplayAsync("device connected")
+				ensureX11VirtualDisplayAsync("device connected", true)
 			}
 		} else {
 			failures = 0
