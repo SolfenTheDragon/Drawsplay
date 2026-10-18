@@ -27,6 +27,11 @@ import (
 	"time"
 )
 
+// vaapiH264Encoder names the VA-API H.264 encoder; it is shared by the
+// Linux ffmpeg specs and the native helper spec, so it lives here to keep
+// non-Linux builds compiling.
+const vaapiH264Encoder = "h264_vaapi"
+
 const (
 	nativeHelperName        = "drawsplay-media"
 	nativeHelperEnv         = "DRAWSPLAY_MEDIA_HELPER"

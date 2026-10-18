@@ -495,8 +495,6 @@ func gstPipeWireSpecs(target captureTarget, opts videoOptions) []pipelineSpec {
 // (format=nv12,hwupload) costs more than libx264 does, so the filter order
 // here is load-bearing, not cosmetic.
 
-const vaapiH264Encoder = "h264_vaapi"
-
 // vaapiScaleFilter carries the GPU-side colour conversion.
 const vaapiScaleFilter = "scale_vaapi"
 
