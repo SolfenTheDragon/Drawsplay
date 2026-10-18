@@ -85,6 +85,8 @@ type videoOptions struct {
 	IdleGate bool
 	// X11HighRate allows x11grab capture above 60 fps (setting x11HighRateCapture).
 	X11HighRate bool
+	// NativeMedia is the nativeMediaHelper setting (auto, on, off).
+	NativeMedia string
 }
 
 // runVideoListener accepts video sessions until ctx is cancelled. If the
@@ -967,6 +969,9 @@ func newPipelineTelemetry(specName string) pipelineTelemetry {
 // the next candidate; errRateChanged means the rate controller requested a
 // restart at a new bitrate.
 func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec pipelineSpec, monitor *sessionMonitor, rc *rateController, temporal *temporalController, expectBlackout bool, gate *congestionGate) (bool, error) {
+	if spec.Framed {
+		return runFramedPipeline(ctx, w, opts, spec, monitor, rc, temporal, expectBlackout, gate)
+	}
 	pipeline, err := startCapturePipeline(ctx, spec)
 	if err != nil {
 		return false, err
@@ -1218,6 +1223,9 @@ func logSessionSummary(specName, bitrate string, nals, bytes int64, stats *clien
 			specName, bitrate, nals, float64(bytes)/1e6,
 			stats.FramesReceived, stats.FramesRendered, stats.FrameDrops, stats.AvgDecodeMs, stats.AvgPresentMs,
 			stats.QueuedFrames, stats.RenderMode, stats.PacingGuardrail, stats.RefreshHz, refreshClass(stats.RefreshHz), stats.IntervalMs)
+		if stats.EchoMs > 0 {
+			log.Printf("Video [%s]: input echo latency (tablet send to frame carrying it) %.1f ms", specName, stats.EchoMs)
+		}
 		return
 	}
 	log.Printf("Video [%s @ %s]: sent %d NALs / %.1f MB; no client stats yet",

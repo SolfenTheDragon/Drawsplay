@@ -25,7 +25,7 @@ No source build is required.
 
 - A USB cable between the computer and the tablet
 - **Windows:** Windows 10/11 (the extended display needs Windows 10 version 1903 or later; any NVIDIA, AMD or Intel GPU works), with the WinUSB driver bound to the tablet (see Install). Internet access during install: the installer downloads the newest ffmpeg build compatible with your Windows version and CPU (SHA-256 verified). adb is not needed or downloaded.
-- **Linux:** an x86-64 computer with ffmpeg. Wayland is preferred (GNOME, KDE Plasma 6, sway and Hyprland support an extended desktop); X11 also works and needs the `vkms` kernel module for an extended desktop. Without a virtual display DrawSplay mirrors your screen instead.
+- **Linux:** an x86-64 computer with ffmpeg. Wayland is preferred (GNOME, KDE Plasma 6, sway and Hyprland support an extended desktop); X11 also works and needs the `vkms` kernel module for an extended desktop. Without a virtual display DrawSplay mirrors your screen instead. On X11 with an Intel GPU an optional native helper (`drawsplay-media`, see `BUILD.md`) lowers latency; ffmpeg remains the automatic fallback, and AMD/NVIDIA keep using ffmpeg unless you opt in.
 - **Tablet:** an Android device. No Developer options or USB debugging are needed.
 
 ## Install

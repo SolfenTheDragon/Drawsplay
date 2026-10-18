@@ -137,6 +137,9 @@ class VideoDecoder(
      * Returns decode statistics since the previous call. Called from the
      * stats reporter thread only.
      */
+    /** Frames released for display so far (monotonic). */
+    fun renderedFrames(): Long = framesRendered.get()
+
     fun snapshotStats(): Stats {
         val recv = framesReceived.get()
         val dec = framesDecoded.get()

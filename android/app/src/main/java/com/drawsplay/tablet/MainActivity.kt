@@ -1,5 +1,6 @@
 ﻿package com.drawsplay.tablet
 
+import com.drawsplay.tablet.video.TileView
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
@@ -55,6 +56,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var videoFrame: FrameLayout
     private lateinit var videoSurface: SurfaceView
+    private lateinit var tileView: TileView
     private lateinit var statusOverlay: FrameLayout
     private lateinit var statusText: TextView
     private lateinit var inputPad: InputPadView
@@ -92,6 +94,7 @@ class MainActivity : AppCompatActivity() {
 
         videoFrame = findViewById(R.id.videoFrame)
         videoSurface = findViewById(R.id.videoSurface)
+        tileView = findViewById(R.id.tileView)
         statusOverlay = findViewById(R.id.statusOverlay)
         statusText = findViewById(R.id.statusText)
         inputPad = findViewById(R.id.inputPad)
@@ -172,6 +175,13 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { updateStatus() }
             }
 
+            override fun onTileLayerVisible(visible: Boolean) {
+                runOnUiThread {
+                    tileView.visibility = if (visible) View.VISIBLE else View.GONE
+                    if (!visible) tileView.clear()
+                }
+            }
+
             override fun onVideoSize(width: Int, height: Int) {
                 runOnUiThread {
                     videoWidth = width
@@ -188,6 +198,7 @@ class MainActivity : AppCompatActivity() {
             { wifiPolicyTlsFingerprint }
         )
 
+        videoChannel.tileSink = tileView
         inputPad.onInputBatch = { events -> inputChannel.send(events) }
 
         AccessoryTransport.start(this) { attached -> endpointSelector.updateAccessoryAttached(attached) }

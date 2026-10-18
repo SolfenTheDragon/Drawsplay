@@ -55,7 +55,14 @@ class VideoChannel(
 
         /** Decoded picture size (visible area) is known or changed. */
         fun onVideoSize(width: Int, height: Int) {}
+
+        /** The lossless tile layer should be shown or hidden (UI thread not guaranteed). */
+        fun onTileLayerVisible(visible: Boolean) {}
     }
+
+    /** Receives tile pictures; null keeps the tile packets unused. */
+    @Volatile
+    var tileSink: TileDecoder.Sink? = null
 
     private val generation = AtomicLong(0L)
 
@@ -166,6 +173,8 @@ class VideoChannel(
             val input = DataInputStream(socket.getInputStream().buffered(256 * 1024))
             val decoder = VideoDecoder(renderSurface) { w, h -> listener.onVideoSize(w, h) }
             val statsThread = startStatsReporter(socket, decoder)
+            val tiles = tileSink?.let { TileDecoder(it) }
+            var tileModeActive = false
             try {
                 while (gen == generation.get() && !Thread.currentThread().isInterrupted) {
                     val type = input.readUnsignedByte()
@@ -179,6 +188,21 @@ class VideoChannel(
                     when (type) {
                         PACKET_CONFIG -> handleConfig(payload, decoder)
                         PACKET_NAL -> decoder.feedNal(payload)
+                        PACKET_TILE -> if (tiles != null) {
+                            tiles.decode(payload)
+                            if (payload.size > 1 && payload[1].toInt() and TileDecoder.FLAG_FULL_END != 0) {
+                                tileModeActive = true
+                                listener.onTileLayerVisible(true)
+                            }
+                        }
+                        PACKET_MODE -> if (payload.isNotEmpty() && payload[0].toInt() == 0 && tileModeActive) {
+                            tileModeActive = false
+                            val baseline = decoder.renderedFrames()
+                            hideTileLayerAfterNextRender(decoder, baseline, gen)
+                        }
+                        PACKET_FRAME_META -> if (payload.size >= 4) {
+                            EchoTracker.onFrameMeta(java.nio.ByteBuffer.wrap(payload).int)
+                        }
                         else -> Log.w(TAG, "Unknown video packet type $type")
                     }
                 }
@@ -187,6 +211,8 @@ class VideoChannel(
             } finally {
                 activeSocket = null
                 statsThread.interrupt()
+                tiles?.release()
+                if (tileModeActive) listener.onTileLayerVisible(false)
                 decoder.release()
                 // Note: never lockCanvas() this surface to blank it â€” that
                 // permanently connects it as a CPU producer, and MediaCodec
@@ -225,6 +251,7 @@ class VideoChannel(
                         put("renderMode", decoder.renderMode)
                         put("pacingGuardrail", decoder.pacingGuardrailApplied)
                         put("appForeground", isAppForeground())
+                        EchoTracker.medianMs().takeIf { it > 0 }?.let { put("echoMs", it) }
                     }.toString() + "\n"
                     output.write(line.toByteArray(Charsets.UTF_8))
                     output.flush()
@@ -237,6 +264,24 @@ class VideoChannel(
         thread.isDaemon = true
         thread.start()
         return thread
+    }
+
+    // The tile layer stays up until the first video frame after the switch back
+    // is on screen, so the picture never flashes a stale video frame.
+    private fun hideTileLayerAfterNextRender(decoder: VideoDecoder, baseline: Long, gen: Long) {
+        val thread = Thread({
+            try {
+                val deadline = System.nanoTime() + TILE_HIDE_TIMEOUT_NS
+                while (gen == generation.get() && System.nanoTime() < deadline &&
+                    decoder.renderedFrames() <= baseline) {
+                    Thread.sleep(4)
+                }
+            } catch (_: InterruptedException) {
+            }
+            listener.onTileLayerVisible(false)
+        }, "tile-hide")
+        thread.isDaemon = true
+        thread.start()
     }
 
     private fun handleConfig(payload: ByteArray, decoder: VideoDecoder) {
@@ -312,8 +357,12 @@ class VideoChannel(
         private const val RECONNECT_DELAY_MS = 1000L
         private const val FALLBACK_RACE_DELAY_MS = 200L
         private const val STATS_INTERVAL_MS = 250L
+        private const val TILE_HIDE_TIMEOUT_NS = 500_000_000L
         private const val PACKET_CONFIG = 0
         private const val PACKET_NAL = 1
+        private const val PACKET_TILE = 2
+        private const val PACKET_MODE = 3
+        private const val PACKET_FRAME_META = 4
         private const val MAX_PACKET_BYTES = 8 * 1024 * 1024
     }
 }

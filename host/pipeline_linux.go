@@ -169,7 +169,7 @@ func buildCapturePipelines(target captureTarget, opts videoOptions) ([]pipelineS
 				}
 			}
 		}
-		return withAccessUnitWrites(specs, opts), nil
+		return withNativeHelperCandidate(withAccessUnitWrites(specs, opts), opts, target, display), nil
 	case captureScreencopy:
 		capture := screencopyCaptureArgs(target, opts.FPS)
 		specs, err := ffmpegSpecs(opts, capture)

@@ -1,5 +1,6 @@
 ﻿package com.drawsplay.tablet.input
 
+import com.drawsplay.tablet.video.EchoTracker
 import android.os.Build
 import android.os.Process
 import android.media.MediaCodecList
@@ -429,6 +430,7 @@ class InputChannel(
             // the app replies with modePrefs for that host.
             put("hostPrefs", true)
             put("videoCodecs", advertisedVideoCodecs())
+            put("videoFeatures", JSONArray().put("tile1").put("meta1"))
             put("inputProtocol", "mux-v1")
             put("timestamp", System.currentTimeMillis())
             if (!endpoint?.authToken.isNullOrBlank()) {
@@ -472,6 +474,7 @@ class InputChannel(
             put("w", event.width)
             put("h", event.height)
             put("ts", event.timestampMs)
+            put("sq", EchoTracker.nextSeq())
         }
         return obj.toString().toByteArray(Charsets.UTF_8)
     }

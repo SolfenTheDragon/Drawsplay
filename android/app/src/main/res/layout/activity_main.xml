@@ -22,6 +22,12 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
+        <com.drawsplay.tablet.video.TileView
+            android:id="@+id/tileView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
         <com.drawsplay.tablet.input.InputPadView
             android:id="@+id/inputPad"
             android:layout_width="match_parent"
