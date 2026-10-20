@@ -44,3 +44,26 @@ func TestReapDisconnectedDisplayWithoutSession(t *testing.T) {
 		t.Fatal("reported a teardown with no active session")
 	}
 }
+
+func TestIdleDisplayTrackerWaitsForTimeout(t *testing.T) {
+	var tr idleDisplayTracker
+	now := time.Now()
+	bindSessionDevice(9002, "idle-tablet")
+	if tr.check(now.Add(time.Hour), 10*time.Minute) {
+		t.Fatal("released while a tablet is connected")
+	}
+	unbindSessionDevice(9002)
+	if tr.check(now, 10*time.Minute) || tr.check(now.Add(9*time.Minute), 10*time.Minute) {
+		t.Fatal("released before the timeout")
+	}
+	if !tr.check(now.Add(10*time.Minute), 10*time.Minute) {
+		t.Fatal("did not release after the timeout")
+	}
+	if tr.check(now.Add(20*time.Minute), 10*time.Minute) {
+		t.Fatal("released twice in one idle period")
+	}
+	var off idleDisplayTracker
+	if off.check(now, 0) {
+		t.Fatal("released with the check disabled")
+	}
+}

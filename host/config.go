@@ -80,6 +80,9 @@ type settings struct {
 	// ADBTunnelEnabled turns on the legacy adb-reverse transport. It needs
 	// Developer options and USB debugging on the tablet, so it is opt-in.
 	ADBTunnelEnabled bool `json:"adbTunnelEnabled"`
+	// IdleDisplayTimeoutSec removes the virtual display once no tablet has
+	// been connected for this many seconds (0 disables the check).
+	IdleDisplayTimeoutSec int `json:"idleDisplayTimeoutSec"`
 }
 
 // defaultSettings mirrors the flag defaults in main.go.
@@ -114,8 +117,14 @@ func defaultSettings() settings {
 		WifiMaxBitrate:        "12M",
 		AOAEnabled:            true,
 		ADBTunnelEnabled:      false,
+		IdleDisplayTimeoutSec: defaultIdleDisplayTimeoutSec,
 	}
 }
+
+const (
+	defaultIdleDisplayTimeoutSec = 600
+	maxIdleDisplayTimeoutSec     = 86400
+)
 
 // Tablet video scaling modes. Fill stretches the picture over the whole panel
 // (the original behaviour), fit scales it to the panel keeping its aspect
@@ -146,6 +155,9 @@ func (s settings) validate() error {
 	}
 	if s.Width < 640 || s.Width > 7680 || s.Height < 480 || s.Height > 4320 {
 		return fmt.Errorf("resolution must be between 640x480 and 7680x4320")
+	}
+	if s.IdleDisplayTimeoutSec < 0 || s.IdleDisplayTimeoutSec > maxIdleDisplayTimeoutSec {
+		return fmt.Errorf("idle display timeout must be between 0 (disabled) and %d seconds", maxIdleDisplayTimeoutSec)
 	}
 	if !validVideoScaling(s.VideoScaling) {
 		return fmt.Errorf("video scaling must be %q, %q or %q", videoScalingFill, videoScalingFit, videoScalingOriginal)
