@@ -204,6 +204,8 @@ func acquireVideoSession(transport string) bool {
 	}
 }
 
+var hostPriorityOnce sync.Once
+
 // serveVideoSession runs one accepted connection to completion. The caller
 // must own the coordinator's video channel; it is released here only after
 // streamVideo has fully unwound (including virtual display teardown).
@@ -212,6 +214,7 @@ func serveVideoSession(ctx context.Context, conn net.Conn, store *settingsStore,
 	defer conn.Close()
 	defer clearLatestClientVideoStats()
 	defer logPanic("video session")
+	hostPriorityOnce.Do(raiseHostProcessPriority)
 	if tcpConn := underlyingTCPConn(conn); tcpConn != nil {
 		_ = tcpConn.SetNoDelay(true)
 		_ = tcpConn.SetWriteBuffer(1024 * 1024)
@@ -761,7 +764,7 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		for _, spec := range specs {
 			pipelineStarted := time.Now()
 			produced, err := runEncodePipeline(ctx, writer, effOpts, spec, monitor, rc, temporal, blackout, gate)
-			if errors.Is(err, errRateChanged) || errors.Is(err, errAccessUnitResync) {
+			if errors.Is(err, errRateChanged) || errors.Is(err, errAccessUnitResync) || errors.Is(err, errPumpLagged) {
 				if produced {
 					goodSpecs[spec.Name] = true
 				}
@@ -884,6 +887,22 @@ func promoteBestGoodSpec(specs []pipelineSpec, good map[string]bool) {
 // errRateChanged signals that the pipeline should restart at the rate
 // controller's new bitrate (not a failure).
 var errRateChanged = errors.New("bitrate changed")
+
+// errPumpLagged signals that the host fell behind the encoder (CPU starved by
+// other applications); the pipeline restarts at the same rung for a fresh
+// keyframe rather than streaming seconds-old video.
+var errPumpLagged = errors.New("host pump lagged behind encoder")
+
+const (
+	// pumpLagChunks: chunk-queue depth (of 16) that counts as lagging.
+	pumpLagChunks = 12
+	// pumpLagConsecutive reads at that depth confirm a sustained backlog.
+	pumpLagConsecutive = 4
+	// pumpLagCooldown spaces recoveries so a persistently loaded host does
+	// not restart-loop.
+	pumpLagCooldown = 3 * time.Second
+)
+
 var errPrivacyModeChanged = errors.New("video privacy mode changed")
 
 // isFinalSessionError reports whether err ends the session (client gone or
@@ -1098,6 +1117,8 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 	}()
 	flushTicker := time.NewTicker(nalTailFlushInterval)
 	defer flushTicker.Stop()
+	lagStreak := 0
+	lastLagRecovery := time.Now()
 	updateCapturePriority := func() {
 		if stats := monitor.stats(); stats != nil && stats.AppForeground != nil {
 			pipeline.setClientForeground(*stats.AppForeground)
@@ -1136,6 +1157,16 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 			}
 			continue
 		case chunk, ok := <-chunks:
+			if len(chunks) >= pumpLagChunks {
+				lagStreak++
+			} else {
+				lagStreak = 0
+			}
+			if lagStreak >= pumpLagConsecutive && time.Since(lastLagRecovery) > pumpLagCooldown && produced.Load() {
+				log.Printf("Pipeline %s: host pump fell behind encoder (%d chunks queued); restarting for a fresh keyframe", spec.Name, len(chunks))
+				lastLagRecovery = time.Now()
+				return true, errPumpLagged
+			}
 			if sessionDisplayBlackout() != expectBlackout {
 				pipeline.stop()
 				return produced.Load(), errPrivacyModeChanged
