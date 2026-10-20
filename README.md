@@ -104,6 +104,8 @@ On Linux the frame rate is limited to 60, except on X11 hosts with VA-API (Intel
 
 **Linux: `no permissions` or pen/touch not working.** Check that the Android USB rules are installed and you're in `plugdev`; for input, check the `/dev/uinput` rule and `input` group. Log out and back in afterwards.
 
+**Linux: the mouse cursor disappears after starting DrawSplay.** Press Ctrl+Alt+Del to open the session menu and move the mouse to bring the cursor back. This comes from the desktop's "hide the pointer while typing" setting reacting to DrawSplay's virtual keyboard and pen devices; turning that setting off prevents it.
+
 **Linux shows a mirror instead of an extra display.**
 - Wayland: use GNOME, KDE Plasma 6, sway or Hyprland. Other Wayland desktops can't extend and show only X11 apps.
 - X11: run `sudo modprobe vkms`, then reconnect; log out and back in if `xrandr` doesn't list `Virtual-1-1`.
