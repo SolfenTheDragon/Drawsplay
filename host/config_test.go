@@ -128,3 +128,15 @@ func TestSettingsRequirePreferredSerial(t *testing.T) {
 		t.Fatalf("valid strict serial rejected: %v", err)
 	}
 }
+
+func TestApplyFeatureFlagsKeepsOneUSBTransport(t *testing.T) {
+	s := defaultSettings()
+	s.AOAEnabled, s.ADBTunnelEnabled = false, false
+	if got := applyFeatureFlags(s); !got.AOAEnabled {
+		t.Fatal("AOA not enabled when both transports were off")
+	}
+	s.ADBTunnelEnabled = true
+	if got := applyFeatureFlags(s); got.AOAEnabled {
+		t.Fatal("AOA forced on although ADB tunnel is enabled")
+	}
+}

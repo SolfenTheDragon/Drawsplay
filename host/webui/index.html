@@ -120,6 +120,8 @@
           </div>
         </div>
         <div class="hint">Primary stream bitrate is managed automatically by adaptive bitrate.</div>
+        <label for="idle-display-timeout">Remove virtual display when no tablet is connected (seconds, 0 = never)</label>
+        <input id="idle-display-timeout" type="number" min="0" max="86400" step="1">
         <label for="ffmpeg">ffmpeg path</label>
         <input id="ffmpeg" type="text" required>
         <div class="input-options" data-feature-wifi hidden>
@@ -161,7 +163,7 @@
         </div>
         <div class="input-options">
           <strong>ADB tunnel (legacy)</strong>
-          <div class="hint">Connects through <code>adb reverse</code>. Requires Developer options and USB debugging on the tablet. Off by default; USB accessory transport below needs neither.</div>
+          <div class="hint">Connects through <code>adb reverse</code>. Requires Developer options and USB debugging on the tablet. Off by default; USB accessory transport below needs neither. At least one of the two must stay on, so turning this off turns USB accessory on.</div>
           <div class="toggle-row">
             <span>Enable ADB tunnel</span>
             <label class="switch">
@@ -186,7 +188,7 @@
         </div>
         <div class="input-options">
           <strong>USB accessory transport (no ADB)</strong>
-          <div class="hint">Connects the tablet over USB using Android Open Accessory, so Developer options and USB debugging are not needed. On by default; changes apply on the next host launch. On Linux the user needs access to the tablet's USB node (see README); on Windows a WinUSB driver must be bound to the tablet.</div>
+          <div class="hint">Connects the tablet over USB using Android Open Accessory, so Developer options and USB debugging are not needed. On by default; turning it off turns the ADB tunnel on, since one must stay enabled. Changes apply on the next host launch. On Linux the user needs access to the tablet's USB node (see README); on Windows a WinUSB driver must be bound to the tablet.</div>
           <div class="toggle-row">
             <span>Enable USB accessory transport</span>
             <label class="switch">

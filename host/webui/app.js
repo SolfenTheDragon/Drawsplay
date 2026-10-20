@@ -353,6 +353,7 @@ async function loadSettings() {
   $("pen-enabled").checked = s.penEnabled !== false;
   $("keyboard-enabled").checked = s.keyboardEnabled !== false;
   $("keep-alive-on-background").checked = !!s.keepAliveOnBackground;
+  $("idle-display-timeout").value = Number.isFinite(s.idleDisplayTimeoutSec) ? s.idleDisplayTimeoutSec : 600;
   $("pen-prediction").checked = !!s.penPrediction;
   $("idle-capture-gate").checked = !!s.idleCaptureGate;
   $("x11-high-rate-capture").checked = !!s.x11HighRateCapture;
@@ -595,6 +596,7 @@ $("form").addEventListener("submit", async (ev) => {
       penEnabled: $("pen-enabled").checked,
       keyboardEnabled: $("keyboard-enabled").checked,
       keepAliveOnBackground: $("keep-alive-on-background").checked,
+      idleDisplayTimeoutSec: Math.max(0, parseInt($("idle-display-timeout").value, 10) || 0),
       penPrediction: $("pen-prediction").checked,
       idleCaptureGate: $("idle-capture-gate").checked,
       x11HighRateCapture: $("x11-high-rate-capture").checked,
@@ -686,7 +688,16 @@ function updateADBVisibility() {
     ? "Restart ADB & re-check setup"
     : "Re-check setup";
 }
-$("adb-tunnel-enabled").addEventListener("change", updateADBVisibility);
+$("adb-tunnel-enabled").addEventListener("change", () => {
+  if (!$("adb-tunnel-enabled").checked) $("aoa-enabled").checked = true;
+  updateADBVisibility();
+});
+$("aoa-enabled").addEventListener("change", () => {
+  if (!$("aoa-enabled").checked) {
+    $("adb-tunnel-enabled").checked = true;
+    updateADBVisibility();
+  }
+});
 
 $("run-setup-remediation-btn").addEventListener("click", async () => {
   const btn = $("run-setup-remediation-btn");

@@ -23,7 +23,7 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	go runWebUI(ctx, store, stop)
 	startSessionLockMonitor(ctx)
 	go releaseStaleVirtualDisplays()
-	startDisplayWatchdog(ctx)
+	startDisplayWatchdog(ctx, store)
 
 	// Video channel (best-effort: logs and disables itself if ffmpeg or the
 	// port is unavailable; input continues to work regardless).

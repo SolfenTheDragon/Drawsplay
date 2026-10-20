@@ -1187,3 +1187,36 @@ func releaseStaleVirtualDisplays() {
 	}
 	log.Printf("X11 extended display: switched off %s, left on by a previous host process", o.Name)
 }
+
+// releaseIdleVirtualDisplays switches the virtual displays off now, without
+// waiting out the reconnect grace: the ones this process held, any it still
+// watches, and one a previous host process left on. A claimed output (a live
+// session) is left alone.
+func releaseIdleVirtualDisplays() {
+	x11Ext.mu.Lock()
+	if !x11Ext.claimed && !x11Ext.exiting {
+		stopX11ReleaseTimerLocked()
+		switchOffX11OutputsLocked()
+		verifyX11ReleasedLocked()
+	}
+	x11Ext.mu.Unlock()
+	releaseStaleVirtualDisplays()
+	releaseIdleWaylandDisplays()
+}
+
+// releaseIdleWaylandDisplays removes the Mutter / wlroots virtual monitors a
+// finished session still holds during its reconnect grace.
+func releaseIdleWaylandDisplays() {
+	mutterExt.mu.Lock()
+	if !mutterExt.claimed && !mutterExt.exiting {
+		stopMutterReleaseTimerLocked()
+		stopHeldMutterLocked()
+	}
+	mutterExt.mu.Unlock()
+	wlExt.mu.Lock()
+	if !wlExt.claimed && !wlExt.exiting {
+		stopWlExtReleaseTimerLocked()
+		stopHeldWlExtLocked()
+	}
+	wlExt.mu.Unlock()
+}
