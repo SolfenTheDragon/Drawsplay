@@ -77,6 +77,8 @@ type settings struct {
 	WifiAuthToken   string `json:"wifiAuthToken,omitempty"`
 	WifiMaxBitrate  string `json:"wifiMaxBitrate"`
 	AOAEnabled      bool   `json:"aoaEnabled"`
+	// AOAAutoSwitch makes the host switch an attached tablet into accessory mode on its own; when off, only the web UI button does.
+	AOAAutoSwitch bool `json:"aoaAutoSwitch"`
 	// ADBTunnelEnabled turns on the legacy adb-reverse transport. It needs
 	// Developer options and USB debugging on the tablet, so it is opt-in.
 	ADBTunnelEnabled bool `json:"adbTunnelEnabled"`
@@ -116,6 +118,7 @@ func defaultSettings() settings {
 		WifiAuthToken:         "",
 		WifiMaxBitrate:        "12M",
 		AOAEnabled:            true,
+		AOAAutoSwitch:         true,
 		ADBTunnelEnabled:      false,
 		IdleDisplayTimeoutSec: defaultIdleDisplayTimeoutSec,
 	}

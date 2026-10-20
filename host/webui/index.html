@@ -32,6 +32,7 @@
       <div class="status-meta">USB / LAN stream monitor</div>
     </div>
     <div id="connection-info" class="hint"></div>
+    <button id="switch-aoa-btn" type="button" hidden>Switch to USB accessory mode</button>
     <div id="warnings" class="hint" hidden></div>
     <div class="metrics-row">
       <div id="metrics-summary" class="hint"></div>
@@ -189,6 +190,14 @@
         <div class="input-options">
           <strong>USB accessory transport (no ADB)</strong>
           <div class="hint">Connects the tablet over USB using Android Open Accessory, so Developer options and USB debugging are not needed. On by default; turning it off turns the ADB tunnel on, since one must stay enabled. Changes apply on the next host launch. On Linux the user needs access to the tablet's USB node (see README); on Windows a WinUSB driver must be bound to the tablet.</div>
+          <div class="toggle-row">
+            <span>Switch the tablet to accessory mode automatically</span>
+            <label class="switch">
+              <input id="aoa-auto-switch" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="hint">Turn off to keep the tablet in File transfer (MTP) or any other USB mode until you press "Switch to USB accessory mode" in the host overview.</div>
           <div class="toggle-row">
             <span>Enable USB accessory transport</span>
             <label class="switch">

@@ -345,6 +345,7 @@ async function loadSettings() {
     : "shared token";
   $("wifi-tls").checked = s.wifiTLS !== false;
   $("aoa-enabled").checked = !!s.aoaEnabled;
+  $("aoa-auto-switch").checked = s.aoaAutoSwitch !== false;
   $("adb-tunnel-enabled").checked = !!s.adbTunnelEnabled;
   updateADBVisibility();
   $("require-adb-serial").checked = !!s.requirePreferredADB;
@@ -470,6 +471,8 @@ const AOA_STATE_LABELS = {
   "waiting-app": "tablet found, waiting for the DrawSplay app to open",
   linked: "linked",
   error: "error",
+  "file-transfer": "tablet is in File transfer mode",
+  "manual-switch": "automatic switching is off",
 };
 
 // Shows only the connection details for transports that are turned on.
@@ -480,6 +483,8 @@ function renderConnectionInfo(st) {
     const label = AOA_STATE_LABELS[aoa.state] || aoa.state || "unknown";
     lines.push(`USB accessory: ${label}${aoa.detail ? ` (${aoa.detail})` : ""}`);
   }
+  const aoaState = (st.aoa || {}).state;
+  $("switch-aoa-btn").hidden = !st.aoaEnabled || ["linked", "waiting-app", "switching"].includes(aoaState);
   if (st.adbTunnelEnabled) {
     const adb = st.adb || {};
     const serials = Array.isArray(adb.availableSerials) ? adb.availableSerials : [];
@@ -607,6 +612,7 @@ $("form").addEventListener("submit", async (ev) => {
       allowToolAutoInstall: $("allow-tool-auto-install").checked,
       noDriverInstall: $("no-driver-install").checked,
       aoaEnabled: $("aoa-enabled").checked,
+      aoaAutoSwitch: $("aoa-auto-switch").checked,
       adbTunnelEnabled: $("adb-tunnel-enabled").checked,
     };
     if (featureFlags.wifi) {
@@ -820,6 +826,19 @@ $("clear-mode-btn").addEventListener("click", async () => {
   try {
     await api("/api/tablet/clear-display-mode", { method: "POST" });
     showMsg("Tablet display preference cleared. It takes effect on next reconnect.", true);
+  } catch (e) {
+    showMsg(e.message, false);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("switch-aoa-btn").addEventListener("click", async () => {
+  const btn = $("switch-aoa-btn");
+  btn.disabled = true;
+  try {
+    await api("/api/tablet/switch-aoa", { method: "POST" });
+    showMsg("Switching the tablet to USB accessory mode. Accept the prompt on the tablet.", true);
   } catch (e) {
     showMsg(e.message, false);
   } finally {

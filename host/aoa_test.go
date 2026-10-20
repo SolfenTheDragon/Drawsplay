@@ -281,20 +281,37 @@ func TestAOALinkRejectsBadHello(t *testing.T) {
 	}
 }
 
+func TestAOAPollOnceManualSwitch(t *testing.T) {
+	dev := &fakeAOADevice{protocol: 2, failString: -1}
+	plain := aoaCandidate{VID: 0x04e8, PID: 0x6860, Key: "1-2@5", Open: func() (aoaDeviceHandle, error) { return dev, nil }}
+	scan := func() ([]aoaCandidate, error) { return []aoaCandidate{plain}, nil }
+	lastSwitch := map[string]time.Time{}
+
+	aoaPollOnce(context.Background(), scan, lastSwitch, true, false, func(byte, *aoaConn) {})
+	if len(dev.controls) != 0 {
+		t.Fatal("auto switch off must not probe the tablet")
+	}
+	requestAOASwitch()
+	aoaPollOnce(context.Background(), scan, lastSwitch, true, false, func(byte, *aoaConn) {})
+	if len(dev.controls) == 0 {
+		t.Fatal("a manual request must switch the tablet")
+	}
+}
+
 func TestAOAPollOnceSwitchesThenServes(t *testing.T) {
 	switched := &fakeAOADevice{protocol: 2, failString: -1}
 	lastSwitch := map[string]time.Time{}
 	plain := aoaCandidate{VID: 0x04e8, PID: 0x6860, Key: "1-2@5", Open: func() (aoaDeviceHandle, error) { return switched, nil }}
 	scan := func() ([]aoaCandidate, error) { return []aoaCandidate{plain}, nil }
 
-	if served := aoaPollOnce(context.Background(), scan, lastSwitch, true, func(byte, *aoaConn) {}); served {
+	if served := aoaPollOnce(context.Background(), scan, lastSwitch, true, true, func(byte, *aoaConn) {}); served {
 		t.Fatal("no link expected before the device re-enumerates")
 	}
 	if len(switched.controls) == 0 || switched.controls[len(switched.controls)-1].request != aoaRequestStart {
 		t.Fatalf("expected the switch sequence, got %+v", switched.controls)
 	}
 	n := len(switched.controls)
-	aoaPollOnce(context.Background(), scan, lastSwitch, true, func(byte, *aoaConn) {})
+	aoaPollOnce(context.Background(), scan, lastSwitch, true, true, func(byte, *aoaConn) {})
 	if len(switched.controls) != n {
 		t.Fatal("a device must not be re-probed within the backoff window")
 	}
@@ -312,7 +329,7 @@ func TestAOAPollOnceSwitchesThenServes(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		tabSide.Close()
 	}()
-	served := aoaPollOnce(context.Background(), func() ([]aoaCandidate, error) { return []aoaCandidate{acc}, nil }, lastSwitch, true,
+	served := aoaPollOnce(context.Background(), func() ([]aoaCandidate, error) { return []aoaCandidate{acc}, nil }, lastSwitch, true, true,
 		func(kind byte, c *aoaConn) { opened <- kind })
 	if !served {
 		t.Fatal("expected the accessory link to be served")

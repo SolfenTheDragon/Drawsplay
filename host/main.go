@@ -60,6 +60,7 @@ func main() {
 	wifiAuthToken := flag.String("wifi-auth-token", "", "optional Wi-Fi auth token required in hello packet")
 	wifiMaxBitrate := flag.String("wifi-max-bitrate", "12M", "Wi-Fi session max bitrate cap")
 	aoaEnabled := flag.Bool("aoa-enabled", true, "ADB-free USB transport over Android Open Accessory (no developer mode needed)")
+	aoaAutoSwitch := flag.Bool("aoa-auto-switch", true, "automatically switch an attached tablet to accessory mode (otherwise use the web UI button)")
 	adbTunnel := flag.Bool("adb-tunnel", false, "enable the adb reverse tunnel transport (needs USB debugging on the tablet)")
 	ffmpeg := flag.String("ffmpeg", "ffmpeg", "ffmpeg executable path (used for screen capture/encode)")
 	allowToolAutoInstall := flag.Bool("allow-tool-auto-install", true, "allow automatic download of the newest ffmpeg when missing (Windows)")
@@ -147,6 +148,7 @@ func main() {
 		"wifi-auth-token":          func() { cfg.WifiAuthToken = *wifiAuthToken },
 		"wifi-max-bitrate":         func() { cfg.WifiMaxBitrate = *wifiMaxBitrate },
 		"aoa-enabled":              func() { cfg.AOAEnabled = *aoaEnabled },
+		"aoa-auto-switch":          func() { cfg.AOAAutoSwitch = *aoaAutoSwitch },
 		"adb-tunnel":               func() { cfg.ADBTunnelEnabled = *adbTunnel },
 		"ffmpeg":                   func() { cfg.FFmpeg = *ffmpeg },
 		"allow-tool-auto-install":  func() { cfg.AllowToolAutoInstall = *allowToolAutoInstall },

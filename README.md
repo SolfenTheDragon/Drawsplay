@@ -47,6 +47,10 @@ To uninstall, use **Apps & Features**, the **Uninstall DrawSplay** Start Menu sh
 
 To run DrawSplay without installing (portable), rename the downloaded file to `DrawSplay.exe`, run it and choose **No** when it offers to install; it then asks for administrator approval only when a driver is first needed, and never twice for the same USB device. For a console with live logs, run `DrawSplay.exe -background=false` from a terminal.
 
+**USB mode note:** while DrawSplay runs it switches the tablet into USB accessory mode, which replaces the tablet's *File transfer (MTP)* mode (Android shows the "allow DrawSplay" prompt and the mode reverts). On Linux, DrawSplay leaves a tablet alone while it is in File transfer/PTP mode, so choose that mode to move files, then pick *No data transfer* to resume DrawSplay. On Windows, quit DrawSplay (or uninstall it) to use file transfer.
+
+If you want to keep the tablet in File transfer mode until you choose otherwise, turn off **Switch the tablet to accessory mode automatically** in the settings page (`-aoa-auto-switch=false`) and press **Switch to USB accessory mode** in the host overview when you want to use DrawSplay.
+
 ### Linux
 
 1. Download and extract `DrawSplay-linux-vX.Y.Z.tar.gz` (`tar -xzf DrawSplay-linux-*.tar.gz`), open the extracted folder, then run:

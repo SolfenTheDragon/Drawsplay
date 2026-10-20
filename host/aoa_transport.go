@@ -4,8 +4,17 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync/atomic"
 	"time"
 )
+
+// aoaForceSwitch is set by the web UI to make the next scan switch an idle
+// tablet (including one in File transfer mode) to accessory mode right away.
+var aoaForceSwitch atomic.Bool
+
+// requestAOASwitch asks the transport to switch an attached tablet to
+// accessory mode on its next scan.
+func requestAOASwitch() { aoaForceSwitch.Store(true) }
 
 const (
 	aoaScanInterval  = 2 * time.Second
@@ -51,7 +60,7 @@ func runAOATransport(ctx context.Context, store *settingsStore, scan aoaScanFunc
 	ticker := time.NewTicker(aoaScanInterval)
 	defer ticker.Stop()
 	for {
-		if aoaPollOnce(ctx, scan, lastSwitch, store.get().AutoLaunchAndroidApp, onOpen) {
+		if aoaPollOnce(ctx, scan, lastSwitch, store.get().AutoLaunchAndroidApp, store.get().AOAAutoSwitch, onOpen) {
 			// A link just ended; give the tablet a moment before probing again.
 			select {
 			case <-ctx.Done():
@@ -69,7 +78,7 @@ func runAOATransport(ctx context.Context, store *settingsStore, scan aoaScanFunc
 
 // aoaPollOnce scans for devices, switching Android devices into accessory mode
 // and serving one accessory link. It reports whether a link was served.
-func aoaPollOnce(ctx context.Context, scan aoaScanFunc, lastSwitch map[string]time.Time, autoLaunch bool, onOpen func(byte, *aoaConn)) bool {
+func aoaPollOnce(ctx context.Context, scan aoaScanFunc, lastSwitch map[string]time.Time, autoLaunch, autoSwitch bool, onOpen func(byte, *aoaConn)) bool {
 	cands, err := scan()
 	if err != nil {
 		throttledLog("aoa-scan", "AOA device scan failed: %v", err)
@@ -116,11 +125,20 @@ func aoaPollOnce(ctx context.Context, scan aoaScanFunc, lastSwitch map[string]ti
 		return true
 	}
 
+	force := aoaForceSwitch.Swap(false)
 	for _, c := range cands {
 		if c.inAccessoryMode() {
 			continue
 		}
-		if t, ok := lastSwitch[c.Key]; ok && time.Since(t) < aoaSwitchBackoff {
+		if !autoSwitch && !force {
+			setAOAStatus("manual-switch", "Automatic switching is off; use \"Switch to USB accessory mode\".")
+			continue
+		}
+		if c.FileTransfer && !force {
+			setAOAStatus("file-transfer", "Tablet is in File transfer mode; DrawSplay leaves it alone. Use \"Switch to USB accessory mode\" to start DrawSplay.")
+			continue
+		}
+		if t, ok := lastSwitch[c.Key]; ok && time.Since(t) < aoaSwitchBackoff && !force {
 			continue
 		}
 		lastSwitch[c.Key] = time.Now()

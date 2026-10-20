@@ -4,7 +4,7 @@ import "sync"
 
 // aoaStatusInfo describes the USB accessory link for the setup checklist.
 type aoaStatusInfo struct {
-	// State is one of: searching, switching, waiting-app, linked, error.
+	// State is one of: searching, file-transfer, manual-switch, switching, waiting-app, linked, error.
 	State  string `json:"state"`
 	Detail string `json:"detail,omitempty"`
 }

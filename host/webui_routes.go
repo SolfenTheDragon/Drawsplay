@@ -73,6 +73,7 @@ func (api webUIAPI) register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/autostart", securePost(api.csrfToken, api.handleAutostart))
 	mux.HandleFunc("/api/stop", securePost(api.csrfToken, api.handleStop))
 	mux.HandleFunc("/api/tablet/clear-display-mode", securePost(api.csrfToken, api.handleClearDisplayMode))
+	mux.HandleFunc("/api/tablet/switch-aoa", securePost(api.csrfToken, api.handleSwitchAOA))
 	mux.HandleFunc("/api/session/input-lock", securePost(api.csrfToken, api.handleSessionInputLock))
 	mux.HandleFunc("/api/session/disconnect", securePost(api.csrfToken, api.handleSessionDisconnect))
 	mux.HandleFunc("/api/session/reconnect-video", securePost(api.csrfToken, api.handleSessionReconnectVideo))
@@ -332,6 +333,20 @@ func (api webUIAPI) handleClearDisplayMode(w http.ResponseWriter, _ *http.Reques
 		return
 	}
 	log.Printf("Requested client display-preference clear via web UI")
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (api webUIAPI) handleSwitchAOA(w http.ResponseWriter, _ *http.Request) {
+	if !api.store.get().AOAEnabled {
+		httpError(w, http.StatusConflict, "USB accessory transport is disabled in settings")
+		return
+	}
+	if st := currentAOAStatus().State; st == "linked" || st == "waiting-app" {
+		httpError(w, http.StatusConflict, "tablet is already in accessory mode")
+		return
+	}
+	requestAOASwitch()
+	log.Printf("Requested switch of the tablet to accessory mode via web UI")
 	writeJSON(w, map[string]any{"ok": true})
 }
 

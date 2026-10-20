@@ -71,7 +71,10 @@ type aoaPipe interface {
 type aoaCandidate struct {
 	VID, PID uint16
 	Key      string // stable per-attachment identifier (sysfs name / device path)
-	Open     func() (aoaDeviceHandle, error)
+	// FileTransfer is set when the device exposes an MTP/PTP interface, i.e. the
+	// user chose "File transfer" on the tablet; it must not be switched away.
+	FileTransfer bool
+	Open         func() (aoaDeviceHandle, error)
 }
 
 func (c aoaCandidate) inAccessoryMode() bool {

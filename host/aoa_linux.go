@@ -229,6 +229,22 @@ func readSysfsInt(path string) (int, bool) {
 	return v, err == nil
 }
 
+// sysfsHasFileTransferInterface reports whether the device exposes an MTP/PTP
+// interface (still-image class 6, or a vendor interface named "MTP").
+func sysfsHasFileTransferInterface(dir, name string) bool {
+	ifaces, _ := filepath.Glob(filepath.Join(dir, name+":*"))
+	for _, ifDir := range ifaces {
+		if class, ok := readSysfsHex(filepath.Join(ifDir, "bInterfaceClass")); ok && class == 0x06 {
+			return true
+		}
+		if label, err := os.ReadFile(filepath.Join(ifDir, "interface")); err == nil &&
+			strings.Contains(strings.ToUpper(string(label)), "MTP") {
+			return true
+		}
+	}
+	return false
+}
+
 // aoaScanDevices lists attached USB devices of interest.
 func aoaScanDevices() ([]aoaCandidate, error) {
 	entries, err := filepath.Glob(filepath.Join(usbSysfsRoot, "*"))
@@ -249,6 +265,7 @@ func aoaScanDevices() ([]aoaCandidate, error) {
 			continue
 		}
 		cand := aoaCandidate{VID: vid, PID: pid, Key: fmt.Sprintf("%s@%d", name, dev)}
+		cand.FileTransfer = sysfsHasFileTransferInterface(dir, name)
 		if !cand.inAccessoryMode() && !aoaVendorProbeAllowed(vid) {
 			continue
 		}
