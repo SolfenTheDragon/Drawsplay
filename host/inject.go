@@ -73,3 +73,9 @@ func (g *penGate) blocksFinger() bool {
 func isPenTool(toolType string) bool {
 	return toolType == "stylus" || toolType == "eraser"
 }
+
+// isFingerRelease reports whether a finger action lifts a contact. Releases
+// must reach the injector even during palm rejection (see penGate).
+func isFingerRelease(action string) bool {
+	return action == "up" || action == "pointer_up" || action == "cancel"
+}

@@ -290,8 +290,10 @@ func (l *linuxInjector) inject(msg *packet) {
 	pen := isPenTool(msg.ToolType)
 	if pen {
 		l.gate.notePen()
-	} else if l.gate.blocksFinger() {
-		return // palm rejection
+	} else if l.gate.blocksFinger() && !isFingerRelease(msg.Action) {
+		// Palm rejection. Releases always pass: dropping one leaves a
+		// phantom contact that eventually exhausts the multitouch slots.
+		return
 	}
 	if !pen && l.useTouchDevice() {
 		l.injectTouch(msg)

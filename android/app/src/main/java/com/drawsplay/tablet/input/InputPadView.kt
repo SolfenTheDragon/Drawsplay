@@ -74,6 +74,51 @@ class InputPadView(context: Context, attrs: AttributeSet? = null) : View(context
         }
     }
 
+    /** Pointer ids with a finger down, last seen position and tool, so a lost gesture can be lifted. */
+    private val activeTouches = LinkedHashMap<Int, InputEventPacket>()
+
+    /**
+     * The status shade or a system gesture can take the window away mid-touch
+     * without a usable UP/CANCEL reaching the host. Without a release the host
+     * keeps phantom contacts and multitouch stops working.
+     */
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (!hasWindowFocus) releaseActiveTouches()
+    }
+
+    override fun onDetachedFromWindow() {
+        releaseActiveTouches()
+        super.onDetachedFromWindow()
+    }
+
+    /** Lifts every tracked finger one by one, then sends a blanket cancel. */
+    private fun releaseActiveTouches() {
+        if (activeTouches.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val lifts = activeTouches.values.map { it.copy(action = "pointer_up", pressure = 0f, timestampMs = now) }
+        val cancel = lifts.last().copy(action = "cancel", pointerCount = 0)
+        activeTouches.clear()
+        onInputBatch?.invoke(lifts)
+        onInputBatch?.invoke(listOf(cancel))
+    }
+
+    private fun trackTouches(event: MotionEvent, packets: List<InputEventPacket>) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> activeTouches.clear()
+            MotionEvent.ACTION_POINTER_UP -> activeTouches.remove(event.getPointerId(event.actionIndex))
+            else -> for (idx in 0 until event.pointerCount) {
+                if (event.getToolType(idx) == MotionEvent.TOOL_TYPE_FINGER) {
+                    val id = event.getPointerId(idx)
+                    activeTouches[id] = packets.lastOrNull { it.pointerId == id }
+                        ?: packetForPointer(event, "move", idx)
+                } else {
+                    activeTouches.remove(event.getPointerId(idx))
+                }
+            }
+        }
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         predictor.reset()
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
@@ -100,6 +145,7 @@ class InputPadView(context: Context, attrs: AttributeSet? = null) : View(context
             listOf(packetForPointer(event, actionName, idx))
         }
 
+        trackTouches(event, packets)
         onInputBatch?.invoke(packets)
 
         if (event.actionMasked == MotionEvent.ACTION_UP) {

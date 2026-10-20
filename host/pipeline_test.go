@@ -47,3 +47,11 @@ func TestDefaultSettingsFavorSmoothMotion(t *testing.T) {
 		t.Fatalf("default mode = %dx%d @ %d, want 1920x1080 @ 120", s.Width, s.Height, s.FPS)
 	}
 }
+
+func TestIsFingerRelease(t *testing.T) {
+	for action, want := range map[string]bool{"up": true, "pointer_up": true, "cancel": true, "down": false, "move": false} {
+		if got := isFingerRelease(action); got != want {
+			t.Errorf("isFingerRelease(%q) = %t, want %t", action, got, want)
+		}
+	}
+}

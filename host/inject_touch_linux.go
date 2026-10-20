@@ -194,7 +194,10 @@ func (l *linuxInjector) injectTouch(msg *packet) {
 					}
 				}
 				if !ok {
-					break // all slots busy
+					// Every slot busy means lifts were lost; recover instead of
+					// ignoring touch until the app restarts.
+					events = l.releaseAllTouches(events)
+					break
 				}
 			}
 			if msg.Width > 0 && msg.Height > 0 {
@@ -225,19 +228,24 @@ func (l *linuxInjector) injectTouch(msg *packet) {
 	l.writeEvents(l.touchFd, events)
 }
 
-// releaseAllTouches appends the events lifting every contact in use.
+// releaseAllTouches appends the events lifting every contact in use, one
+// frame per contact: X11 clients (Qt/XI2) track a lone TouchEnd per frame more
+// reliably than a simultaneous lift of every slot.
 func (l *linuxInjector) releaseAllTouches(events []inputEvent) []inputEvent {
 	t := &l.touch
 	for i := range t.used {
-		if t.used[i] {
-			events = append(events,
-				inputEvent{typ: evAbs, code: absMTSlot, value: int32(i)},
-				inputEvent{typ: evAbs, code: absMTTrackingID, value: -1})
-			t.used[i] = false
+		if !t.used[i] {
+			continue
 		}
-	}
-	if t.activeCt > 0 {
-		events = append(events, inputEvent{typ: evKey, code: uint16(btnTouch), value: 0})
+		events = append(events,
+			inputEvent{typ: evAbs, code: absMTSlot, value: int32(i)},
+			inputEvent{typ: evAbs, code: absMTTrackingID, value: -1})
+		t.used[i] = false
+		t.activeCt--
+		if t.activeCt == 0 {
+			events = append(events, inputEvent{typ: evKey, code: uint16(btnTouch), value: 0})
+		}
+		events = append(events, inputEvent{typ: evSyn, code: synReport})
 	}
 	t.activeCt = 0
 	return events

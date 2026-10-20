@@ -177,7 +177,7 @@ func (w *winInjector) inject(msg *packet) {
 		return
 	}
 	// Palm rejection: drop finger input while the pen is in range.
-	if w.gate.blocksFinger() {
+	if w.gate.blocksFinger() && !isFingerRelease(msg.Action) {
 		return
 	}
 	if w.touchDev != 0 {
