@@ -197,6 +197,13 @@ button.danger { background: var(--err); }
 #warnings { color: var(--warn); white-space: pre-line; }
 #connection-info { white-space: pre-line; }
 .hint { margin-top: .25rem; color: var(--muted); font-size: .78rem; }
+.recommended-resolution {
+  margin: 0 0 14px; padding: 10px 14px;
+  border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 9px;
+  background: var(--panel-raised);
+}
+.recommended-label { color: var(--muted); font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; }
+.recommended-value { margin-top: 2px; font-size: 1.6rem; font-weight: 700; line-height: 1.2; }
 #setup-checklist { display: grid; gap: 10px; }
 .setup-card #setup-checklist { margin-top: 14px; }
 .setup-item {

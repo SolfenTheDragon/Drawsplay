@@ -122,6 +122,7 @@ const (
 // forwards; rc is required, temporal and gate may be nil.
 func adaptToLinkFeedback(monitor *sessionMonitor, rc *rateController, temporal *temporalController, gate *congestionGate, spec pipelineSpec) congestionAction {
 	if monitor.consumeCongestion() {
+		linkStall := monitor.consumeLinkStall()
 		// Congestion means the stream is not clean whether or not it is
 		// acted on below, so ladder step-ups stay blocked either way.
 		rc.resetCleanWindow()
@@ -129,8 +130,19 @@ func adaptToLinkFeedback(monitor *sessionMonitor, rc *rateController, temporal *
 			log.Printf("Temporal adaptation enabled (%s): dropping non-reference enhancement frames", spec.Name)
 			return congestionActionAdapted
 		}
-		if gate.observe() && gate.allowsStepDown(rc) && rc.onCongestion() {
-			return congestionActionRestart
+		// Once the tablet's decoder is identified as the bottleneck, its
+		// queue spikes no longer drive the ladder; link stalls still do.
+		ignoreQueueSpike := rc.decoderBound() && !linkStall
+		if !ignoreQueueSpike && gate.observe() && gate.allowsStepDown(rc) {
+			var restart bool
+			if linkStall {
+				restart = rc.onCongestion()
+			} else {
+				restart = rc.onQueueCongestion(monitor.bytesSent.Load())
+			}
+			if restart {
+				return congestionActionRestart
+			}
 		}
 	} else if temporal != nil && spec.SupportsTemporalDrop && temporal.onClean() {
 		rc.resetCleanWindow()

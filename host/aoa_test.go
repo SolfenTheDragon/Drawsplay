@@ -338,3 +338,31 @@ func TestAOAPollOnceSwitchesThenServes(t *testing.T) {
 		t.Fatalf("kind = %d", kind)
 	}
 }
+
+func TestAOALinkRelaunchedAppGetsNewHandshake(t *testing.T) {
+	_, tb, opened, _ := startLink(t)
+	first := append(append([]byte(nil), aoaHelloPayload...), 1, 2, 3, 4)
+	tb.send(t, aoaFrameHello, 0, first)
+	if typ, _, _ := tb.recv(t); typ != aoaFrameHello {
+		t.Fatalf("first nonce hello got frame type %d", typ)
+	}
+	tb.send(t, aoaFrameOpen, 7, []byte{aoaKindInput})
+	conn := <-opened
+
+	// Keepalive with the same nonce: no reply, connection survives.
+	tb.send(t, aoaFrameHello, 0, first)
+	tb.send(t, aoaFrameData, 7, []byte("x"))
+	buf := make([]byte, 4)
+	if n, err := conn.Read(buf); err != nil || n != 1 {
+		t.Fatalf("keepalive must not reset the link: n=%d err=%v", n, err)
+	}
+
+	// New nonce: relaunch. Old connections close and the host answers hello.
+	tb.send(t, aoaFrameHello, 0, append(append([]byte(nil), aoaHelloPayload...), 9, 9, 9, 9))
+	if typ, _, p := tb.recv(t); typ != aoaFrameHello || !bytes.Equal(p, aoaHelloPayload) {
+		t.Fatalf("relaunch reply = %d %q", typ, p)
+	}
+	if _, err := conn.Read(buf); err == nil {
+		t.Fatal("old connection should be closed after relaunch")
+	}
+}

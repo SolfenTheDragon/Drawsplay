@@ -10,6 +10,8 @@ let debugLogLines = [];
 let currentCalibrationDevice = "";
 let loadedSettings = null;
 let resolutionManagedByOS = false;
+// True once the user edits the resolution controls; otherwise Save resends the host's current resolution, which the OS display settings may have changed since the page loaded.
+let resolutionDirty = false;
 const featureFlags = { wifi: false };
 const DEBUG_LOG_MAX_LINES = 600;
 const THEME_STORAGE_KEY = "drawsplay-theme";
@@ -327,6 +329,7 @@ async function api(path, opts) {
 async function loadSettings() {
   const s = await api("/api/settings");
   loadedSettings = s;
+  resolutionDirty = false;
   syncResolutionPreset(s.width, s.height);
   refreshFramerateOptions(s.fps);
   $("ffmpeg").value = s.ffmpeg;
@@ -386,6 +389,17 @@ async function refreshStatus() {
     ensureNativeResolutionOption(activeClient.nativeWidth, activeClient.nativeHeight);
     const nativeW = Number(activeClient.nativeWidth) || 0;
     const nativeH = Number(activeClient.nativeHeight) || 0;
+    const recHint = $("recommended-resolution-hint");
+    const recW = Number(activeClient.recommendedWidth) || 0;
+    const recH = Number(activeClient.recommendedHeight) || 0;
+    if (recW > 0 && recH > 0) {
+      $("recommended-resolution-value").textContent = `${recW}x${recH}`;
+      const why = activeClient.recommendedReason ? `Because of ${activeClient.recommendedReason}. ` : "";
+      $("recommended-resolution-reason").textContent = `${why}Higher resolutions may cause lag or freezes on this device.`;
+      recHint.hidden = false;
+    } else {
+      recHint.hidden = true;
+    }
     const refreshRates = Array.isArray(activeClient.refreshRates) ? activeClient.refreshRates : [];
     const maxHz = refreshRates.length > 0 ? Math.max(...refreshRates) : 0;
     const nativeParts = [];
@@ -581,9 +595,10 @@ $("form").addEventListener("submit", async (ev) => {
   $("save").disabled = true;
   try {
     let resolution = selectedResolutionDimensions();
-    if (resolutionManagedByOS && loadedSettings) {
-      const lockedWidth = Number.parseInt(loadedSettings.width, 10);
-      const lockedHeight = Number.parseInt(loadedSettings.height, 10);
+    if ((resolutionManagedByOS || !resolutionDirty) && loadedSettings) {
+      const current = await api("/api/settings");
+      const lockedWidth = Number.parseInt(current.width, 10);
+      const lockedHeight = Number.parseInt(current.height, 10);
       if (Number.isFinite(lockedWidth) && Number.isFinite(lockedHeight) && lockedWidth > 0 && lockedHeight > 0) {
         resolution = { width: lockedWidth, height: lockedHeight };
       }
@@ -634,6 +649,7 @@ $("form").addEventListener("submit", async (ev) => {
       body: JSON.stringify(body),
     });
     loadedSettings = { ...(loadedSettings || {}), ...body };
+    resolutionDirty = false;
     showMsg(res.restarted ? "Saved — stream restarting with new settings." : "Saved — applies on next connection.", true);
   } catch (e) {
     showMsg(e.message, false);
@@ -751,17 +767,20 @@ $("download-diagnostics-btn").addEventListener("click", async () => {
 });
 
 $("resolution-preset").addEventListener("change", () => {
+  resolutionDirty = true;
   setCustomResolutionVisibility();
   refreshFramerateOptions();
 });
 
 $("width").addEventListener("input", () => {
+  resolutionDirty = true;
   if ($("resolution-preset").value === CUSTOM_RESOLUTION) {
     refreshFramerateOptions();
   }
 });
 
 $("height").addEventListener("input", () => {
+  resolutionDirty = true;
   if ($("resolution-preset").value === CUSTOM_RESOLUTION) {
     refreshFramerateOptions();
   }

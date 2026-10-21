@@ -134,3 +134,17 @@ func TestAdaptToLinkFeedbackIdleStreamDoesNothing(t *testing.T) {
 		t.Fatalf("action = %v, want none", action)
 	}
 }
+
+func TestAdaptToLinkFeedbackLinkStallStillStepsDownWhenDecoderBound(t *testing.T) {
+	rc, _ := newTestRC("8M")
+	rc.bound = true
+	mon := congestedMonitor()
+	if adaptToLinkFeedback(mon, rc, nil, newCongestionGate(1, 0), pipelineSpec{Name: "test"}) != congestionActionNone {
+		t.Fatal("queue-only congestion must be ignored when decoder-bound")
+	}
+	mon.congested.Store(true)
+	mon.linkStalled.Store(true)
+	if adaptToLinkFeedback(mon, rc, nil, newCongestionGate(1, 0), pipelineSpec{Name: "test"}) != congestionActionRestart {
+		t.Fatal("link stall must still step down")
+	}
+}

@@ -17,6 +17,10 @@ type clientIdentity struct {
 	NativeHeight int    `json:"nativeHeight,omitempty"`
 	// RefreshRates the tablet panel supports (Hz, ascending, deduplicated).
 	RefreshRates []int `json:"refreshRates,omitempty"`
+	// Recommended maximum resolution reported by the tablet (0 = none).
+	RecommendedWidth  int    `json:"recommendedWidth,omitempty"`
+	RecommendedHeight int    `json:"recommendedHeight,omitempty"`
+	RecommendedReason string `json:"recommendedReason,omitempty"`
 	// Mode the tablet remembered from a previous session (0 = none).
 	PrefWidth  int `json:"prefWidth,omitempty"`
 	PrefHeight int `json:"prefHeight,omitempty"`

@@ -121,6 +121,16 @@ On Linux the frame rate is limited to 60, except on X11 hosts with VA-API (Intel
 
 **Windows: no extended display.** Run the installer (or `"C:\Program Files\DrawSplay\DrawSplay.exe" -install`) again to repair the driver setup (one UAC prompt); reboot if Windows asks. If custom resolutions are missing, run **Enable custom-resolution registry access (Admin)** once on the settings page, then reconnect.
 
+**Video lags, freezes for a few seconds or catches up in bursts (older or low-memory tablets).** The tablet may not be able to decode the video at its full panel resolution. Open the settings page: when the tablet is connected, a **Recommended maximum for this tablet** resolution (for example `1280x800`) is shown above the resolution controls, with the reason. It is based on the tablet's RAM and hardware video decoder and is only a suggestion; DrawSplay never applies it by itself. To use it:
+- Linux: set the tablet's display to that resolution in the desktop's display settings (GNOME: Settings > Displays; X11 such as Cinnamon: the "Virtual-1-1" display). DrawSplay remembers the choice for that tablet.
+- Windows: choose the resolution in Windows Display Settings.
+- If the settings page doesn't show a recommendation, the tablet's native size is fine or the app is older; update the tablet app.
+- If the stream is still choppy at the recommended size, try a lower one and keep the tablet app in the foreground.
+
+**The resolution keeps changing back.** Reload the settings page (it can be out of date) and set the resolution again; recent versions no longer overwrite a resolution chosen in the OS display settings when you press Save.
+
+**Tablet app stays on "waiting for host" after being reinstalled or restarted.** Update the host; recent versions reconnect automatically when the tablet app is relaunched. If it still doesn't connect, unplug and replug the tablet, or restart the host and reopen the app.
+
 **Tablet shows no prompt / doesn't open when plugged in.** Turn on **Auto-launch Android app on USB connect** on the settings page, or open the app manually.
 
 ## Privacy

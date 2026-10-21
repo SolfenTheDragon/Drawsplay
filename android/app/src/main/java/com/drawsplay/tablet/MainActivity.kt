@@ -296,12 +296,16 @@ class MainActivity : AppCompatActivity() {
             ?.distinct()
             ?.sorted()
             .orEmpty()
+        val recommended = com.drawsplay.tablet.video.ResolutionRecommender.forDevice(this, nativeW, nativeH)
         return InputChannel.DisplayInfo(
             nativeWidth = nativeW,
             nativeHeight = nativeH,
             prefWidth = 0,
             prefHeight = 0,
-            refreshRates = refreshRates
+            refreshRates = refreshRates,
+            recommendedWidth = recommended?.width ?: 0,
+            recommendedHeight = recommended?.height ?: 0,
+            recommendedReason = recommended?.reason.orEmpty()
         )
     }
 

@@ -27,6 +27,9 @@ class AccessoryLink(
     private val closed = AtomicBoolean(false)
     private var nextId = 0
 
+    // Identifies this app instance so the host can tell a relaunch from a keepalive hello.
+    private val helloPayload = AccessoryFraming.HELLO_PAYLOAD + ByteArray(4).also { java.security.SecureRandom().nextBytes(it) }
+
     @Volatile
     var isReady = false
         private set
@@ -154,7 +157,7 @@ class AccessoryLink(
     private fun helloLoop() {
         try {
             while (!closed.get()) {
-                writeFrame(AccessoryFraming.TYPE_HELLO, 0, AccessoryFraming.HELLO_PAYLOAD)
+                writeFrame(AccessoryFraming.TYPE_HELLO, 0, helloPayload)
                 Thread.sleep(HELLO_INTERVAL_MS)
             }
         } catch (_: IOException) {

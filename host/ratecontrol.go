@@ -21,6 +21,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -45,6 +46,14 @@ const (
 	// protocol overhead, so the top rung never congests the link by
 	// construction.
 	maxLadderKbps = 60000
+	// queueRecurrence: queue-only congestion returning within this window of
+	// a queue-driven step-down means the step did not help.
+	queueRecurrence = 15 * time.Second
+	// futileStepLimit consecutive futile steps mark the decoder as the bottleneck.
+	futileStepLimit = 2
+	// underusedFraction: a stream sending less than this share of its rung
+	// is not limited by the link, so lowering the rung cannot help.
+	underusedFraction = 0.5
 )
 
 // rateController owns the bitrate ladder position for one video session.
@@ -57,6 +66,13 @@ type rateController struct {
 	lastStepUp time.Time
 	holdUntil  time.Time // no step-ups before this (post-relapse penalty)
 	cleanSince time.Time
+
+	// Decoder-bound detection (see onQueueCongestion).
+	bound          bool
+	seriesStartIdx int       // rung before the current run of queue-driven step-downs
+	lastQueueStep  time.Time // zero when no run is active
+	lastQueueBytes int64
+	futileSteps    int
 }
 
 // newRateController builds the ladder from the configured top bitrate:
@@ -140,6 +156,53 @@ func (rc *rateController) onCongestion() bool {
 	return true
 }
 
+// decoderBound reports whether this session's tablet decoder, not the link,
+// was identified as the bottleneck.
+func (rc *rateController) decoderBound() bool { return rc.bound }
+
+// onQueueCongestion handles congestion signalled only by the client's decode
+// queue (no slow socket write). It behaves like onCongestion, but if stepping
+// down repeatedly fails to help while the stream uses well under its rung,
+// the decoder is the limit: the rung before the series is restored once and
+// the session stops reacting to queue-only spikes. bytesSent is the
+// cumulative bytes written to the client.
+func (rc *rateController) onQueueCongestion(bytesSent int64) bool {
+	t := rc.now()
+	if rc.bound {
+		return false
+	}
+	inRun := !rc.lastQueueStep.IsZero() && t.Sub(rc.lastQueueStep) < queueRecurrence
+	if inRun {
+		elapsed := t.Sub(rc.lastQueueStep).Seconds()
+		rungBps := float64(rc.ladder[rc.idx]) * 1000
+		if elapsed > 0 && float64(bytesSent-rc.lastQueueBytes)*8/elapsed < rungBps*underusedFraction {
+			rc.futileSteps++
+		} else {
+			rc.futileSteps = 0
+		}
+	} else {
+		rc.seriesStartIdx = rc.idx
+		rc.futileSteps = 0
+	}
+	if rc.futileSteps >= futileStepLimit {
+		rc.bound = true
+		rc.cleanSince = t
+		log.Printf("Decoder-bound client detected: %d queue-driven step-downs did not help while sending under %d%% of the rung; restoring %dk and ignoring decode-queue spikes for this session", rc.futileSteps, int(underusedFraction*100), rc.ladder[rc.seriesStartIdx])
+		if rc.idx == rc.seriesStartIdx {
+			return false
+		}
+		rc.idx = rc.seriesStartIdx
+		rc.lastChange = t
+		return true
+	}
+	stepped := rc.onCongestion()
+	if stepped {
+		rc.lastQueueStep = t
+		rc.lastQueueBytes = bytesSent
+	}
+	return stepped
+}
+
 // resetCleanWindow marks the stream as recently unstable for step-up gating
 // without changing the current ladder rung.
 func (rc *rateController) resetCleanWindow() {
@@ -150,7 +213,7 @@ func (rc *rateController) resetCleanWindow() {
 // the next-higher rung. Callers restart the pipeline when it returns true.
 func (rc *rateController) shouldStepUp() bool {
 	t := rc.now()
-	if rc.idx == 0 || t.Before(rc.holdUntil) || t.Sub(rc.cleanSince) < stepUpAfter {
+	if rc.bound || rc.idx == 0 || t.Before(rc.holdUntil) || t.Sub(rc.cleanSince) < stepUpAfter {
 		return false
 	}
 	rc.idx--

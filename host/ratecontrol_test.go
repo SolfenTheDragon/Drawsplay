@@ -117,3 +117,60 @@ func TestQuickRelapsePenalty(t *testing.T) {
 		t.Error("step up after penalty expiry should be allowed")
 	}
 }
+
+// queueStep simulates one queue-only congestion event after the given time,
+// with the stream having sent kbps worth of traffic during that time.
+func queueStep(rc *rateController, clock *testClock, bytes *int64, gap time.Duration, sentKbps int) bool {
+	clock.advance(gap)
+	*bytes += int64(float64(sentKbps) * 1000 / 8 * gap.Seconds())
+	return rc.onQueueCongestion(*bytes)
+}
+
+func TestQueueCongestionFutileStepsMarkDecoderBound(t *testing.T) {
+	rc, clock := newTestRC("8M")
+	var bytes int64
+	if !queueStep(rc, clock, &bytes, 2*time.Second, 100) || rc.idx != 1 {
+		t.Fatalf("first step: idx=%d", rc.idx)
+	}
+	if !queueStep(rc, clock, &bytes, 5*time.Second, 100) || rc.idx != 2 {
+		t.Fatalf("second step: idx=%d", rc.idx)
+	}
+	if !queueStep(rc, clock, &bytes, 5*time.Second, 100) {
+		t.Fatal("restore should restart")
+	}
+	if !rc.decoderBound() || rc.idx != 0 {
+		t.Fatalf("bound=%v idx=%d, want bound at rung 0", rc.decoderBound(), rc.idx)
+	}
+	if queueStep(rc, clock, &bytes, 5*time.Second, 100) {
+		t.Fatal("queue spikes must be ignored once decoder-bound")
+	}
+	clock.advance(2 * stepUpAfter)
+	if rc.shouldStepUp() {
+		t.Fatal("no step-ups while decoder-bound")
+	}
+}
+
+func TestQueueCongestionBusyLinkIsNotDecoderBound(t *testing.T) {
+	rc, clock := newTestRC("8M")
+	var bytes int64
+	for i := 0; i < 4; i++ {
+		queueStep(rc, clock, &bytes, 5*time.Second, rc.ladder[rc.idx])
+	}
+	if rc.decoderBound() {
+		t.Fatal("a stream filling its rung is link-bound")
+	}
+	if rc.idx < 3 {
+		t.Fatalf("idx=%d, want continued step-downs", rc.idx)
+	}
+}
+
+func TestQueueCongestionRecurrenceWindowResetsSeries(t *testing.T) {
+	rc, clock := newTestRC("8M")
+	var bytes int64
+	queueStep(rc, clock, &bytes, 2*time.Second, 100)
+	queueStep(rc, clock, &bytes, 5*time.Second, 100)
+	queueStep(rc, clock, &bytes, queueRecurrence+time.Second, 100)
+	if rc.decoderBound() {
+		t.Fatal("isolated congestion after a quiet period must not mark decoder-bound")
+	}
+}

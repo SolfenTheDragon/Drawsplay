@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"sync"
@@ -174,6 +176,7 @@ func (l *aoaLink) serve(ctx context.Context, onOpen func(kind byte, conn *aoaCon
 		return err
 	}
 	helloTimer.Stop()
+	peerNonce := aoaHelloNonce(payload)
 
 	for {
 		typ, id, payload, err := readAOAFrame(r)
@@ -185,6 +188,26 @@ func (l *aoaLink) serve(ctx context.Context, onOpen func(kind byte, conn *aoaCon
 			return err
 		}
 		switch typ {
+		case aoaFrameHello:
+			// The tablet repeats its hello as a keepalive; a different nonce
+			// means the app was relaunched on the same link and lost every
+			// virtual connection, so drop ours and complete a new handshake.
+			nonce := aoaHelloNonce(payload)
+			if len(nonce) == 0 || bytes.Equal(nonce, peerNonce) || !validAOAHello(payload) {
+				continue
+			}
+			log.Printf("AOA: tablet app restarted on the same link; resetting its connections")
+			peerNonce = nonce
+			l.mu.Lock()
+			old := l.conns
+			l.conns = make(map[uint16]*aoaConn)
+			l.mu.Unlock()
+			for _, c := range old {
+				c.remoteClose()
+			}
+			if err := l.writeFrame(aoaFrameHello, 0, aoaHelloPayload, time.Time{}); err != nil {
+				return err
+			}
 		case aoaFrameOpen:
 			if len(payload) < 1 {
 				continue
@@ -218,6 +241,19 @@ func (l *aoaLink) serve(ctx context.Context, onOpen func(kind byte, conn *aoaCon
 			}
 		}
 	}
+}
+
+func validAOAHello(payload []byte) bool {
+	return len(payload) >= len(aoaHelloPayload) && string(payload[:5]) == "DSAOA" && payload[5] == aoaLinkVersion
+}
+
+// aoaHelloNonce returns the optional per-app-instance bytes following the
+// fixed hello header (empty for older tablet apps).
+func aoaHelloNonce(payload []byte) []byte {
+	if len(payload) <= len(aoaHelloPayload) {
+		return nil
+	}
+	return append([]byte(nil), payload[len(aoaHelloPayload):]...)
 }
 
 func (l *aoaLink) forget(id uint16) {

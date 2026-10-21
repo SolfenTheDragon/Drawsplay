@@ -43,6 +43,8 @@ const (
 // session. All fields are goroutine-safe (reader goroutine + session loop).
 type sessionMonitor struct {
 	congested   atomic.Bool
+	linkStalled atomic.Bool  // a slow socket write raised congested (link evidence)
+	bytesSent   atomic.Int64 // total bytes written to the client
 	clientGone  atomic.Bool
 	lastStats   atomic.Pointer[clientStatsMsg]
 	staleFrames atomic.Int64 // client stale-frame skips not yet logged
@@ -95,6 +97,13 @@ func (m *sessionMonitor) consumeCongestion() bool {
 	return m.congested.Swap(false)
 }
 
+// consumeLinkStall reports whether a slow socket write contributed to the
+// congestion just consumed, which is evidence the link (not the tablet's
+// decoder) is the bottleneck.
+func (m *sessionMonitor) consumeLinkStall() bool {
+	return m.linkStalled.Swap(false)
+}
+
 // gone reports whether the client's upstream half has closed.
 func (m *sessionMonitor) gone() bool { return m.clientGone.Load() }
 
@@ -115,7 +124,9 @@ func (w *monitoredWriter) Write(p []byte) (int, error) {
 	}
 	start := time.Now()
 	n, err := w.conn.Write(p)
+	w.mon.bytesSent.Add(int64(n))
 	if d := time.Since(start); d > slowWriteThreshold && err == nil {
+		w.mon.linkStalled.Store(true)
 		w.mon.congested.Store(true)
 		log.Printf("Video send stalled %v (link congested)", d.Round(time.Millisecond))
 	}

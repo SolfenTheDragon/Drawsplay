@@ -57,7 +57,11 @@ class InputChannel(
         val prefHeight: Int,
         val prefFps: Int = 0,
         // Refresh rates (Hz, rounded, ascending) the panel supports at its native size.
-        val refreshRates: List<Int> = emptyList()
+        val refreshRates: List<Int> = emptyList(),
+        // Suggested maximum host resolution for this tablet's specs (null = native is fine).
+        val recommendedWidth: Int = 0,
+        val recommendedHeight: Int = 0,
+        val recommendedReason: String = ""
     )
 
     @Volatile
@@ -425,6 +429,11 @@ class InputChannel(
             put("screenHeight", info?.nativeHeight ?: 0)
             info?.refreshRates?.takeIf { it.isNotEmpty() }?.let {
                 put("screenRefreshRates", JSONArray(it))
+            }
+            if (info != null && info.recommendedWidth > 0 && info.recommendedHeight > 0) {
+                put("recommendedWidth", info.recommendedWidth)
+                put("recommendedHeight", info.recommendedHeight)
+                put("recommendedReason", info.recommendedReason)
             }
             // Display preferences are kept per host: the host answers with hostInfo and
             // the app replies with modePrefs for that host.

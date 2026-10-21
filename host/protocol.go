@@ -117,6 +117,11 @@ type packet struct {
 	// ScreenRefreshRates (hello): refresh rates (Hz, rounded) the tablet
 	// panel supports at its native resolution. Optional; older clients omit it.
 	ScreenRefreshRates []int `json:"screenRefreshRates"`
+	// RecommendedWidth/Height/Reason (hello): optional maximum resolution the
+	// client suggests for its specs; shown in the web UI, never enforced.
+	RecommendedWidth  int    `json:"recommendedWidth"`
+	RecommendedHeight int    `json:"recommendedHeight"`
+	RecommendedReason string `json:"recommendedReason"`
 	// HostPrefs (hello): the client keeps display preferences per host and
 	// will answer the host's "hostInfo" with a "modePrefs" packet (which
 	// carries PrefWidth/PrefHeight/PrefFPS).

@@ -1,8 +1,10 @@
 ﻿package com.drawsplay.tablet.video
 
 import android.media.MediaCodec
+import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.media.MediaFormat
+import android.os.Build
 import android.util.Log
 import android.view.Display
 import android.view.Surface
@@ -223,7 +225,7 @@ class VideoDecoder(
 
         // Placeholder size: decoders take the real dimensions from the SPS in
         // csd-0; 0x0 fails configuration on some devices.
-        fun buildFormat(vendorKeys: Boolean): MediaFormat? = MediaFormat.createVideoFormat(
+        fun buildFormat(tier: FormatTier): MediaFormat? = MediaFormat.createVideoFormat(
             if (codecName == "hevc") MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC,
             1920,
             1080
@@ -243,102 +245,87 @@ class VideoDecoder(
             // USB) can exceed a decoder's default input buffer size; an
             // undersized buffer silently drops the keyframe and corrupts
             // the picture until the next IDR.
-            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_INPUT_BUFFER_SIZE)
-            setInteger(MediaFormat.KEY_PRIORITY, 0)
-            setInteger(MediaFormat.KEY_OPERATING_RATE, Short.MAX_VALUE.toInt())
-            if (AndroidCompat.supportsLowLatencyDecoderHint) {
+            if (tier.maxInputSize) setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_INPUT_BUFFER_SIZE)
+            if (tier.rateHints) {
+                setInteger(MediaFormat.KEY_PRIORITY, 0)
+                setInteger(MediaFormat.KEY_OPERATING_RATE, Short.MAX_VALUE.toInt())
+            }
+            if (tier.lowLatencyHint && AndroidCompat.supportsLowLatencyDecoderHint) {
                 setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
             }
-            if (vendorKeys) {
-                // SoC-specific switches that disable output reordering/queueing
-                // on decoders that ignore the standard key. Unknown keys are
-                // ignored by most codecs; if one is rejected, configure is
-                // retried without them below.
+            if (tier.vendorKeys) {
                 for ((key, value) in VENDOR_LOW_LATENCY_KEYS) setInteger(key, value)
             }
         }
-        val format = buildFormat(vendorKeys = true) ?: return
 
-        val useSoftware = consecutiveHwFailures >= MAX_HW_FAILURES
-        val created = try {
-            createDecoder(useSoftware, codecName)
-        } catch (e: Exception) {
-            Log.e(TAG, "Decoder create failed (software=$useSoftware)", e)
-            if (!useSoftware) consecutiveHwFailures++
-            return
-        }
-        usingSoftwareDecoder = useSoftware
-        try {
-            created.setCallback(RenderPacedCallback())
-            try {
-                created.configure(format, surface, null, 0)
+        // Any decoder or optional key can be rejected on some tablet SoC
+        // (e.g. Unisoc OMX.sprd.h264.decoder fails configure() on
+        // KEY_LOW_LATENCY), so walk every decoder x format tier until one
+        // starts. Software decoding is the last resort, not the next step.
+        val mime = if (codecName == "hevc") MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+        val (hardwareNames, softwareNames) = listDecoders(mime)
+        val candidates = DecoderConfigPlan.orderCandidates(
+            hardwareNames, softwareNames, skipHardware = consecutiveHwFailures >= MAX_HW_FAILURES
+        )
+        val attempts = DecoderConfigPlan.attempts(candidates, workingConfig[codecName])
+        var lastError: Exception? = null
+        for (attempt in attempts) {
+            val format = buildFormat(attempt.tier) ?: return
+            val created = try {
+                createDecoder(attempt.decoder, mime)
             } catch (e: Exception) {
-                Log.w(TAG, "Decoder rejected vendor low-latency keys; retrying without them", e)
-                // A failed configure leaves the codec uninitialized, so a
-                // fresh instance is needed for the retry.
-                val plain = buildFormat(vendorKeys = false) ?: throw e
+                lastError = e
+                Log.w(TAG, "Decoder create failed (${attempt.decoder})", e)
+                continue
+            }
+            try {
+                created.setCallback(RenderPacedCallback())
+                created.configure(format, surface, null, 0)
+                created.start()
+            } catch (e: Exception) {
+                lastError = e
+                Log.w(TAG, "Decoder ${created.name} rejected tier ${attempt.tier}; trying next", e)
                 try {
                     created.release()
                 } catch (_: Exception) {
                 }
-                val retry = createDecoder(useSoftware, codecName)
-                retry.setCallback(RenderPacedCallback())
-                retry.configure(plain, surface, null, 0)
-                retry.start()
-                codec = retry
-                usingSoftwareDecoder = useSoftware
-                applySurfaceFrameRateHint()
-                Log.i(TAG, "Decoder configured: ${retry.name} (software=$useSoftware, no vendor keys)")
-                return
+                continue
             }
-            created.start()
-        } catch (e: Exception) {
-            Log.e(TAG, "Decoder configure/start failed (software=$useSoftware)", e)
-            if (!useSoftware) consecutiveHwFailures++
-            try {
-                created.release()
-            } catch (_: Exception) {
-            }
+            codec = created
+            usingSoftwareDecoder = attempt.decoder.software
+            workingConfig[codecName] = attempt
+            applySurfaceFrameRateHint()
+            Log.i(TAG, "Decoder configured: ${created.name} (software=${attempt.decoder.software}, tier=${attempt.tier})")
             return
         }
-        codec = created
-        applySurfaceFrameRateHint()
-        Log.i(TAG, "Decoder configured: ${created.name} (software=$useSoftware)")
+        Log.e(TAG, "No decoder for $mime accepted any configuration", lastError)
+        if (consecutiveHwFailures < MAX_HW_FAILURES) consecutiveHwFailures++
     }
 
-    /**
-     * Creates the AVC decoder. The platform default is the hardware decoder
-     * on real devices (findDecoderForFormat is unreliable with synthetic
-     * formats so it is deliberately not used). After [MAX_HW_FAILURES]
-     * hardware codec errors, the software decoder is used instead â€” slower
-     * but universally reliable â€” so a device with a broken vendor decoder
-     * still gets a picture rather than an endless reconnect loop.
-     */
-    private fun createDecoder(software: Boolean, codecName: String): MediaCodec {
-        val mime = if (codecName == "hevc") MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
-        if (software) {
-            val name = findSoftwareDecoder(mime)
-            if (name != null) {
-                Log.w(TAG, "Falling back to software decoder $name after $consecutiveHwFailures hardware failures")
-                return MediaCodec.createByCodecName(name)
-            }
-            Log.w(TAG, "No software decoder found for $mime; retrying platform default")
-        }
-        return MediaCodec.createDecoderByType(mime)
+    private fun createDecoder(candidate: DecoderCandidate, mime: String): MediaCodec {
+        val name = candidate.name ?: return MediaCodec.createDecoderByType(mime)
+        return MediaCodec.createByCodecName(name)
     }
 
-    private fun findSoftwareDecoder(mime: String): String? {
+    /** Hardware and software decoder names the device lists for [mime], in listing order. */
+    private fun listDecoders(mime: String): Pair<List<String>, List<String>> {
         return try {
-            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull { info ->
-                !info.isEncoder &&
-                    info.supportedTypes.any { it.equals(mime, ignoreCase = true) } &&
-                    (info.name.startsWith("c2.android.") || info.name.startsWith("OMX.google."))
-            }?.name
+            val (software, hardware) = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+                .filter { info ->
+                    !info.isEncoder && info.supportedTypes.any { it.equals(mime, ignoreCase = true) } &&
+                        !info.name.endsWith(".secure")
+                }
+                .partition { isSoftwareDecoder(it) }
+            hardware.map { it.name } to software.map { it.name }
         } catch (e: Exception) {
             Log.w(TAG, "Codec enumeration failed", e)
-            null
+            emptyList<String>() to emptyList()
         }
     }
+
+    private fun isSoftwareDecoder(info: MediaCodecInfo): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.isSoftwareOnly
+        else info.name.startsWith("c2.android.") || info.name.startsWith("OMX.google.")
 
     /**
      * Tells the compositor the surface carries fixed-rate video so devices
@@ -558,6 +545,8 @@ class VideoDecoder(
         override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
             Log.e(TAG, "Decoder error (recoverable=${e.isRecoverable} transient=${e.isTransient})", e)
             if (!usingSoftwareDecoder && !hwMarkedHealthy) consecutiveHwFailures++
+            // A configuration that starts but then errors at runtime must not be pinned.
+            workingConfig.remove(streamCodec)
             failed.set(true)
         }
 
@@ -629,5 +618,11 @@ class VideoDecoder(
          */
         @Volatile
         private var consecutiveHwFailures = 0
+
+        /**
+         * Decoder/tier that last started per codec, tried first on reconnect
+         * so a device's quirks are only discovered once per process.
+         */
+        private val workingConfig = java.util.concurrent.ConcurrentHashMap<String, ConfigAttempt>()
     }
 }
