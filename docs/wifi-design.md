@@ -20,6 +20,13 @@ blocking requirements. The
 records real CPU/memory observations and raw output, explicitly not a passing
 baseline. Crypto overhead has NOT been measured.
 
+**Measurement update:** the owner-authorized attached Tab A8 has now run
+two stable software resource observations and an isolated offline
+AES-GCM/ChaCha provider probe, without replacing the app. See
+[the software reference](performance/tab-a8-software-reference-2026-10-22.md).
+Actual TLS/record/handshake overhead is still unmeasured; primitive
+feasibility does not establish transport performance or USB equivalence.
+
 ## 1. Intent, scope and decision status
 
 ### Owner revision: software-only baseline, no camera or physical interaction

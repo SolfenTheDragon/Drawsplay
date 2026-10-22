@@ -171,6 +171,7 @@ class EvidenceTests(unittest.TestCase):
             "version": "dev-test", "aoa": {"state": "linked"},
             "video": {"streaming": True, "encoder": "h264"},
             "metrics": {"videoRestarts": 3},
+            "clientVideoStats": {},
         })
         self.assertNotIn("private", json.dumps(sanitized))
 
@@ -181,7 +182,73 @@ class EvidenceTests(unittest.TestCase):
         }}] * 2, [])
         self.assertEqual(result["acceptance"], "BLOCKED")
         self.assertTrue(result["resource_window_valid"])
-        self.assertIn("end_to_end_latency", result["missing_acceptance_evidence"])
+        self.assertIn("end_to_end_latency", result["optional_unmeasured_physical_metrics"])
+        self.assertNotIn("end_to_end_latency", result["missing_acceptance_evidence"])
+        self.assertNotIn("input_application_rtt_and_input_to_photon",
+                         result["missing_acceptance_evidence"])
+        self.assertEqual(result["measurement_scope"], "software_only")
+
+    def test_resource_summary_keeps_generations_separate_and_reports_memory(self):
+        rows = [
+            {"host_processes": [
+                {"pid": 10, "start_ticks": 1, "cpu_percent_one_core": None},
+                {"pid": 20, "start_ticks": 2, "cpu_percent_one_core": 4.0},
+            ], "tablet": {"cpu_percent_one_core": None},
+             "tablet_memory": {"pss_kib": 50, "rss_kib": 100, "swap_pss_kib": 5}},
+            {"host_processes": [
+                {"pid": 10, "start_ticks": 1, "cpu_percent_one_core": 10.0},
+                {"pid": 20, "start_ticks": 3, "cpu_percent_one_core": 8.0},
+            ], "tablet": {"cpu_percent_one_core": 20.0}},
+            {"host_processes": [
+                {"pid": 10, "start_ticks": 1, "cpu_percent_one_core": 12.0},
+            ], "tablet": {"cpu_percent_one_core": 30.0},
+             "tablet_memory": {"pss_kib": 60, "rss_kib": 110, "swap_pss_kib": 6}},
+        ]
+        summary = collect.resource_summary(rows)
+        self.assertEqual(summary["tablet_cpu"]["mean"], 25.0)
+        self.assertEqual(summary["tablet_cpu"]["samples"], 2)
+        self.assertEqual(summary["tablet_memory"]["pss_kib"]["first"], 50)
+        self.assertEqual(summary["tablet_memory"]["pss_kib"]["last"], 60)
+        self.assertEqual(summary["host_process_cpu"]["10:1"]["mean"], 11.0)
+        self.assertEqual(set(summary["host_process_cpu"]), {"10:1", "20:2", "20:3"})
+
+    def test_missing_cpu_or_memory_is_reported_as_unknown_not_zero(self):
+        summary = collect.resource_summary([{"tablet": {}, "host_processes": []}])
+        self.assertIsNone(summary["tablet_cpu"])
+        self.assertIsNone(summary["tablet_memory"]["pss_kib"])
+        self.assertEqual(summary["host_process_cpu"], {})
+
+    def test_decoder_stats_are_sampled_proxies_not_summed_frame_counts(self):
+        raw = {"clientVideoStats": {
+            "intervalMs": 250, "avgDecodeMs": 20.0, "queuedFrames": 3,
+            "framesReceived": 15, "framesRendered": 15, "token": "private",
+        }}
+        safe = collect.safe_status(raw)
+        self.assertEqual(safe, {"clientVideoStats": {
+            "intervalMs": 250, "avgDecodeMs": 20.0, "queuedFrames": 3,
+        }})
+        summary = collect.resource_summary([{"status": safe}] * 2)
+        self.assertEqual(summary["sampled_decoder_proxies"]["avgDecodeMs"]["mean"], 20.0)
+        self.assertNotIn("framesReceived", json.dumps(summary))
+        self.assertNotIn("framesRendered", json.dumps(summary))
+        status = {"aoa": {"state": "linked"}, "video": {"streaming": True}}
+        samples = [{"status": dict(status, clientVideoStats={"avgDecodeMs": value})}
+                   for value in (10, 20)]
+        self.assertTrue(collect.assessment(samples, [])["resource_window_valid"])
+        assessment = collect.assessment(samples, [])
+        self.assertIn("software_decode_proxy_coverage",
+                      assessment["missing_acceptance_evidence"])
+        self.assertEqual(assessment["decode_proxy_observation"]["samples_with_decode_value"], 2)
+        self.assertEqual(assessment["decode_proxy_observation"]["status_samples"], 2)
+        sparse = collect.assessment([samples[0], {"status": status}], ["invalid window"])
+        self.assertIn("software_decode_proxy_coverage", sparse["missing_acceptance_evidence"])
+        self.assertEqual(sparse["decode_proxy_observation"]["samples_with_decode_value"], 1)
+
+    def test_invalid_decoder_numbers_are_not_recorded_as_metrics(self):
+        self.assertEqual(collect.safe_status({"clientVideoStats": {
+            "intervalMs": -1, "avgDecodeMs": "private", "avgPresentMs": True,
+            "queuedFrames": float("inf"),
+        }}), {"clientVideoStats": {}})
 
     def test_restart_or_command_error_invalidates_window(self):
         samples = [{"status": {"aoa": {"state": "linked"},

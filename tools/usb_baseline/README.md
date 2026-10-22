@@ -2,10 +2,12 @@
 
 **Scope revision (2026-10-22):** the owner removed camera measurements and
 required physical interaction from the implementation gate. Those optional
-metrics remain unmeasured. This initial collector still always emits
-`acceptance: BLOCKED`; it has not yet been extended into the revised
-software-only baseline assessment. Its output must not be relabeled as
-PASS, nor should its historical missing-camera list be used to demand
+metrics remain unmeasured. Schema version 2 separates
+`optional_unmeasured_physical_metrics` from required software evidence
+and adds descriptive resource summaries. The collector still emits
+`acceptance: BLOCKED`: resource acquisition alone is not a validated
+software non-regression comparison. Its output must not be relabeled as
+PASS, nor should historical missing-camera lists be used to demand
 equipment the owner has explicitly waived. Repeatable software checks,
 stable sessions and artifact provenance remain required.
 
@@ -16,10 +18,10 @@ transport, change settings, restart sessions, inject input or capture screen
 contents. It needs Python 3.9+, Go (for existing binary build metadata),
 ADB debugging access and a running AOA session. No Python packages are needed.
 
-**It is not the complete USB acceptance benchmark.** Optical latency, unique
-presented FPS/drops, input RTT/input-to-photon, calibrated power, controlled
-workloads, replicated comparisons and observation-overhead controls remain
-separate requirements. A successful resource observation always reports
+**It is not the complete software USB acceptance benchmark.** Automated
+frame/input/reconnect checks, a validated power proxy, controlled workloads,
+replicated comparisons and observation-overhead controls remain separate
+requirements. Optical/physical checks are optional. A resource observation reports
 `acceptance: BLOCKED`; it cannot authorize product changes.
 
 ## Run
@@ -59,7 +61,11 @@ Outputs:
   installed APK hashes, tablet model/API, timing settings and units.
 - `samples.jsonl`: flushed interval evidence, process generations, selected
   status, low-cadence memory and raw battery readings, explicit errors.
-- `summary.json`: observation validity and missing acceptance evidence.
+- `summary.json`: software-only scope, observation validity, required missing
+  evidence, optional unmeasured physical metrics, and resource distributions.
+  CPU summaries omit unknown first samples and separate PID generations.
+  Decode snapshot presence is reported separately from still-required
+  complete report coverage; observing a value does not satisfy that gate.
 - `failure.json`: explicit acquisition/interruption failure when collection
   cannot finish; partial files remain for diagnosis.
 
@@ -72,8 +78,11 @@ than 1.5 sampling intervals, or missing beginning/end coverage beyond that
 tolerance, invalidate the resource window. Read the summary even when
 files were produced.
 
-The latest video stats are deliberately excluded: they count NALs/codec
-outputs and cannot be summed into unique presented FPS. Battery readings
+Only numeric sampled decode delay, presentation-scheduling slack and pending
+queue depth are included from the latest stats. These snapshots can be stale
+or miss reports; their summaries describe sampled values, not continuous
+tails. Frame counts are excluded and never summed into unique FPS. Software
+decode delay/slack do not establish photon latency. Battery readings
 are vendor values, often cached and collected while USB charging; they
 are not application watts. `dumpsys meminfo` can disturb the app; compare
 against profiler-off controls before drawing performance conclusions.

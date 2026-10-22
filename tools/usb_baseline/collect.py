@@ -11,6 +11,7 @@ import math
 import os
 from pathlib import Path
 import re
+import statistics
 import subprocess
 import sys
 import time
@@ -69,6 +70,7 @@ def safe_status(raw):
         "metrics": ("inputConnections", "inputRestarts", "videoConnections",
                     "videoRestarts", "captureRestarts"),
         "featureFlags": ("wifi",),
+        "clientVideoStats": ("intervalMs", "avgDecodeMs", "avgPresentMs", "queuedFrames"),
     }
     result = {k: raw[k] for k in ("version", "aoaEnabled", "adbTunnelEnabled")
               if k in raw and isinstance(raw[k], (str, bool))}
@@ -79,6 +81,9 @@ def safe_status(raw):
                                and isinstance(value[k], (str, int, float, bool))
                                and not (isinstance(value[k], float)
                                         and not math.isfinite(value[k]))}
+            if section == "clientVideoStats":
+                result[section] = {key: number for key, number in result[section].items()
+                                   if type(number) in (int, float) and number >= 0}
     return result
 
 
@@ -90,7 +95,9 @@ def assessment(samples, errors, *, duration=None, interval=None):
     if any(s.get("aoa", {}).get("state") != "linked"
            or s.get("video", {}).get("streaming") is not True for s in statuses):
         issues.append("AOA streaming not confirmed throughout")
-    if statuses and any(s != statuses[0] for s in statuses[1:]):
+    invariants = [{key: value for key, value in status.items()
+                   if key != "clientVideoStats"} for status in statuses]
+    if invariants and any(s != invariants[0] for s in invariants[1:]):
         issues.append("session counters, settings or transport changed")
     if duration is not None and interval is not None:
         stamps = [s.get("elapsed_seconds") for s in samples]
@@ -103,16 +110,68 @@ def assessment(samples, errors, *, duration=None, interval=None):
             issues.append("sampling coverage gap")
     return {
         "acceptance": "BLOCKED",
+        "measurement_scope": "software_only",
         "resource_window_valid": not issues,
         "resource_window_issues": sorted(set(issues)),
+        "decode_proxy_observation": {
+            "samples_with_decode_value": sum(
+                "avgDecodeMs" in status.get("clientVideoStats", {}) for status in statuses),
+            "status_samples": len(statuses),
+            "interpretation": "Observed snapshots, not validated complete report coverage.",
+        },
+        "optional_unmeasured_physical_metrics": [
+            "end_to_end_latency", "unique_optically_presented_fps_and_drop_rate",
+            "physical_input_to_photon_and_pen_fidelity",
+        ],
         "missing_acceptance_evidence": [
-            "end_to_end_latency", "unique_presented_fps_and_drop_rate",
-            "input_application_rtt_and_input_to_photon", "calibrated_power_proxy",
+            "software_decode_proxy_coverage",
+            "software_frame_delivery_fps_and_drop_proxies",
+            "automated_input_timing_and_reconnect_checks",
+            "validated_software_power_proxy",
             "controlled_workload_and_matched_thermal_conditions",
             "exact_baseline_source_provenance", "replicated_matched_trials",
             "approved_statistical_sensitivity", "profiler_off_controls",
             "all_platform_baselines",
         ],
+    }
+
+
+def resource_summary(rows):
+    def describe(values):
+        if not values:
+            return None
+        return {"samples": len(values), "mean": statistics.mean(values),
+                "median": statistics.median(values), "min": min(values), "max": max(values),
+                "first": values[0], "last": values[-1]}
+
+    host_cpu = {}
+    tablet_cpu = []
+    decoder = {key: [] for key in ("avgDecodeMs", "avgPresentMs", "queuedFrames")}
+    memory = {key: [] for key in ("pss_kib", "rss_kib", "swap_pss_kib")}
+    for row in rows:
+        for process in row.get("host_processes", []):
+            value = process.get("cpu_percent_one_core")
+            if value is not None:
+                key = f"{process['pid']}:{process['start_ticks']}"
+                host_cpu.setdefault(key, []).append(value)
+        value = row.get("tablet", {}).get("cpu_percent_one_core")
+        if value is not None:
+            tablet_cpu.append(value)
+        for key, values in memory.items():
+            value = row.get("tablet_memory", {}).get(key)
+            if value is not None:
+                values.append(value)
+        for key, values in decoder.items():
+            value = row.get("status", {}).get("clientVideoStats", {}).get(key)
+            if value is not None:
+                values.append(value)
+    return {
+        "cpu_units": "percent of one logical core; intervals are correlated, not independent trials",
+        "host_process_cpu": {key: describe(values) for key, values in host_cpu.items()},
+        "tablet_cpu": describe(tablet_cpu),
+        "tablet_memory": {key: describe(values) for key, values in memory.items()},
+        "sampled_decoder_proxies": {key: describe(values) for key, values in decoder.items()},
+        "interpretation": "Descriptive resource values only, not a non-regression verdict.",
     }
 
 
@@ -260,7 +319,7 @@ def collect(args, output):
         raise ValueError("invalid tablet clock ticks")
     metadata = identity(args.host_pid, adb)
     metadata.update({
-        "schema_version": 1, "started_utc": datetime.now(timezone.utc).isoformat(),
+        "schema_version": 2, "started_utc": datetime.now(timezone.utc).isoformat(),
         "duration_seconds": args.duration, "warmup_seconds": args.warmup,
         "interval_seconds": args.interval, "detail_interval_seconds": args.detail_interval,
         "tablet_clk_tck": tablet_hz,
@@ -328,6 +387,8 @@ def collect(args, output):
             if due < time.monotonic():
                 due = time.monotonic() + args.interval
     summary = assessment(statuses, errors, duration=args.duration, interval=args.interval)
+    with (output / "samples.jsonl").open() as recorded:
+        summary["resources"] = resource_summary(json.loads(line) for line in recorded)
     summary.update({"sample_count": count, "error_count": len(errors),
                     "elapsed_seconds": time.monotonic() - started,
                     "interpretation": "Uncontrolled passive resource observation, not acceptance."})
