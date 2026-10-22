@@ -1,0 +1,328 @@
+READ-ONLY HOST OBSERVATION RETRY, NOT AN ACCEPTANCE BASELINE
+2026-10-22T14:13:10Z
+
+Current direct children
+    PID COMMAND
+  16629 xdg-open
+  34840 ffmpeg
+
+Status before
+{"activeClient":{"platform":"android","type":"tablet","version":"0.2.0","nativeWidth":1920,"nativeHeight":1200,"refreshRates":[60],"recommendedWidth":1280,"recommendedHeight":800,"recommendedReason":"limited memory (2.4 GB RAM)","prefWidth":1200,"prefHeight":800},"activeInputDevice":"samsung SM-X200","adb":{"ready":false,"availableSerials":null,"targetSerials":null},"adbTunnelEnabled":false,"aoa":{"state":"linked"},"aoaEnabled":true,"autostart":true,"autostartImplementation":"Linux desktop session: XDG autostart","clientVideoStats":{"type":"stats","intervalMs":250,"framesReceived":15,"framesRendered":16,"avgDecodeMs":26.1836875,"queuedFrames":0,"renderMode":"latency","appForeground":true},"featureFlags":{"wifi":false},"hostOS":"linux","inputLocked":false,"metrics":{"adbRetryAttempts":0,"adbRecoveries":0,"inputConnections":1,"inputRestarts":0,"videoConnections":4,"videoRestarts":3,"captureRestarts":6},"setup":{"generatedAt":"2026-10-22T14:13:10Z","allReady":true,"items":[{"key":"aoa-ready","label":"USB accessory link","ok":true,"detail":"Tablet linked over USB"},{"key":"ffmpeg-ready","label":"Video encoder available","ok":true,"detail":"Ready","action":"Set a valid ffmpeg path or install ffmpeg.","command":"sudo apt install ffmpeg"},{"key":"device-connected","label":"Client connected and authorized","ok":true,"detail":"samsung SM-X200","action":"Open DrawSplay on the client device and keep the app in foreground."},{"key":"stream-live","label":"Desktop stream active","ok":true,"detail":"h264_vaapi","action":"If this stays idle, lower resolution/FPS or reconnect the session."},{"key":"linux-display-mode","label":"Display mode","ok":true,"detail":"Extended desktop"},{"key":"linux-uinput","label":"uinput injection access","ok":true,"detail":"Ready","action":"Create /etc/udev/rules.d/99-drawsplay-uinput.rules with: KERNEL==\"uinput\", MODE=\"0660\", GROUP=\"input\"; add user to input group; reload udev; then reconnect."},{"key":"linux-x11-vkms","label":"X11 virtual display (vkms)","ok":true,"detail":"Ready","action":"The X server reconfigures displays when vkms loads; save your work first. After loading it, click Run setup repair checks to restart the stream onto the extended desktop. To load it automatically at boot, configure the module and its options.","command":"sudo modprobe vkms create_default_dev=1"}]},"version":"dev-76837e1","video":{"streaming":true,"encoder":"h264_vaapi","bitrate":"11111k","displayMode":"extend","captureKind":"x11grab","display":"X11 extended display Virtual-1-1 (1200x800 at +1920+0)"},"warnings":[]}
+
+CPU samples; encoder PID 34840 verified before recording; first sample discarded
+top - 10:13:10 up 38 min,  1 user,  load average: 2.43, 3.61, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  8.5 us,  2.4 sy,  0.0 ni, 86.6 id,  2.4 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  31181.0 total,  19523.9 free,   8619.1 used,   3985.5 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22561.9 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  10157 solfen    20   0 2347052  20968  12316 S   9.1   0.1   2:02.36 drawspl+
+  34840 solfen    20   0  781168 104572  67052 S   9.1   0.3   0:22.49 ffmpeg
+
+top - 10:13:12 up 38 min,  1 user,  load average: 2.40, 3.59, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  7.2 us,  1.8 sy,  0.0 ni, 89.1 id,  1.6 wa,  0.0 hi,  0.2 si,  0.0 st 
+MiB Mem :  31181.0 total,  19523.9 free,   8619.1 used,   3985.5 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22561.9 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  10.5   0.3   0:22.70 ffmpeg
+  10157 solfen    20   0 2347052  20968  12316 S   5.0   0.1   2:02.46 drawspl+
+
+top - 10:13:14 up 38 min,  1 user,  load average: 2.40, 3.59, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  7.3 us,  1.4 sy,  0.0 ni, 89.5 id,  1.6 wa,  0.0 hi,  0.2 si,  0.0 st 
+MiB Mem :  31181.0 total,  19500.3 free,   8642.6 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22538.4 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  10.5   0.3   0:22.91 ffmpeg
+  10157 solfen    20   0 2347052  21116  12316 S   4.5   0.1   2:02.55 drawspl+
+
+top - 10:13:16 up 38 min,  1 user,  load average: 2.40, 3.59, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.7 us,  1.6 sy,  0.0 ni, 89.8 id,  1.7 wa,  0.0 hi,  0.2 si,  0.0 st 
+MiB Mem :  31181.0 total,  19500.3 free,   8642.6 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22538.4 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  11.0   0.3   0:23.13 ffmpeg
+  10157 solfen    20   0 2347052  21116  12316 S   4.5   0.1   2:02.64 drawspl+
+
+top - 10:13:18 up 38 min,  1 user,  load average: 2.29, 3.54, 2.82
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  8.6 us,  1.8 sy,  0.0 ni, 87.8 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19516.6 free,   8626.4 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22554.7 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  11.5   0.3   0:23.36 ffmpeg
+  10157 solfen    20   0 2347052  21116  12316 S   5.0   0.1   2:02.74 drawspl+
+
+top - 10:13:20 up 38 min,  1 user,  load average: 2.29, 3.54, 2.82
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.9 us,  1.7 sy,  0.0 ni, 89.7 id,  1.6 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19516.6 free,   8626.4 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22554.7 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  10.4   0.3   0:23.57 ffmpeg
+  10157 solfen    20   0 2347052  21160  12316 S   4.5   0.1   2:02.83 drawspl+
+
+top - 10:13:22 up 38 min,  1 user,  load average: 2.34, 3.53, 2.82
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.2 us,  1.5 sy,  0.0 ni, 90.5 id,  1.7 wa,  0.0 hi,  0.2 si,  0.0 st 
+MiB Mem :  31181.0 total,  19517.6 free,   8625.4 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22555.7 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  11.0   0.3   0:23.79 ffmpeg
+  10157 solfen    20   0 2347052  21188  12316 S   4.5   0.1   2:02.92 drawspl+
+
+top - 10:13:24 up 38 min,  1 user,  load average: 2.34, 3.53, 2.82
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  7.0 us,  1.3 sy,  0.0 ni, 89.9 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19517.6 free,   8625.4 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22555.7 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  10.5   0.3   0:24.00 ffmpeg
+  10157 solfen    20   0 2347052  21192  12316 S   4.5   0.1   2:03.01 drawspl+
+
+top - 10:13:26 up 38 min,  1 user,  load average: 2.34, 3.53, 2.82
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.2 us,  1.6 sy,  0.0 ni, 90.3 id,  1.7 wa,  0.0 hi,  0.2 si,  0.0 st 
+MiB Mem :  31181.0 total,  19516.6 free,   8626.3 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22554.7 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  10.5   0.3   0:24.21 ffmpeg
+  10157 solfen    20   0 2347052  21192  12316 S   4.0   0.1   2:03.09 drawspl+
+
+top - 10:13:28 up 38 min,  1 user,  load average: 2.32, 3.51, 2.81
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  7.0 us,  1.5 sy,  0.0 ni, 89.8 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19516.6 free,   8626.3 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22554.7 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  10.5   0.3   0:24.42 ffmpeg
+  10157 solfen    20   0 2347052  21228  12316 S   5.0   0.1   2:03.19 drawspl+
+
+top - 10:13:30 up 38 min,  1 user,  load average: 2.32, 3.51, 2.81
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.3 us,  1.5 sy,  0.0 ni, 90.4 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19514.8 free,   8628.1 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22552.9 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  10.0   0.3   0:24.62 ffmpeg
+  10157 solfen    20   0 2347052  21344  12316 S   4.5   0.1   2:03.28 drawspl+
+
+top - 10:13:32 up 38 min,  1 user,  load average: 2.77, 3.58, 2.84
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.8 us,  1.6 sy,  0.0 ni, 89.8 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19514.8 free,   8628.1 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22552.9 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  10.5   0.3   0:24.83 ffmpeg
+  10157 solfen    20   0 2347052  21384  12316 S   4.5   0.1   2:03.37 drawspl+
+
+top - 10:13:34 up 38 min,  1 user,  load average: 2.77, 3.58, 2.84
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.9 us,  1.5 sy,  0.0 ni, 89.8 id,  1.8 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19515.5 free,   8627.3 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22553.7 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  11.0   0.3   0:25.05 ffmpeg
+  10157 solfen    20   0 2347052  21384  12316 S   4.5   0.1   2:03.46 drawspl+
+
+top - 10:13:36 up 38 min,  1 user,  load average: 2.77, 3.58, 2.84
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.1 us,  1.4 sy,  0.0 ni, 90.7 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19515.5 free,   8627.3 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22553.7 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  10.0   0.3   0:25.25 ffmpeg
+  10157 solfen    20   0 2347052  21384  12316 S   4.5   0.1   2:03.55 drawspl+
+
+top - 10:13:38 up 38 min,  1 user,  load average: 2.63, 3.54, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.7 us,  1.6 sy,  0.0 ni, 90.0 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19514.3 free,   8628.6 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22552.5 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104576  67052 S  10.4   0.3   0:25.46 ffmpeg
+  10157 solfen    20   0 2347052  21040  12316 S   4.5   0.1   2:03.64 drawspl+
+
+top - 10:13:40 up 38 min,  1 user,  load average: 2.63, 3.54, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  5.9 us,  1.4 sy,  0.0 ni, 90.9 id,  1.6 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19514.3 free,   8628.6 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22552.5 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104580  67052 S  10.0   0.3   0:25.66 ffmpeg
+  10157 solfen    20   0 2347052  21044  12316 S   4.5   0.1   2:03.73 drawspl+
+
+top - 10:13:42 up 38 min,  1 user,  load average: 2.58, 3.51, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.9 us,  1.4 sy,  0.0 ni, 89.9 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19516.7 free,   8626.2 used,   3985.7 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22554.9 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104580  67052 S  10.0   0.3   0:25.86 ffmpeg
+  10157 solfen    20   0 2347052  21052  12316 S   4.5   0.1   2:03.82 drawspl+
+
+top - 10:13:44 up 38 min,  1 user,  load average: 2.58, 3.51, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.2 us,  1.3 sy,  0.0 ni, 90.8 id,  1.6 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19516.7 free,   8626.2 used,   3985.7 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22554.9 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  11.0   0.3   0:26.08 ffmpeg
+  10157 solfen    20   0 2347052  21052  12316 S   4.5   0.1   2:03.91 drawspl+
+
+top - 10:13:46 up 38 min,  1 user,  load average: 2.58, 3.51, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.8 us,  1.5 sy,  0.0 ni, 89.8 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19518.0 free,   8624.8 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22556.2 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  10.5   0.3   0:26.29 ffmpeg
+  10157 solfen    20   0 2347052  21052  12316 S   4.5   0.1   2:04.00 drawspl+
+
+top - 10:13:48 up 38 min,  1 user,  load average: 2.61, 3.51, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.1 us,  1.4 sy,  0.0 ni, 90.7 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19518.0 free,   8624.8 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22556.2 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  10.4   0.3   0:26.50 ffmpeg
+  10157 solfen    20   0 2347052  21084  12316 S   4.5   0.1   2:04.09 drawspl+
+
+top - 10:13:50 up 38 min,  1 user,  load average: 2.61, 3.51, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.9 us,  1.7 sy,  0.0 ni, 89.6 id,  1.6 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19519.1 free,   8623.8 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22557.3 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  10.0   0.3   0:26.70 ffmpeg
+  10157 solfen    20   0 2347052  21084  12316 S   4.0   0.1   2:04.17 drawspl+
+
+top - 10:13:52 up 39 min,  1 user,  load average: 2.72, 3.51, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.9 us,  1.3 sy,  0.0 ni, 89.9 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19519.1 free,   8623.8 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22557.3 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  10.5   0.3   0:26.91 ffmpeg
+  10157 solfen    20   0 2347052  21204  12316 S   5.0   0.1   2:04.27 drawspl+
+
+top - 10:13:54 up 39 min,  1 user,  load average: 2.72, 3.51, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.2 us,  1.4 sy,  0.0 ni, 90.5 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19525.9 free,   8616.9 used,   3985.7 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22564.1 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  10.0   0.3   0:27.11 ffmpeg
+  10157 solfen    20   0 2347052  21172  12316 S   4.5   0.1   2:04.36 drawspl+
+
+top - 10:13:56 up 39 min,  1 user,  load average: 2.72, 3.51, 2.83
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  7.1 us,  1.6 sy,  0.0 ni, 89.6 id,  1.6 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19525.9 free,   8616.9 used,   3985.7 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22564.1 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  11.0   0.3   0:27.33 ffmpeg
+  10157 solfen    20   0 2347052  21180  12316 S   4.5   0.1   2:04.45 drawspl+
+
+top - 10:13:58 up 39 min,  1 user,  load average: 2.59, 3.47, 2.82
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  7.0 us,  1.8 sy,  0.0 ni, 89.4 id,  1.6 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19521.1 free,   8621.6 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22559.4 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  11.9   0.3   0:27.57 ffmpeg
+  10157 solfen    20   0 2347052  21256  12316 S   5.0   0.1   2:04.55 drawspl+
+
+top - 10:14:00 up 39 min,  1 user,  load average: 2.59, 3.47, 2.82
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.7 us,  1.3 sy,  0.0 ni, 90.2 id,  1.6 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19521.1 free,   8621.6 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22559.4 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  10.5   0.3   0:27.78 ffmpeg
+  10157 solfen    20   0 2347052  21256  12316 S   4.5   0.1   2:04.64 drawspl+
+
+top - 10:14:02 up 39 min,  1 user,  load average: 2.54, 3.45, 2.82
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.1 us,  1.6 sy,  0.0 ni, 90.6 id,  1.6 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19521.1 free,   8621.7 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22559.4 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  10.5   0.3   0:27.99 ffmpeg
+  10157 solfen    20   0 2347052  21292  12316 S   4.5   0.1   2:04.73 drawspl+
+
+top - 10:14:04 up 39 min,  1 user,  load average: 2.54, 3.45, 2.82
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  7.0 us,  1.9 sy,  0.0 ni, 89.2 id,  1.8 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19521.1 free,   8621.7 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22559.4 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  11.0   0.3   0:28.21 ffmpeg
+  10157 solfen    20   0 2347052  21384  12316 S   4.5   0.1   2:04.82 drawspl+
+
+top - 10:14:06 up 39 min,  1 user,  load average: 2.54, 3.45, 2.82
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  7.1 us,  1.4 sy,  0.0 ni, 89.7 id,  1.8 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19518.0 free,   8624.8 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22556.3 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  10.0   0.3   0:28.41 ffmpeg
+  10157 solfen    20   0 2347052  21396  12316 S   4.5   0.1   2:04.91 drawspl+
+
+top - 10:14:08 up 39 min,  1 user,  load average: 2.50, 3.42, 2.81
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.2 us,  1.6 sy,  0.0 ni, 90.3 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19518.0 free,   8624.8 used,   3985.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22556.3 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  10.9   0.3   0:28.63 ffmpeg
+  10157 solfen    20   0 2347052  21396  12316 S   4.5   0.1   2:05.00 drawspl+
+
+top - 10:14:10 up 39 min,  1 user,  load average: 2.50, 3.42, 2.81
+Tasks:   2 total,   0 running,   2 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  7.6 us,  1.5 sy,  0.0 ni, 89.2 id,  1.7 wa,  0.0 hi,  0.1 si,  0.0 st 
+MiB Mem :  31181.0 total,  19520.0 free,   8622.8 used,   3985.7 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  22558.2 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  34840 solfen    20   0  781168 104584  67052 S  11.5   0.3   0:28.86 ffmpeg
+  10157 solfen    20   0 2347052  21404  12316 S   5.0   0.1   2:05.10 drawspl+
+
+Status after
+{"activeClient":{"platform":"android","type":"tablet","version":"0.2.0","nativeWidth":1920,"nativeHeight":1200,"refreshRates":[60],"recommendedWidth":1280,"recommendedHeight":800,"recommendedReason":"limited memory (2.4 GB RAM)","prefWidth":1200,"prefHeight":800},"activeInputDevice":"samsung SM-X200","adb":{"ready":false,"availableSerials":null,"targetSerials":null},"adbTunnelEnabled":false,"aoa":{"state":"linked"},"aoaEnabled":true,"autostart":true,"autostartImplementation":"Linux desktop session: XDG autostart","clientVideoStats":{"type":"stats","intervalMs":250,"framesReceived":15,"framesRendered":16,"avgDecodeMs":26.211625,"queuedFrames":0,"renderMode":"latency","appForeground":true},"featureFlags":{"wifi":false},"hostOS":"linux","inputLocked":false,"metrics":{"adbRetryAttempts":0,"adbRecoveries":0,"inputConnections":1,"inputRestarts":0,"videoConnections":4,"videoRestarts":3,"captureRestarts":6},"setup":{"generatedAt":"2026-10-22T14:14:10Z","allReady":true,"items":[{"key":"aoa-ready","label":"USB accessory link","ok":true,"detail":"Tablet linked over USB"},{"key":"ffmpeg-ready","label":"Video encoder available","ok":true,"detail":"Ready","action":"Set a valid ffmpeg path or install ffmpeg.","command":"sudo apt install ffmpeg"},{"key":"device-connected","label":"Client connected and authorized","ok":true,"detail":"samsung SM-X200","action":"Open DrawSplay on the client device and keep the app in foreground."},{"key":"stream-live","label":"Desktop stream active","ok":true,"detail":"h264_vaapi","action":"If this stays idle, lower resolution/FPS or reconnect the session."},{"key":"linux-display-mode","label":"Display mode","ok":true,"detail":"Extended desktop"},{"key":"linux-uinput","label":"uinput injection access","ok":true,"detail":"Ready","action":"Create /etc/udev/rules.d/99-drawsplay-uinput.rules with: KERNEL==\"uinput\", MODE=\"0660\", GROUP=\"input\"; add user to input group; reload udev; then reconnect."},{"key":"linux-x11-vkms","label":"X11 virtual display (vkms)","ok":true,"detail":"Ready","action":"The X server reconfigures displays when vkms loads; save your work first. After loading it, click Run setup repair checks to restart the stream onto the extended desktop. To load it automatically at boot, configure the module and its options.","command":"sudo modprobe vkms create_default_dev=1"}]},"version":"dev-76837e1","video":{"streaming":true,"encoder":"h264_vaapi","bitrate":"11111k","displayMode":"extend","captureKind":"x11grab","display":"X11 extended display Virtual-1-1 (1200x800 at +1920+0)"},"warnings":[]}
+
+Current capture processes after
+  34840   10157 ffmpeg          ffmpeg -hide_banner -loglevel warning -f x11grab -framerate 60 -video_size 1200x800 -i :0+1920,0 -c:v h264_vaapi -vaapi_device /dev/dri/renderD128 -vf hwupload,scale_vaapi=format=nv12:out_range=tv -async_depth 1 -level 5.2 -rc_mode VBR -bf 0 -g 120 -b:v 11111k -maxrate 11111k -bufsize 1388k -flush_packets 1 -f h264 pipe:1
+2026-10-22T14:14:10Z

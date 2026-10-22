@@ -1,0 +1,512 @@
+READ-ONLY USB OBSERVATION, NOT AN ACCEPTANCE BASELINE
+2026-10-22T14:09:40Z
+
+Device capabilities
+SM-X200
+34
+T618
+arm64-v8a,armeabi-v7a,armeabi
+Features	: fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm lrcpc dcpop asimddp
+
+Package version
+    versionCode=2 minSdk=26 targetSdk=36
+    versionName=0.2.0
+    lastUpdateTime=2026-10-21 01:08:25
+
+Memory before
+Applications Memory Usage (in Kilobytes):
+Uptime: 62777588 Realtime: 120461378
+
+** MEMINFO in pid 14400 [com.drawsplay.tablet] **
+                   Pss  Private  Private  SwapPss      Rss     Heap     Heap     Heap
+                 Total    Dirty    Clean    Dirty    Total     Size    Alloc     Free
+                ------   ------   ------   ------   ------   ------   ------   ------
+  Native Heap     5335     5160      156     4573     5756    34112    32649     1462
+  Dalvik Heap     5473     2836       32       68     8836     8557     4279     4278
+ Dalvik Other     2572     2060       32      158     3296                           
+        Stack     1228     1204       24      384     1236                           
+       Ashmem       49        4        0        0      132                           
+    Other dev       15        0       12        0      352                           
+     .so mmap     4150      336     1156      162    26976                           
+    .jar mmap     2716        0      352        0    31948                           
+    .apk mmap      423        0      248        0     1792                           
+    .dex mmap     1977     1708      256    10496     2612                           
+    .oat mmap       45        0        0        0     1132                           
+    .art mmap     5152     1996     1368     3367    16896                           
+   Other mmap        9        4        0        1      616                           
+    GL mtrack     4292     4292        0        0     4292                           
+      Unknown      337      196      136      373      400                           
+        TOTAL    53355    19796     3772    19582   106272    42669    36928     5740
+ 
+ App Summary
+                       Pss(KB)                        Rss(KB)
+                        ------                         ------
+           Java Heap:     6200                          25732
+         Native Heap:     5160                           5756
+                Code:     4056                          65364
+               Stack:     1204                           1236
+            Graphics:     4292                           4292
+       Private Other:     2656
+              System:    29787
+             Unknown:                                    3892
+ 
+           TOTAL PSS:    53355            TOTAL RSS:   106272       TOTAL SWAP PSS:    19582
+ 
+ Objects
+               Views:       16         ViewRootImpl:        1
+         AppContexts:        5           Activities:        1
+              Assets:       24        AssetManagers:        0
+       Local Binders:       14        Proxy Binders:       47
+       Parcel memory:       10         Parcel count:       39
+    Death Recipients:        0             WebViews:        0
+ 
+ SQL
+         MEMORY_USED:        0
+  PAGECACHE_OVERFLOW:        0          MALLOC_SIZE:        0
+ 
+
+Battery before
+Current Battery Service state:
+  AC powered: false
+  USB powered: true
+  Wireless powered: false
+  Dock powered: false
+  Max charging current: 0
+  Max charging voltage: 0
+  Charge counter: 1529775
+  status: 2
+  health: 2
+  present: true
+  level: 23
+  scale: 100
+  voltage: 3791
+  temperature: 274
+  technology: Li-ion
+  batteryMiscEvent: 0
+  batteryCurrentEvent: 0
+  mSecPlugTypeSummary: 2
+  LED Charging: true
+  LED Low Battery: true
+  current now: 217000
+  charge counter: 1529775
+  Adaptive Fast Charging Settings: true
+  Super Fast Charging Settings: false
+FEATURE_WIRELESS_FAST_CHARGER_CONTROL: false
+  mWasUsedWirelessFastChargerPreviously: false
+  mWirelessFastChargingSettingsEnable: true
+LLB CAL: 
+LLB MAN: 20230911
+LLB CURRENT: YEAR2026M10D21
+LLB DIFF: 162
+
+CPU samples (discard first)
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2456264K used,    78656K free,     2324K buffers
+ Swap:  4194300K total,   847684K used,  3346616K free,   958932K cached
+800%cpu  64%user   0%nice  86%sys 632%idle   0%iow  14%irq   4%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  78M  63M S 89.2   3.1  25:18.51 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2456528K used,    78392K free,     2324K buffers
+ Swap:  4194300K total,   847684K used,  3346616K free,   958932K cached
+800%cpu  75%user   3%nice  67%sys 643%idle   0%iow  12%irq   2%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  78M  63M S 85.5   3.1  25:18.76 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   1 running,   0 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2457380K used,    77540K free,     2324K buffers
+ Swap:  4194300K total,   847684K used,  3346616K free,   958932K cached
+800%cpu  74%user   3%nice  68%sys 642%idle   0%iow  12%irq   2%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  78M  63M R 87.5   3.1  25:20.47 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   1 running,   0 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2458124K used,    76796K free,     2324K buffers
+ Swap:  4194300K total,   847684K used,  3346616K free,   958932K cached
+800%cpu  74%user   2%nice  69%sys 642%idle   0%iow  12%irq   2%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  78M  63M R 87.0   3.1  25:22.22 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2457256K used,    77664K free,     2324K buffers
+ Swap:  4194300K total,   847684K used,  3346616K free,   958964K cached
+800%cpu  35%user   2%nice  41%sys 715%idle   0%iow   7%irq   1%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  78M  63M S 41.0   3.1  25:23.96 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2463160K used,    71760K free,     2324K buffers
+ Swap:  4194300K total,   850408K used,  3343892K free,   957828K cached
+800%cpu  72%user   2%nice  80%sys 637%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.0G  80M  63M S 50.0   3.2  25:24.78 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2457952K used,    76968K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956248K cached
+800%cpu  71%user   2%nice  78%sys 641%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  89M  63M S 52.0   3.5  25:25.78 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2454976K used,    79944K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956340K cached
+800%cpu  71%user   2%nice  76%sys 643%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  90M  64M S 52.0   3.6  25:26.82 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2455720K used,    79200K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956452K cached
+800%cpu  72%user   3%nice  73%sys 644%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  87M  64M S 52.0   3.5  25:27.86 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2456464K used,    78456K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956552K cached
+800%cpu  66%user   2%nice  71%sys 652%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  87M  64M S 52.0   3.5  25:28.90 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2455488K used,    79432K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956624K cached
+800%cpu  74%user   3%nice  69%sys 646%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  87M  64M S 52.0   3.5  25:29.94 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2455844K used,    79076K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956648K cached
+800%cpu  68%user   3%nice  71%sys 650%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  87M  64M S 51.5   3.5  25:30.98 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2456572K used,    78348K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956648K cached
+800%cpu  67%user   1%nice  70%sys 653%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  87M  64M S 52.0   3.5  25:32.01 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2457208K used,    77712K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956648K cached
+800%cpu  66%user   2%nice  71%sys 653%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  87M  64M S 52.0   3.5  25:33.05 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2458200K used,    76720K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956872K cached
+800%cpu  64%user   2%nice  72%sys 654%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  88M  64M S 53.0   3.5  25:34.09 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   1 running,   0 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2458836K used,    76084K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956872K cached
+800%cpu  65%user   3%nice  72%sys 653%idle   0%iow   6%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  88M  64M R 51.5   3.5  25:35.15 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2459300K used,    75620K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956872K cached
+800%cpu  65%user   2%nice  74%sys 651%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  88M  64M S 51.5   3.5  25:36.18 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   1 running,   0 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2456340K used,    78580K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956876K cached
+800%cpu  65%user   4%nice  71%sys 652%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  88M  64M R 54.0   3.5  25:37.21 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2456588K used,    78332K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956876K cached
+800%cpu  67%user   2%nice  77%sys 645%idle   1%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  84M  64M S 51.5   3.3  25:38.29 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2456944K used,    77976K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956876K cached
+800%cpu  67%user   3%nice  77%sys 645%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  84M  64M S 52.0   3.3  25:39.32 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2458076K used,    76844K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956876K cached
+800%cpu  64%user   3%nice  65%sys 661%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  84M  64M S 50.5   3.3  25:40.36 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2458448K used,    76472K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956876K cached
+800%cpu  68%user   2%nice  78%sys 644%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  85M  64M S 53.0   3.4  25:41.37 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2459316K used,    75604K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956876K cached
+800%cpu  67%user   3%nice  70%sys 652%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  85M  64M S 51.5   3.4  25:42.43 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2460308K used,    74612K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956976K cached
+800%cpu  67%user   2%nice  80%sys 643%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  85M  64M S 52.0   3.4  25:43.46 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2460572K used,    74348K free,     2312K buffers
+ Swap:  4194300K total,   854136K used,  3340164K free,   956984K cached
+800%cpu  66%user   1%nice  74%sys 650%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  85M  64M S 51.5   3.4  25:44.50 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2457236K used,    77684K free,     2256K buffers
+ Swap:  4194300K total,   854096K used,  3340204K free,   955208K cached
+800%cpu  65%user   3%nice  71%sys 652%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  85M  64M S 51.0   3.4  25:45.53 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2457964K used,    76956K free,     2256K buffers
+ Swap:  4194300K total,   854096K used,  3340204K free,   955208K cached
+800%cpu  65%user   1%nice  66%sys 660%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  85M  64M S 51.0   3.4  25:46.55 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2458244K used,    76676K free,     2256K buffers
+ Swap:  4194300K total,   854096K used,  3340204K free,   955208K cached
+800%cpu  69%user   3%nice  73%sys 646%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  86M  64M S 52.0   3.4  25:47.57 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2454524K used,    80396K free,     2256K buffers
+ Swap:  4194300K total,   854096K used,  3340204K free,   955208K cached
+800%cpu  65%user   3%nice  73%sys 652%idle   0%iow   6%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  85M  64M S 52.5   3.4  25:48.61 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2453144K used,    81776K free,     2256K buffers
+ Swap:  4194300K total,   854096K used,  3340204K free,   955208K cached
+800%cpu  63%user   2%nice  69%sys 658%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  90M  64M S 51.0   3.6  25:49.66 com.drawsplay.tablet
+
+
+
+Tasks: 1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+  Mem:  2534920K total,  2453764K used,    81156K free,     2256K buffers
+ Swap:  4194300K total,   854096K used,  3340204K free,   955208K cached
+800%cpu  67%user   2%nice  76%sys 646%idle   0%iow   7%irq   3%sirq   0%host
+  PID USER         PR  NI VIRT  RES  SHR S[%CPU] %MEM     TIME+ ARGS
+14400 u0_a235      10 -10 6.1G  90M  64M S 52.5   3.6  25:50.68 com.drawsplay.tablet
+
+Memory after
+Applications Memory Usage (in Kilobytes):
+Uptime: 62838161 Realtime: 120521951
+
+** MEMINFO in pid 14400 [com.drawsplay.tablet] **
+                   Pss  Private  Private  SwapPss      Rss     Heap     Heap     Heap
+                 Total    Dirty    Clean    Dirty    Total     Size    Alloc     Free
+                ------   ------   ------   ------   ------   ------   ------   ------
+  Native Heap     5443     5268      156     4565     5864    34188    32721     1466
+  Dalvik Heap     6089     3452       32       68     9452     8522     4261     4261
+ Dalvik Other     2564     2052       32      158     3288                           
+        Stack     1224     1200       24      384     1232                           
+       Ashmem      289        4        0        0      612                           
+    Other dev       15        0       12        0      352                           
+     .so mmap     4153      336     1156      162    27044                           
+    .jar mmap     2758        0      392        0    32032                           
+    .apk mmap      423        0      248        0     1792                           
+    .dex mmap     1985     1712      260    10488     2620                           
+    .oat mmap       50        0        0        0     1260                           
+    .art mmap     5165     2008     1368     3359    16908                           
+   Other mmap        9        4        0        1      616                           
+    GL mtrack     4292     4292        0        0     4292                           
+      Unknown      337      196      136      373      400                           
+        TOTAL    54354    20524     3816    19558   107764    42710    36982     5727
+ 
+ App Summary
+                       Pss(KB)                        Rss(KB)
+                        ------                         ------
+           Java Heap:     6828                          26360
+         Native Heap:     5268                           5864
+                Code:     4104                          65652
+               Stack:     1200                           1232
+            Graphics:     4292                           4292
+       Private Other:     2648
+              System:    30014
+             Unknown:                                    4364
+ 
+           TOTAL PSS:    54354            TOTAL RSS:   107764       TOTAL SWAP PSS:    19558
+ 
+ Objects
+               Views:       16         ViewRootImpl:        1
+         AppContexts:        5           Activities:        1
+              Assets:       24        AssetManagers:        0
+       Local Binders:       14        Proxy Binders:       47
+       Parcel memory:       10         Parcel count:       39
+    Death Recipients:        0             WebViews:        0
+ 
+ SQL
+         MEMORY_USED:        0
+  PAGECACHE_OVERFLOW:        0          MALLOC_SIZE:        0
+ 
+
+Battery after
+Current Battery Service state:
+  AC powered: false
+  USB powered: true
+  Wireless powered: false
+  Dock powered: false
+  Max charging current: 0
+  Max charging voltage: 0
+  Charge counter: 1529775
+  status: 2
+  health: 2
+  present: true
+  level: 23
+  scale: 100
+  voltage: 3791
+  temperature: 274
+  technology: Li-ion
+  batteryMiscEvent: 0
+  batteryCurrentEvent: 0
+  mSecPlugTypeSummary: 2
+  LED Charging: true
+  LED Low Battery: true
+  current now: 217000
+  charge counter: 1529775
+  Adaptive Fast Charging Settings: true
+  Super Fast Charging Settings: false
+FEATURE_WIRELESS_FAST_CHARGER_CONTROL: false
+  mWasUsedWirelessFastChargerPreviously: false
+  mWirelessFastChargingSettingsEnable: true
+LLB CAL: 
+LLB MAN: 20230911
+LLB CURRENT: YEAR2026M10D21
+LLB DIFF: 162
+
+Thermal status
+IsStatusOverride: false
+ThermalEventListeners:
+	callbacks: 2
+	killed: false
+	broadcasts count: -1
+ThermalStatusListeners:
+	callbacks: 4
+	killed: false
+	broadcasts count: -1
+Thermal Status: 0
+Cached temperatures:
+	Temperature{mValue=47.566, mType=-1, mName=soc-thmzone
+, mStatus=0}
+	Temperature{mValue=44.171, mType=-1, mName=ank5-thmzone
+, mStatus=0}
+	Temperature{mValue=45.706, mType=-1, mName=cputop-thmzone
+, mStatus=0}
+	Temperature{mValue=44.185, mType=-1, mName=ank4-thmzone
+, mStatus=0}
+	Temperature{mValue=44.678, mType=-1, mName=ank3-thmzone
+, mStatus=0}
+	Temperature{mValue=44.671, mType=-1, mName=ank2-thmzone
+, mStatus=0}
+	Temperature{mValue=47.31, mType=-1, mName=ank1-thmzone
+, mStatus=0}
+	Temperature{mValue=47.06, mType=-1, mName=ank0-thmzone
+, mStatus=0}
+	Temperature{mValue=34.988, mType=-1, mName=chg-thmzone
+, mStatus=0}
+	Temperature{mValue=45.199, mType=-1, mName=gpu-thmzone
+, mStatus=0}
+	Temperature{mValue=27.893, mType=-1, mName=usb-thmzone
+, mStatus=0}
+	Temperature{mValue=44.38, mType=-1, mName=gpuank2-thmzone
+, mStatus=0}
+	Temperature{mValue=47.566, mType=-1, mName=prometheus7-thmzone
+, mStatus=0}
+	Temperature{mValue=45.018, mType=-1, mName=prometheus6-tzone0
+, mStatus=0}
+	Temperature{mValue=46.542, mType=-1, mName=prometheus6-tzone1
+, mStatus=0}
+	Temperature{mValue=47.566, mType=-1, mName=cluster1-thmzone
+, mStatus=0}
+	Temperature{mValue=47.31, mType=-1, mName=cluster0-thmzone
+, mStatus=0}
+2026-10-22T14:10:41Z
