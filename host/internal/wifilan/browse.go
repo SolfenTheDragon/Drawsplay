@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"time"
 
 	"github.com/miekg/dns"
@@ -84,12 +85,22 @@ func Browse(ctx context.Context, interfaceName string, found func(Candidate), re
 	cache := newPacketCache()
 	buffer := make([]byte, 4097)
 	nextQuery := time.Time{}
+	checkInterface := func() error {
+		current, currentPrefixes, err := SelectInterface(iface.Name)
+		if err != nil {
+			return fmt.Errorf("selected LAN changed or disappeared; restart discovery: %w", err)
+		}
+		return validateInterfaceSnapshot(iface, prefixes, current, currentPrefixes)
+	}
 	for {
 		if err := browseCtx.Err(); err != nil {
 			return err
 		}
 		now := time.Now()
 		if !now.Before(nextQuery) {
+			if err := checkInterface(); err != nil {
+				return err
+			}
 			if _, err := packets.WriteTo(queryData, &ipv4.ControlMessage{IfIndex: iface.Index}, group); err != nil {
 				return fmt.Errorf("send tablet mDNS query on selected interface: %w", err)
 			}
@@ -115,6 +126,9 @@ func Browse(ctx context.Context, interfaceName string, found func(Candidate), re
 			rejected(fmt.Errorf("mDNS response did not originate on the selected link"))
 			continue
 		}
+		if err := checkInterface(); err != nil {
+			return err
+		}
 		address, ok := netip.AddrFromSlice(peer.IP)
 		if !ok || !onLinkIPv4(address.Unmap(), prefixes) {
 			rejected(fmt.Errorf("mDNS responder is not a peer on the selected IPv4 LAN"))
@@ -139,4 +153,20 @@ func minTime(a, b time.Time) time.Time {
 		return a
 	}
 	return b
+}
+
+func validateInterfaceSnapshot(before net.Interface, prefixes []netip.Prefix, after net.Interface, current []netip.Prefix) error {
+	changed := before.Index != after.Index || before.Name != after.Name || len(prefixes) != len(current)
+	if !changed {
+		for _, prefix := range prefixes {
+			if !slices.Contains(current, prefix) {
+				changed = true
+				break
+			}
+		}
+	}
+	if changed {
+		return errors.New("selected LAN interface generation or IPv4 addresses changed; restart discovery on the new LAN")
+	}
+	return nil
 }

@@ -67,7 +67,14 @@ public final class DiscoveryProbeActivity extends Activity {
         if (literal == null || !literal.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}")) {
             throw new IOException("Provide the tablet's numeric Wi-Fi IPv4 address");
         }
-        InetAddress address = InetAddress.getByName(literal);
+        String[] parts = literal.split("\\.");
+        byte[] bytes = new byte[4];
+        for (int index = 0; index < 4; index++) {
+            int octet = Integer.parseInt(parts[index]);
+            if (octet > 255) throw new IOException("Invalid IPv4 octet");
+            bytes[index] = (byte) octet;
+        }
+        InetAddress address = InetAddress.getByAddress(bytes);
         if (!(address instanceof Inet4Address) || address.isLoopbackAddress()
                 || address.isAnyLocalAddress() || address.isMulticastAddress()) {
             throw new IOException("Require a usable selected Wi-Fi IPv4 address");

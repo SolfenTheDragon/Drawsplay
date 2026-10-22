@@ -156,3 +156,30 @@ func FuzzTabletCandidate(f *testing.F) {
 		}
 	})
 }
+
+func TestDiscoveryRejectsChangedInterfaceGenerationOrPrefixes(t *testing.T) {
+	before := net.Interface{Name: "wifi-test", Index: 5}
+	original := []netip.Prefix{netip.MustParsePrefix("192.0.2.10/24")}
+	for _, after := range []struct {
+		iface net.Interface
+		addrs []netip.Prefix
+	}{
+		{before, []netip.Prefix{netip.MustParsePrefix("198.51.100.10/24")}},
+		{before, []netip.Prefix{netip.MustParsePrefix("192.0.2.10/25")}},
+		{net.Interface{Name: "wifi-test", Index: 6}, original},
+		{net.Interface{Name: "renamed-wifi", Index: 5}, original},
+		{before, nil},
+		{before, append(append([]netip.Prefix{}, original...), netip.MustParsePrefix("192.0.2.11/24"))},
+	} {
+		if err := validateInterfaceSnapshot(before, original, after.iface, after.addrs); err == nil {
+			t.Fatal("changed LAN snapshot accepted")
+		}
+	}
+	if err := validateInterfaceSnapshot(before, original, before, original); err != nil {
+		t.Fatalf("unchanged LAN rejected: %v", err)
+	}
+	second := netip.MustParsePrefix("192.0.2.11/24")
+	if err := validateInterfaceSnapshot(before, append([]netip.Prefix{second}, original...), before, append(append([]netip.Prefix{}, original...), second)); err != nil {
+		t.Fatalf("reordered addresses rejected: %v", err)
+	}
+}

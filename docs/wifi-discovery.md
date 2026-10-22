@@ -33,6 +33,10 @@ No capture, input injection or trust-store change occurs in this command.
 Names may use DNS escaping; they are display labels, never identity keys.
 Consumers must not treat a prior candidate as valid after a network change.
 Revalidate the selected interface and route before any future connection.
+The browser rechecks the selected interface generation and IPv4 prefix set
+before every query and before accepting a link-valid response. A changed
+address set or disappeared interface aborts with an explicit restart
+message rather than silently validating against the previous LAN.
 
 Duration is limited to 1–60 seconds; output keeps at most 64 unique
 candidates, and only the first five rejection details are logged. Exit 0
