@@ -1,0 +1,11 @@
+goos: linux
+goarch: amd64
+pkg: drawsplay/host
+cpu: Intel(R) Core(TM) i7-10610U CPU @ 1.80GHz
+BenchmarkUSBBaselineInputEcho-8   	   29024	      7939 ns/op	   4.66 MB/s	     270 B/op	      13 allocs/op
+BenchmarkUSBBaselineInputEcho-8   	   28266	      8267 ns/op	   4.48 MB/s	     269 B/op	      13 allocs/op
+BenchmarkUSBBaselineInputEcho-8   	   29137	      8048 ns/op	   4.60 MB/s	     269 B/op	      13 allocs/op
+BenchmarkUSBBaselineInputEcho-8   	   30668	      8068 ns/op	   4.59 MB/s	     269 B/op	      13 allocs/op
+BenchmarkUSBBaselineInputEcho-8   	   29230	      8002 ns/op	   4.62 MB/s	     269 B/op	      13 allocs/op
+PASS
+ok  	drawsplay/host	1.186s

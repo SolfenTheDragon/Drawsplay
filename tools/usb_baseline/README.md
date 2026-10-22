@@ -101,6 +101,18 @@ workloads, calibrated power and statistical equivalence comparison are
 
 ## Test
 
+Existing AOA framing, simulated disconnect cleanup and test-only software
+input echo measurements can also be reproduced without touching hardware:
+
+```sh
+cd host
+go test -race -run '^TestUSBBaseline' -count=3 .
+go test -run '^$' -bench '^BenchmarkUSBBaseline' -benchmem -benchtime=200ms -count=5 .
+```
+
+The echo traverses AOA and mux code over an in-memory pipe, not tablet/OS
+input injection. It is a software reference, never measured device RTT.
+
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
   -s tools/usb_baseline -p 'test_*.py' -v

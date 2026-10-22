@@ -91,6 +91,34 @@ is not useful bus throughput. Existing allocations are recorded, not
 optimized or falsely described as allocation-free. This reference is for
 future comparison with the exact same benchmark/toolchain/host settings.
 
+### Automated AOA input/reconnect checks
+
+Added executable software checks in the same test file:
+
+- 100 fresh AOA virtual input connections, each with a pending input read,
+  followed by link loss; every reader and link worker must terminate within
+  three seconds. Three race-detector repetitions completed (300 cycles).
+- Oversized AOA length rejection before payload read/allocation.
+- A test-only input echo over `net.Pipe` through the actual AOA link and
+  mux parser/writer, verifying response bytes and waiting for both workers
+  at teardown. No echo command or per-event acknowledgment was added to the
+  product protocol.
+
+Reproduce:
+
+```sh
+cd host
+go test -race -run '^TestUSBBaseline' -count=3 .
+go test -run '^$' -bench '^BenchmarkUSBBaselineInputEcho$' -benchmem -benchtime=200ms -count=5 .
+```
+
+Recorded [echo output](usb-input-echo-benchmark-2026-10-22.txt): median
+8,048 ns per complete software echo, five trials, 13 allocations per
+operation (269-270 B/op). This includes harness allocations and goroutine
+scheduling. It excludes physical USB, Android dispatch, OS input injection
+and application response. It is not tablet input RTT, p95 latency or proof
+of bounded input latency while video saturates the real USB bus.
+
 ## On-device offline crypto feasibility
 
 [`tools/android_crypto_probe/`](../../tools/android_crypto_probe/README.md)
