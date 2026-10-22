@@ -20,7 +20,7 @@ jobs:
       - name: Check shell script syntax
         run: |
           shopt -s nullglob
-          for script in scripts/*.sh release/*.sh tools/android_wifi_probe/build.sh; do
+          for script in scripts/*.sh release/*.sh tools/android_wifi_probe/*.sh; do
             bash -n "$script"
           done
 

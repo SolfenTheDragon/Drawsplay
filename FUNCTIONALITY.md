@@ -258,6 +258,28 @@ Field notes:
   * Stats gain `echoMs` (input send to the frame carrying it); logged in the session summary.
 * Helper wire format: `native/drawsplay-media/PROTOCOL.md`.
 
+### 3.6 Wi-Fi major-2 envelope component (not yet a product session)
+
+The independent Go/Kotlin Wi-Fi codec uses a fixed 36-byte big-endian
+header: `type:u8, flags:u8, headerLen:u16, payloadLen:u32, epoch:u64,
+sequence:u32, captureMonoUs:u64, durationUs:u32, reserved:u32`.
+Types are 1 hello, 2 control, 3 input, 4 attach, 5 config, 6 video AU.
+Flags/reserved are zero, headerLen is 36. Bootstrap hello alone uses zero
+epoch/sequence; all session records require nonzero values. Payload maxima
+are 4 KiB for hello/control/input/attach, 64 KiB for config and 1 MiB per AU.
+Duration is zero except for AU records. Unknown/oversized/malformed values
+fail before payload reading. A separate session sequence guard rejects
+replay, wrong epochs and uint32 wrap.
+
+Header-first reads permit validation before leasing caller-owned payload
+storage; codecs reuse header storage and never allocate payload buffers.
+The Kotlin header object is borrowed until the next read. This code is not
+yet admitted by normal app/host sessions and does not change USB framing,
+major versions or current packet meanings. Pairing, authenticated major-2
+negotiation and channel association still need implementation. See
+`docs/wifi-wire.md` for layout, ownership and actual Tab A8 interoperability
+results.
+
 ## 4. Target MVP Functionality
 
 1. Extend desktop onto a virtual display represented by the Android tablet. **(done — M2)**
