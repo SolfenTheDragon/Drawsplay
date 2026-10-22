@@ -140,6 +140,15 @@ On Linux the frame rate is limited to 60, except on X11 hosts with VA-API (Intel
 
 **Tablet shows no prompt / doesn't open when plugged in.** Turn on **Auto-launch Android app on USB connect** on the settings page, or open the app manually.
 
+## Wi-Fi development diagnostics
+
+The new host-discovers-tablet Wi-Fi path is **not ready for normal use**.
+Developers can run bounded, LAN-only [tablet discovery](docs/wifi-discovery.md)
+and reproduce [Wi-Fi TLS tests](docs/wifi-testing.md).
+An [isolated Android advertisement probe](tools/android_wifi_probe/README.md)
+tests real tablet discovery without replacing the installed display app.
+These tools do not pair devices, stream a display or authorize input.
+
 ## Privacy
 
 The host listens only on your computer (localhost) and the settings page is local-only. See [PRIVACY.md](PRIVACY.md) for the full privacy policy.
