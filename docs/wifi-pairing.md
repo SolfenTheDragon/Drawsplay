@@ -1,8 +1,9 @@
 # Wi-Fi enrollment and durable identity components
 
 These are **development components, not an enabled product pairing flow**.
-The host/tablet enrollment UI, network exchange, local confirmation and
-session integration are still required. No screen or input capability is
+The production tablet enrollment UI and display-session integration are
+still required. An opt-in host CLI and isolated tablet probe now exercise
+the real network exchange, approval and storage. No screen or input capability is
 granted by calling a codec or passing a pairing unit test.
 
 ## Numeric-code exchange
@@ -97,9 +98,17 @@ power-loss guarantees.
 
 Android `WiFiTrustStore` creates a P-256 signing identity and a separate
 AES-256-GCM trust key in Android Keystore. Both are non-exportable.
+The signing key authorizes `DIGEST_NONE` in addition to SHA-256/SHA-384:
+Android Conscrypt uses `NONEwithECDSA` for an already-hashed TLS transcript.
+The first actual Keystore-backed TLS attempt failed with
+`INCOMPATIBLE_DIGEST` before this was fixed; both LAN mTLS and an independent
+prehashed sign/verify test passed afterward. Existing incompatible keys fail
+explicitly with a local-reset instruction, rather than silently rotating.
 The host pin/name is stored as a bounded authenticated record in
 `noBackupFilesDir/wifi-v2/trust.bin`, with a fresh provider-generated nonce
 and atomic-file replacement followed by readback verification.
+Saving validates/initializes the local identity first, so calling save
+before requesting a key manager cannot strand trust without an identity.
 There is no plaintext preferences fallback, no backup migration and no
 StrongBox/hardware-backing assumption. Missing keys or invalid ciphertext
 require explicit local repair/re-pairing, not automatic trust replacement.
@@ -120,8 +129,10 @@ DRAWSPLAY_PAIRING_TEST_PEER=/absolute/session/path/wifi-pairing-test-peer \
 ./gradlew :app:assembleWifiTest
 ```
 
-The stdio peer has a public fixed test code and synthetic identities; it
-never listens or saves trust. The cross-language test is explicitly skipped
+The stdio peer has a public fixed test code and synthetic identities. Its
+`--enrollment numeric-loopback:port` mode initiates a real PAKE-to-mTLS TCP
+exchange with a disposable identity. Neither mode accepts LAN destinations,
+listens, or saves paired trust. The cross-language tests are explicitly skipped
 when that executable is not configured; CI builds/configures it. A configured
 missing/broken peer fails the test.
 
@@ -146,3 +157,68 @@ streaming, power or soak evidence. Starting the test activity can background
 the display app; do not interpret that as a USB measurement.
 The recorded result is in
 [`performance/tab-a8-wifi-trust-2026-10-22.json`](performance/tab-a8-wifi-trust-2026-10-22.json).
+
+## Host-initiated LAN enrollment preview
+
+`AuthenticateEnrollmentHost` and `WiFiEnrollment.authenticateAccepted`
+perform bounded enrollment on the **same** host-initiated TCP connection.
+The host sends `DSEP || major:u16=2 || reserved:u16=0 || hostSPKI[32]`;
+the tablet returns its actual Keystore SPKI hash. The host sends
+`salt[16] || nonce[32] || B[384]`; the tablet returns `A[384] || proof[32]`.
+Only a matching proof receives the host proof, then both sides upgrade the
+socket to pinned mutual TLS. The PAKE hashes are derived from the identities
+actually used by TLS, not from DNS-SD. Failure/cancellation closes the socket;
+neither helper saves trust or admits a display session.
+
+The opt-in host command browses only the selected NIC, requires an exact
+tablet name with exactly one matching address, displays the code locally
+and asks for explicit approval **after** authentication:
+
+```sh
+# Inspect untrusted names first, then select one explicitly.
+go run ./cmd/wifi-discover -interface wlo1 -duration 10s
+go run ./cmd/wifi-pair -interface wlo1 -tablet 'DrawSplay enrollment test' \
+  -trust-dir /absolute/private/wifi-preview-trust
+```
+
+This command currently works with the isolated tablet enrollment probe,
+not the installed display application. It never starts capture or injection.
+An already-paired store requires explicit `-replace`; old trust is retained
+until a newly approved enrollment succeeds. Approval markers inside mTLS are
+host `1`, tablet `1` after its durable save, and host `2` after its save.
+If the last save/acknowledgment fails, one side can have saved trust without
+confirmation from the other; the error explains that local repair/re-pairing
+is needed. Distributed persistence is not claimed atomic.
+
+Linux dialing enforces numeric on-link IPv4 peers, source binding,
+`SO_BINDTODEVICE` and `SO_DONTROUTE`, with no gateway/default-route fallback.
+Failure to set restrictions fails closed. Other host OSes currently reject
+this dialing operation explicitly; Windows TLS/storage source support is
+not Windows LAN-enrollment support. Interface snapshots are rechecked after
+connect. Runtime roaming/reconnect and IPv6 dialing remain outstanding.
+
+Repeat the opt-in hardware test with exactly one attached authorized tablet:
+
+```sh
+# Build from host/ and android/ respectively.
+go build -o /absolute/path/wifi-pair ./cmd/wifi-pair
+./gradlew :app:assembleWifiTest
+
+# From repository root. Refuses to replace an installed test application.
+python3 tools/wifi_enrollment/run_tablet_test.py \
+  --pair-command /absolute/path/wifi-pair \
+  --apk android/app/build/outputs/apk/wifiTest/app-wifiTest.apk \
+  --interface wlo1 --output /absolute/path/enrollment-result.json
+```
+
+This uses synthetic local UI approvals, never logs the code, and removes
+the test APK and disposable host identity even on failure.
+The isolated probe requires API 33 for network-scoped NSD; this is **not**
+an API-26 availability/listener implementation. It listens on the selected
+Wi-Fi IPv4 address, checks on-link accepted peers, and cancels on link
+changes/backgrounding/120-second expiry. Its video port is reserved only;
+no decoder, capture or input injector starts. Android `SO_DONTROUTE` stalled
+return traffic under this device's policy routing and is not used in the
+probe. Full route-change/VPN acceptance remains outstanding.
+Two complete real Tab A8 enrollment runs passed after the fixes; the result is
+[`performance/tab-a8-wifi-enrollment-2026-10-22.json`](performance/tab-a8-wifi-enrollment-2026-10-22.json).

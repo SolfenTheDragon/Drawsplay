@@ -1,0 +1,26 @@
+{
+  "device": "SM-X200",
+  "androidApi": 34,
+  "host": "Linux X11, selected IPv4 Wi-Fi interface",
+  "hostDiscoveredTablet": true,
+  "hostInitiatedTcp": true,
+  "numericPairingOverLan": true,
+  "mutualTlsWithKeystoreIdentity": true,
+  "hostTrustPersisted": true,
+  "tabletTrustReloaded": true,
+  "tabletIdentityRetained": true,
+  "networkAndMulticastCleanupConfirmed": true,
+  "approval": "automated local test input on both devices; disposable identities",
+  "isolatedApplicationRemoved": true,
+  "disposableHostIdentityRemoved": true,
+  "usbImplementationTested": false,
+  "videoOrInputSessionStarted": false,
+  "limitations": [
+    "Two successful API 34/Linux IPv4 LAN runs, after fixing DNS instance decoding and Keystore TLS signing",
+    "Not streaming, reconnect, power, soak, Android 8 or Windows evidence",
+    "Linux host sockets used SO_BINDTODEVICE and SO_DONTROUTE",
+    "Tablet probe used network-scoped NSD, Wi-Fi address-bound listeners, on-link peer checks and network-change cancellation",
+    "Android SO_DONTROUTE stalled return traffic under policy routing; it is not used by the probe",
+    "No VPN/default-network change or complete LAN-route-enforcement acceptance claim"
+  ]
+}

@@ -1,0 +1,220 @@
+package com.drawsplay.tablet
+
+import android.app.Activity
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
+import android.os.Build
+import android.os.Bundle
+import android.text.InputType
+import android.util.Log
+import android.view.WindowManager
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.TextView
+import com.drawsplay.tablet.transport.WiFiEnrollment
+import com.drawsplay.tablet.transport.WiFiTrustStore
+import java.io.IOException
+import java.net.Inet4Address
+import java.net.InetSocketAddress
+import java.net.ServerSocket
+import java.net.Socket
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import javax.net.ssl.X509KeyManager
+
+/** Test-only foreground LAN enrollment, never registered for USB attachments. */
+class WiFiEnrollmentProbeActivity : Activity() {
+    private val stopped = AtomicBoolean(false)
+    private val code = CompletableFuture<String>()
+    private val worker = Executors.newSingleThreadExecutor()
+    private val timer = Executors.newSingleThreadScheduledExecutor()
+    private var control: ServerSocket? = null
+    private var video: ServerSocket? = null
+    @Volatile private var active: Socket? = null
+    private var multicast: WifiManager.MulticastLock? = null
+    private var nsd: NsdManager? = null
+    private var registration: NsdManager.RegistrationListener? = null
+    private var connectivity: ConnectivityManager? = null
+    private var callback: ConnectivityManager.NetworkCallback? = null
+    private lateinit var status: TextView
+
+    override fun onCreate(state: Bundle?) {
+        super.onCreate(state)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        status = TextView(this).apply { text = "LAN enrollment test. No video or input access. Enter the host's code to approve it." }
+        val entry = EditText(this).apply {
+            hint = "Eight-digit code"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            isSingleLine = true
+        }
+        val approve = Button(this).apply {
+            text = "Pair and trust this host"
+            setOnClickListener {
+                val entered = entry.text.toString()
+                if (entered.length != 8 || entered.any { it !in '0'..'9' }) {
+                    status.text = "Enter exactly eight digits from the host."
+                } else {
+                    code.complete(entered)
+                    entry.text.clear()
+                    isEnabled = false
+                    status.text = "Approving only the host that proves knowledge of this code..."
+                }
+            }
+        }
+        setContentView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(status)
+            addView(entry)
+            addView(approve)
+        })
+        try {
+            if (Build.VERSION.SDK_INT < 33) throw IOException("This network-scoped NSD hardware probe requires API 33; enrollment codec itself supports API 26")
+            val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            connectivity = manager
+            val networks = manager.allNetworks.filter { network ->
+                manager.getNetworkCapabilities(network)?.let {
+                    it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                } == true
+            }
+            if (networks.size != 1) throw IOException("Select exactly one active Wi-Fi LAN; do not use a VPN for this probe")
+            val network = networks.single()
+            val link = manager.getLinkProperties(network) ?: throw IOException("Wi-Fi link addresses are unavailable")
+            val selected = link.linkAddresses.filter { it.address is Inet4Address && !it.address.isLoopbackAddress }
+            if (selected.size != 1) throw IOException("Probe requires exactly one IPv4 Wi-Fi address")
+            val local = selected.single()
+            control = ServerSocket().apply { bind(InetSocketAddress(local.address, 0), 1); soTimeout = 120000 }
+            video = ServerSocket().apply { bind(InetSocketAddress(local.address, 0), 1) }
+            val watcher = object : ConnectivityManager.NetworkCallback() {
+                override fun onLost(lost: Network) {
+                    if (lost == network) failProbe("Selected Wi-Fi disconnected")
+                }
+                override fun onLinkPropertiesChanged(changed: Network, properties: LinkProperties) {
+                    if (changed == network && (properties.interfaceName != link.interfaceName || properties.linkAddresses != link.linkAddresses)) {
+                        failProbe("Selected Wi-Fi addresses changed; reopen pairing")
+                    }
+                }
+            }
+            callback = watcher
+            manager.registerNetworkCallback(
+                NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                    .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), watcher
+            )
+            multicast = (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
+                .createMulticastLock("DrawSplay-enrollment-test").apply { setReferenceCounted(false); acquire() }
+            nsd = getSystemService(Context.NSD_SERVICE) as NsdManager
+            val listener = object : NsdManager.RegistrationListener {
+                override fun onServiceRegistered(info: NsdServiceInfo) {
+                    if (stopped.get()) return
+                    Log.i(TAG, """{"state":"available","name":"${info.serviceName}","inputPort":${control?.localPort},"videoPort":${video?.localPort}}""")
+                    runOnUiThread { if (!stopped.get()) status.text = "Host can discover ${info.serviceName}. Enter its eight-digit code, then approve pairing." }
+                }
+                override fun onRegistrationFailed(info: NsdServiceInfo, error: Int) = failProbe("NSD registration failed ($error)")
+                override fun onServiceUnregistered(info: NsdServiceInfo) { Log.i(TAG, "Advertisement removed") }
+                override fun onUnregistrationFailed(info: NsdServiceInfo, error: Int) { Log.e(TAG, "NSD cleanup failed ($error)") }
+            }
+            registration = listener
+            nsd!!.registerService(NsdServiceInfo().apply {
+                serviceName = "DrawSplay enrollment test"
+                serviceType = "_drawsplay-tablet._tcp."
+                port = control!!.localPort
+                setNetwork(network)
+                setAttribute("v", "2")
+                setAttribute("videoPort", video!!.localPort.toString())
+                setAttribute("pairing", "1")
+                setAttribute("streaming", "0")
+            }, NsdManager.PROTOCOL_DNS_SD, listener)
+            timer.schedule({ failProbe("Enrollment window expired; reopen locally") }, 120, TimeUnit.SECONDS)
+            val inputListener = control!!
+            worker.execute {
+                try {
+                    val store = WiFiTrustStore(applicationContext)
+                    if (store.readPairedHost() != null) throw IOException("Fresh isolated installation required; no existing trust is overwritten")
+                    val raw = inputListener.accept()
+                    active = raw
+                    if (stopped.get()) throw IOException("Enrollment cancelled")
+                    if (raw.localAddress != local.address || raw.inetAddress !is Inet4Address) {
+                        throw IOException("Peer is not on selected IPv4 Wi-Fi")
+                    }
+                    val bits = local.prefixLength
+                    if (bits !in 1..30) throw IOException("Unsupported Wi-Fi prefix")
+                    fun ipNumber(bytes: ByteArray): Int = bytes.fold(0) { value, byte -> (value shl 8) or (byte.toInt() and 255) }
+                    val mask = -1 shl (32 - bits)
+                    val peer = ipNumber(raw.inetAddress.address)
+                    val subnet = ipNumber(local.address.address) and mask
+                    if ((peer and mask) != subnet || peer == subnet || peer == (subnet or mask.inv()) || raw.inetAddress == local.address) {
+                        throw IOException("Enrollment peer is outside the selected directly connected LAN")
+                    }
+                    Log.i(TAG, "Accepted directly connected selected-Wi-Fi peer; awaiting local code")
+                    val entered = code.get(110, TimeUnit.SECONDS)
+                    val identity = store.identitySpkiSha256()
+                    val keyManager = store.keyManagers().filterIsInstance<X509KeyManager>().single()
+                    val pending = WiFiEnrollment(keyManager).authenticateAccepted(raw, entered, 30000)
+                    Log.i(TAG, "PAKE and both TLS identities verified; awaiting host approval")
+                    pending.socket.use { secured ->
+                        active = secured
+                        secured.soTimeout = 60000
+                        if (secured.inputStream.read() != 1) throw IOException("Host did not approve enrollment locally")
+                        if (stopped.get()) throw IOException("Enrollment cancelled before saving trust")
+                        store.savePairedHost(pending.hostSpkiSha256, "LAN test host")
+                        secured.outputStream.write(1)
+                        if (secured.inputStream.read() != 2) throw IOException("Tablet trust saved but host persistence was not confirmed; re-pair locally")
+                        val reloaded = WiFiTrustStore(applicationContext)
+                        check(reloaded.identitySpkiSha256().contentEquals(identity))
+                        check(reloaded.readPairedHost()?.spkiSha256?.contentEquals(pending.hostSpkiSha256) == true)
+                        Log.i(TAG, """{"state":"paired","api":${Build.VERSION.SDK_INT},"mutualTls":true,"trustReloaded":true,"identityRetained":true,"hostConfirmedPersistence":true}""")
+                        runOnUiThread { status.text = "Paired over the selected LAN. Trust saved on both devices. No video/input session was started." }
+                    }
+                    stopNetwork()
+                } catch (error: Exception) {
+                    Log.e(TAG, "LAN enrollment failed; no display session authorized", error)
+                    failProbe("Pairing failed: ${error.message}")
+                }
+            }
+        } catch (error: Exception) {
+            Log.e(TAG, "Cannot start isolated LAN enrollment", error)
+            failProbe(error.message ?: "Cannot start LAN enrollment")
+        }
+    }
+
+    private fun failProbe(message: String) {
+        runOnUiThread { status.text = message }
+        stopNetwork()
+    }
+
+    private fun stopNetwork() {
+        if (!stopped.compareAndSet(false, true)) return
+        code.cancel(false)
+        for (resource in listOfNotNull(active, control, video)) {
+            try { resource.close() } catch (error: IOException) { Log.e(TAG, "Socket cleanup failed", error) }
+        }
+        callback?.let {
+            try { connectivity?.unregisterNetworkCallback(it) } catch (error: IllegalArgumentException) { Log.e(TAG, "Network callback cleanup failed", error) }
+        }
+        registration?.let {
+            try { nsd?.unregisterService(it) } catch (error: IllegalArgumentException) { Log.e(TAG, "NSD cleanup failed", error) }
+        }
+        multicast?.let { if (it.isHeld) it.release() }
+        timer.shutdownNow()
+        worker.shutdownNow()
+        Log.i(TAG, "Enrollment sockets, callback and multicast lock released")
+    }
+
+    override fun onStop() {
+        super.onStop()
+        stopNetwork()
+    }
+
+    companion object {
+        private const val TAG = "DS-WiFiEnrollment"
+    }
+}

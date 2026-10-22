@@ -32,7 +32,14 @@ identity-bound SRP-6a code confirmation; paired SPKI mutual TLS; a new total
 Android handshake deadline; Linux-private/Windows-DPAPI host trust; and
 Keystore/AES-GCM Android trust without plaintext fallback. Go/Kotlin
 interoperability and Tab A8 Keystore persistence/tamper rejection are tested.
-They are not wired into product enrollment or capture/input sessions.
+The opt-in Linux `wifi-pair` command and isolated tablet probe additionally
+exercise host-discovered, host-initiated LAN enrollment, explicit local
+approvals and both durable stores. Conscrypt's prehashed TLS signing requires
+Keystore `DIGEST_NONE`; incompatible existing identities fail without rotation.
+Linux host dialing pins the NIC and disables gateway routing. Other host OS
+dialing is currently disabled, and full tablet route-change/VPN enforcement
+is not established. Normal-app enrollment and capture/input sessions remain
+unwired.
 Their protocol has not received an independent cryptographic audit.
 See `docs/wifi-pairing.md` for exact dependency pins, key derivation caveats,
 caller obligations, revocation requirements and unverified platforms.

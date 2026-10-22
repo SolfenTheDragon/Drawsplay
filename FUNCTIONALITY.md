@@ -296,10 +296,20 @@ DPAPI/ACLs; Android uses non-exportable Keystore keys and bounded
 AES-GCM-authenticated records with no plaintext fallback. An isolated
 Tab A8 test verified Android trust persistence and tamper rejection.
 
-These components do not yet expose a pairing UI or authorize product
-video/input sessions. Local confirmation, live revocation/disconnect,
-network enrollment, capability negotiation and lifecycle wiring remain
-required. Existing USB/scaffold trust behavior is unchanged. Full details
+The opt-in `cmd/wifi-pair` preview now discovers a selected tablet, performs
+numeric PAKE and pinned mTLS on the same host-initiated connection, then
+requires local approval and confirms durable trust. An isolated API-34
+Tab A8 test exercised both stores with actual Keystore-backed TLS.
+The pre-TLS enrollment format starts `DSEP, major:u16=2, reserved:u16=0`
+and binds the actual host/tablet SPKI hashes to the PAKE transcript; it is
+separate from both USB and the post-authentication major-2 envelope.
+
+These components do not yet expose enrollment in the normal tablet app or
+authorize product video/input sessions. Live revocation/disconnect,
+capability negotiation, reconnect and production lifecycle wiring remain
+required. The isolated probe requires API 33; Windows strict-LAN dialing
+and older-Android availability fallbacks remain outstanding.
+Existing USB/scaffold trust behavior is unchanged. Full details
 and limitations: `docs/wifi-pairing.md`.
 
 ## 4. Target MVP Functionality

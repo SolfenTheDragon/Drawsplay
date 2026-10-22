@@ -24,6 +24,7 @@ DRAWSPLAY_PAIRING_TEST_PEER=/tmp/drawsplay-wifi-pairing-test-peer \
 ./gradlew :app:testReleaseUnitTest \
   --tests 'com.drawsplay.tablet.transport.WiFiPairingClientTest' \
   --tests 'com.drawsplay.tablet.transport.WiFiPairingInteropTest' \
+  --tests 'com.drawsplay.tablet.transport.WiFiEnrollmentTest' \
   --tests 'com.drawsplay.tablet.transport.WiFiMutualTlsTest' \
   --tests 'com.drawsplay.tablet.transport.WiFiTrustRecordCodecTest' \
   --tests 'com.drawsplay.tablet.transport.WiFiFrameCodecTest' \
@@ -85,6 +86,26 @@ errors or skips, including the configured Go/Kotlin interoperability check.
 Go Wi-Fi packages passed fresh race tests and vet. The missing-record
 identity-rotation regression was observed failing before the store fix and
 passing afterward.
+
+The later network selection adds two Android test methods covering actual
+host-initiated Go/Kotlin PAKE-to-mTLS TCP exchanges, wrong codes, invalid
+versions, truncation and slow-dribble deadlines. Host tests additionally
+cover transcript/key substitution, cancellation, invalid local identities,
+strict on-link endpoint selection and the opt-in CLI argument boundary.
+Actual Tab A8 enrollment is reproducible with
+`tools/wifi_enrollment/run_tablet_test.py`; its factual
+[result](performance/tab-a8-wifi-enrollment-2026-10-22.json) is separate from
+streaming acceptance. DNS-SD instance names with escaped spaces prevented the
+first selection attempt; decoding regression tests failed before the fix
+and passed afterward. Hardware TLS exposed a missing Keystore raw-signing
+permission not exercised by JVM identities; both hardware mTLS and a direct
+Keystore prehashed-signature test passed after that fix.
+The final expanded selection passed all 28 Android JVM tests without
+failures, errors or skips, plus fresh Go Wi-Fi race/vet and Windows
+cross-compilation. Two complete Tab A8 LAN enrollment runs passed after the
+fixes. A separate real-device regression first demonstrated that saving
+peer trust before requesting an identity stranded the record, then passed
+after saves were made to initialize/validate the local identity first.
 
 ## Not verified by these tests
 

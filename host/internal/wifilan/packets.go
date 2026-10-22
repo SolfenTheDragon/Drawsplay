@@ -68,7 +68,16 @@ func (c *packetCache) service(name string) (*serviceRecord, error) {
 	if !strings.HasSuffix(key, suffix) {
 		return nil, fmt.Errorf("record does not name a tablet service")
 	}
-	service := &serviceRecord{name: name[:len(name)-len(suffix)]}
+	// DNS presentation form escapes spaces, dots, backslashes and UTF-8 bytes.
+	// Recover the single wire label before showing it or comparing UI selection.
+	if len(dns.SplitDomainName(name)) != 4 {
+		return nil, fmt.Errorf("tablet service instance must be one DNS label")
+	}
+	var wire [256]byte
+	if _, err := dns.PackDomainName(name, wire[:], 0, nil, false); err != nil || wire[0] == 0 || wire[0] > 63 {
+		return nil, fmt.Errorf("invalid tablet service instance encoding")
+	}
+	service := &serviceRecord{name: string(wire[1 : 1+int(wire[0])])}
 	c.services[key] = service
 	return service, nil
 }

@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <application android:label="DrawSplay isolated Wi-Fi tests" tools:replace="android:label">
         <activity android:name=".MainActivity" tools:node="remove" />
         <activity android:name=".AccessoryIgnoreActivity" tools:node="remove" />
+        <activity android:name=".WiFiEnrollmentProbeActivity" android:exported="true" />
         <activity android:name=".WiFiSelfTestActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

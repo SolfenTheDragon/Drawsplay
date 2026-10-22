@@ -2,6 +2,7 @@ package com.drawsplay.tablet.transport
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
 import java.io.File
@@ -11,6 +12,7 @@ import java.math.BigInteger
 import java.net.Socket
 import java.security.GeneralSecurityException
 import java.security.KeyPairGenerator
+import java.security.KeyFactory
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.Principal
@@ -80,6 +82,8 @@ class WiFiTrustStore(context: Context) {
     }
 
     fun savePairedHost(pin: ByteArray, label: String) {
+        // Never persist a peer that cannot be associated with our own identity.
+        identity
         // An existing record with a missing Keystore key must not be overwritten
         // until the user explicitly forgets that broken trust.
         val encoded = WiFiTrustRecordCodec.seal(trustKey(create = !hasStoredTrust()), pin, label)
@@ -115,7 +119,8 @@ class WiFiTrustStore(context: Context) {
                 initialize(
                     KeyGenParameterSpec.Builder(IDENTITY_ALIAS, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
                         .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
-                        .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384)
+                        // Conscrypt signs its already-hashed TLS transcript with NONEwithECDSA.
+                        .setDigests(KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384)
                         .setUserAuthenticationRequired(false)
                         .setCertificateSubject(X500Principal("CN=DrawSplay LAN tablet"))
                         .setCertificateSerialNumber(BigInteger(128, SecureRandom()).add(BigInteger.ONE))
@@ -129,6 +134,11 @@ class WiFiTrustStore(context: Context) {
         val entry = keys.getEntry(IDENTITY_ALIAS, null) as? KeyStore.PrivateKeyEntry
             ?: throw IOException("Wi-Fi identity is unavailable; repair Keystore and re-pair locally")
         if (entry.privateKey.encoded != null) throw IOException("Wi-Fi identity key is unexpectedly exportable")
+        val information = KeyFactory.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
+            .getKeySpec(entry.privateKey, KeyInfo::class.java)
+        if (KeyProperties.DIGEST_NONE !in information.digests) {
+            throw IOException("Existing Wi-Fi identity cannot sign TLS transcripts; explicitly reset Wi-Fi identity and re-pair locally")
+        }
         (entry.certificate as? X509Certificate)?.checkValidity()
             ?: throw IOException("Wi-Fi identity certificate is unavailable")
         entry

@@ -12,6 +12,40 @@ import (
 
 const testInstance = "Tablet._drawsplay-tablet._tcp.local."
 
+func TestPacketCacheDecodesServiceNamesForDisplayAndSelection(t *testing.T) {
+	for _, fixture := range []struct{ encoded, display string }{
+		{`DrawSplay\ enrollment\ test`, "DrawSplay enrollment test"},
+		{`Tablet\.one`, "Tablet.one"},
+		{`Tablet\\one`, `Tablet\one`},
+		{`Tablette\032\195\169`, "Tablette é"},
+	} {
+		t.Run(fixture.encoded, func(t *testing.T) {
+			records := serviceRecords()
+			name := fixture.encoded + "._drawsplay-tablet._tcp.local."
+			records[0].(*dns.PTR).Ptr = name
+			records[1].Header().Name = name
+			records[2].Header().Name = name
+			got, err := newPacketCache().consume(packedResponse(t, records), time.Now(), []netip.Prefix{netip.MustParsePrefix("192.0.2.10/24")})
+			if err != nil || len(got) != 1 || got[0].Name != fixture.display {
+				t.Fatalf("DNS-escaped display name was not decoded: %v %v", got, err)
+			}
+		})
+	}
+}
+
+func TestPacketCacheRejectsDecodedControlCharactersAndMultipleInstanceLabels(t *testing.T) {
+	for _, instance := range []string{`Tablet\010forged`, `Tablet.one`, `Tablet\000forged`} {
+		records := serviceRecords()
+		name := instance + "._drawsplay-tablet._tcp.local."
+		records[0].(*dns.PTR).Ptr = name
+		records[1].Header().Name = name
+		records[2].Header().Name = name
+		if _, err := newPacketCache().consume(packedResponse(t, records), time.Now(), []netip.Prefix{netip.MustParsePrefix("192.0.2.10/24")}); err == nil {
+			t.Fatalf("unsafe service name was accepted: %s", instance)
+		}
+	}
+}
+
 func serviceRecords() []dns.RR {
 	return []dns.RR{
 		&dns.PTR{Hdr: dns.RR_Header{Name: TabletService + ".local.", Rrtype: dns.TypePTR, Class: dns.ClassINET, Ttl: 120}, Ptr: testInstance},

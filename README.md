@@ -149,9 +149,12 @@ An [isolated Android advertisement probe](tools/android_wifi_probe/README.md)
 tests real tablet discovery without replacing the installed display app.
 These tools do not pair devices, stream a display or authorize input.
 Numeric pairing, mutual TLS and durable trust
-[components and tests](docs/wifi-pairing.md) now exist, but their product UI
-and streaming-session integration are unfinished. The separate `wifiTest`
-APK verifies Keystore behavior without replacing the display application.
+[components and tests](docs/wifi-pairing.md) now include an opt-in Linux
+host pairing command and an automated real-LAN Tab A8 enrollment check.
+The separate `wifiTest` APK verifies Keystore-backed pairing and persistence
+without replacing the display application. Normal-app enrollment,
+automatic reconnect and streaming-session integration remain unfinished;
+these tools cannot yet turn the tablet into a wireless display.
 
 ## Privacy
 
