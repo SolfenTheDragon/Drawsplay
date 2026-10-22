@@ -1,5 +1,14 @@
 # USB baseline preparation collector
 
+**Scope revision (2026-10-22):** the owner removed camera measurements and
+required physical interaction from the implementation gate. Those optional
+metrics remain unmeasured. This initial collector still always emits
+`acceptance: BLOCKED`; it has not yet been extended into the revised
+software-only baseline assessment. Its output must not be relabeled as
+PASS, nor should its historical missing-camera list be used to demand
+equipment the owner has explicitly waived. Repeatable software checks,
+stable sessions and artifact provenance remain required.
+
 This **external, read-only Linux tool** records host process-tree CPU/RSS,
 tablet CPU/PSS/RSS/swap, raw battery readings, installed binary/APK hashes,
 and selected session counters. It does not install an app, modify either

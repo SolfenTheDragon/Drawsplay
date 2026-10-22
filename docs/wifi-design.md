@@ -8,17 +8,43 @@ Implementation starts with the external USB measurement preparation tool,
 not product transport changes. USB source and installed applications are
 unchanged. No Wi-Fi mode was enabled, no pairing was attempted, and no host
 networking settings were changed. Authorization is not a waiver of the
-USB measurement gates; incomplete evidence still blocks Phase 1.
+remaining software USB measurement gates; incomplete required software
+evidence still blocks Phase 1. See the owner's scope revision below.
 
 **Blocking evidence gap:** a repeatable full USB baseline does not exist in the
 examined repository. The attached Tab A8 is usable for measurements, but the
-installed host differs from the checkout, optical/input timing is unavailable,
-and the first passive observation contained a restart. The
+installed host differs from the checkout and the first passive observation
+contained a restart. Camera/physical-interaction measurements are no longer
+blocking requirements. The
 [baseline readiness report](performance/wifi-usb-baseline-readiness-2026-10-22.md)
 records real CPU/memory observations and raw output, explicitly not a passing
 baseline. Crypto overhead has NOT been measured.
 
 ## 1. Intent, scope and decision status
+
+### Owner revision: software-only baseline, no camera or physical interaction
+
+On 2026-10-22 the owner explicitly removed camera checks and required
+operator-driven physical interaction from the non-negotiable baseline.
+Do not block implementation on obtaining a camera/photodiode, optical
+frame counting, physical taps/stylus actions or operator-driven lifecycle
+tests. Those checks are optional future QA, not prerequisites.
+
+This revision supersedes contrary mandatory language in sections 3, 12,
+13 and 14. Software measurements and automated tests remain required:
+CPU, memory, allocation/queue bounds, session stability, available decode/
+presentation counters with their actual semantics, and automated timing/
+reconnect/input logic checks. Software timing is a proxy, never measured
+photon latency; synthetic input cannot prove physical pen fidelity.
+Unmeasurable physical metrics are reported as NOT MEASURED / waived from
+the baseline gate, not zero or PASS.
+
+The owner has not waived USB protection, artifact provenance, repeatability
+or observed software regressions. The invalid prior trial remains invalid.
+Power instrumentation is not silently waived by this revision: use the
+original permitted software battery proxy where readable, label charging/
+vendor limitations and report uncertainty; do not require an external
+meter when a valid permitted proxy is available.
 
 ### Owner clarification: LAN-only and discovery-first
 
@@ -235,6 +261,14 @@ reviewed connection-time seam. Stop rather than discovering a need to alter
 USB in the middle of implementation and proceeding silently.
 
 ### 3.3 Baseline preparation, not a fabricated Phase 0 pass
+
+**Current scope:** the owner revision in section 1 removes camera and
+physical-interaction checks from this gate. The measurement table below
+retains their definitions for optional future QA; only software-automatable
+baseline checks are required for implementation progression. Historical
+reports and the initial collector's always-BLOCKED acceptance output are
+not retroactive verdicts under the revised gate. Implement a separately
+labeled software-baseline assessment before using it to authorize changes.
 
 The two instructions "build a baseline before changes" and "no implementation
 code in Phase 0" leave an instrumentation sequencing decision. This draft

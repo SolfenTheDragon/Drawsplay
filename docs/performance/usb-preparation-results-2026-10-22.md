@@ -2,6 +2,13 @@
 
 Date: 2026-10-22. Branch: `Wireless_Implementation`.
 
+**Later owner revision:** camera-based checks and required physical
+interaction were removed from the baseline gate. The report below preserves
+the original trial and assessment; its physical-equipment prerequisites
+are historical, not current requirements. The trial remains rejected for
+software-observed session/process changes. See the updated scope in
+[the design](../wifi-design.md).
+
 **Full USB baseline: BLOCKED. Wi-Fi product implementation: NOT STARTED.**
 The approved first implementation step is an external, read-only collector,
 not a change to the host/Android applications. Local `main` and the wireless
