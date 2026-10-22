@@ -1,17 +1,12 @@
 package com.drawsplay.tablet.transport
 
 import java.io.DataInputStream
-import java.io.File
 import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.nio.file.Files
-import java.security.KeyStore
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import javax.net.ssl.KeyManagerFactory
-import javax.net.ssl.X509KeyManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -23,7 +18,7 @@ class WiFiEnrollmentTest {
     fun actualGoHostDialsTabletAndBindsNumericCodeToMutualTlsKeys() {
         val peer = System.getenv("DRAWSPLAY_PAIRING_TEST_PEER")
         assumeTrue("Configure DRAWSPLAY_PAIRING_TEST_PEER for Go/Kotlin network enrollment", !peer.isNullOrEmpty())
-        val identity = identity()
+        val identity = testWiFiIdentity()
         for (correct in listOf(true, false)) {
             ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { listener ->
                 listener.soTimeout = 5000
@@ -58,7 +53,7 @@ class WiFiEnrollmentTest {
 
     @Test(timeout = 15000)
     fun wrongVersionTruncatedAndDribblingPeersFailClosed() {
-        val identity = identity()
+        val identity = testWiFiIdentity()
         for (mode in listOf("version", "truncated", "dribble")) {
             ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { listener ->
                 listener.soTimeout = 3000
@@ -100,31 +95,4 @@ class WiFiEnrollmentTest {
         }
     }
 
-    private fun identity(): X509KeyManager {
-        val directory = Files.createTempDirectory("drawsplay-enrollment-test").toFile()
-        try {
-            val file = File(directory, "identity.p12")
-            val log = File(directory, "keytool.log")
-            val process = ProcessBuilder(
-                File(System.getProperty("java.home"), "bin/keytool").absolutePath,
-                "-genkeypair", "-alias", "test", "-keyalg", "EC", "-groupname", "secp256r1",
-                "-dname", "CN=WiFi enrollment test", "-validity", "1", "-storetype", "PKCS12",
-                "-keystore", file.absolutePath, "-storepass", "public-test-only", "-noprompt"
-            ).redirectErrorStream(true).redirectOutput(log).start()
-            try {
-                assertTrue(process.waitFor(10, TimeUnit.SECONDS))
-                assertEquals(log.readText(), 0, process.exitValue())
-            } finally {
-                process.destroyForcibly()
-            }
-            val store = KeyStore.getInstance("PKCS12")
-            file.inputStream().use { store.load(it, "public-test-only".toCharArray()) }
-            return KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).run {
-                init(store, "public-test-only".toCharArray())
-                keyManagers.filterIsInstance<X509KeyManager>().single()
-            }
-        } finally {
-            check(directory.deleteRecursively()) { "Temporary enrollment identity cleanup failed" }
-        }
-    }
 }

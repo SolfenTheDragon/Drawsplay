@@ -306,11 +306,66 @@ separate from both USB and the post-authentication major-2 envelope.
 
 These components do not yet expose enrollment in the normal tablet app or
 authorize product video/input sessions. Live revocation/disconnect,
-capability negotiation, reconnect and production lifecycle wiring remain
-required. The isolated probe requires API 33; Windows strict-LAN dialing
+automatic reconnect and production lifecycle wiring remain required.
+Authenticated capability/channel negotiation is described below.
+The isolated probe requires API 33; Windows strict-LAN dialing
 and older-Android availability fallbacks remain outstanding.
 Existing USB/scaffold trust behavior is unchanged. Full details
 and limitations: `docs/wifi-pairing.md`.
+
+### 3.8 Paired Wi-Fi channel negotiation (isolated development preview)
+
+These messages use the Wi-Fi major-2 binary envelope, not USB JSON or
+AOA framing. After saved-trust mutual TLS, the tablet sends a Hello and the
+host returns negotiated limits in its Hello. The host initiates TCP but
+remains TLS server on both independent control and video sockets.
+Hello payloads are exactly 96 bytes, unsigned big-endian:
+
+| Offset | Field |
+| --- | --- |
+| 0, 2 | Minimum/maximum protocol major, u16 each; range must include 2 |
+| 4, 5 | Role u8 (tablet 1, host 2); reserved u8 = 0 |
+| 6 | Codec mask u16; bit 0 = H.264 baseline |
+| 8, 10, 12 | Maximum width, height, FPS, u16 each |
+| 14 | H.264 level u16: 31, 32, 40, 41, 42, 50, 51 or 52 |
+| 16, 20 | Maximum access-unit bytes and compressed-queue bytes, u32 each |
+| 24, 26 | Queue slots u16; statistics schema u16 = 1 |
+| 28 | Feature mask u32; bit 0 = low latency |
+| 32, 64 | Actual authenticated SPKI SHA-256 and fresh nonce, 32 bytes each |
+
+Dimensions are 320..8192, FPS 1..120, access units 64 KiB..1 MiB,
+slots 2..4, queue at most 8 MiB and at least access-unit maximum times
+slots, checked without integer overflow. Pins/nonces must be nonzero;
+the role and pin must match the authenticated peer. Negotiation takes
+minimum limits and known-feature intersection. Independent maxima are
+**not a selected display mode**: the capture owner must still validate
+encoder/decoder support and H.264 macroblock limits before starting media.
+
+The host then sends control sequence 1 with a fresh nonzero epoch and
+56-byte payload: subtype u8 = 1, reserved u8 = 0, schema u16 = 1,
+session ID[16], secret ticket[32], lifetime-ms u32 = 5000.
+One control session is active per coordinator; a bounded ring remembers
+64 recent session ID/epoch generations. IDs, epochs and tickets use
+cryptographic randomness. Tickets are never logged or persisted.
+
+The separately authenticated video socket must present an attach envelope
+with that epoch, sequence 1 and 52-byte payload: subtype u8 = 2,
+reserved u8 = 0, schema u16 = 1, session ID[16], ticket[32].
+The host checks the same tablet identity and matching ID/epoch/ticket.
+The ticket expires exactly five seconds after host session creation,
+is single-use even on a failed attachment, and is cleared on close.
+Successful attachment receives video control sequence 1, same epoch,
+payload `[3, 0, 0, 1]`. Subsequent control and video sequences each
+start at 2 in independent sequence spaces.
+
+Setup has an absolute five-second deadline and cancellation closes blocked
+I/O. A failed video setup invalidates the binding; its owner closes control
+too. Closing the Android control owner closes its associated video socket.
+These are admission primitives, **not running capture/decoder/input pumps**.
+`wifi-pair -verify-session` and the isolated API-33+ probe exercise fresh
+saved-trust channels without media. API-34 Tab A8 evidence is recorded in
+`docs/performance/tab-a8-wifi-session-2026-10-22.json`; automatic reconnect,
+normal-app availability and performance acceptance are still outstanding.
 
 ## 4. Target MVP Functionality
 

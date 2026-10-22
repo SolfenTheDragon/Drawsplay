@@ -20,6 +20,8 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.drawsplay.tablet.transport.WiFiEnrollment
+import com.drawsplay.tablet.transport.WiFiPairedSession
+import com.drawsplay.tablet.transport.WiFiSessionProtocol
 import com.drawsplay.tablet.transport.WiFiTrustStore
 import java.io.IOException
 import java.net.Inet4Address
@@ -41,6 +43,7 @@ class WiFiEnrollmentProbeActivity : Activity() {
     private var control: ServerSocket? = null
     private var video: ServerSocket? = null
     @Volatile private var active: Socket? = null
+    @Volatile private var paired: WiFiPairedSession.Control? = null
     private var multicast: WifiManager.MulticastLock? = null
     private var nsd: NsdManager? = null
     private var registration: NsdManager.RegistrationListener? = null
@@ -93,7 +96,7 @@ class WiFiEnrollmentProbeActivity : Activity() {
             if (selected.size != 1) throw IOException("Probe requires exactly one IPv4 Wi-Fi address")
             val local = selected.single()
             control = ServerSocket().apply { bind(InetSocketAddress(local.address, 0), 1); soTimeout = 120000 }
-            video = ServerSocket().apply { bind(InetSocketAddress(local.address, 0), 1) }
+            video = ServerSocket().apply { bind(InetSocketAddress(local.address, 0), 1); soTimeout = 10000 }
             val watcher = object : ConnectivityManager.NetworkCallback() {
                 override fun onLost(lost: Network) {
                     if (lost == network) failProbe("Selected Wi-Fi disconnected")
@@ -139,21 +142,26 @@ class WiFiEnrollmentProbeActivity : Activity() {
                 try {
                     val store = WiFiTrustStore(applicationContext)
                     if (store.readPairedHost() != null) throw IOException("Fresh isolated installation required; no existing trust is overwritten")
-                    val raw = inputListener.accept()
-                    active = raw
-                    if (stopped.get()) throw IOException("Enrollment cancelled")
-                    if (raw.localAddress != local.address || raw.inetAddress !is Inet4Address) {
-                        throw IOException("Peer is not on selected IPv4 Wi-Fi")
+                    fun acceptSelectedPeer(listener: ServerSocket): Socket {
+                        val raw = listener.accept()
+                        active = raw
+                        if (stopped.get()) throw IOException("Enrollment cancelled")
+                        if (raw.localAddress != local.address || raw.inetAddress !is Inet4Address) {
+                            throw IOException("Peer is not on selected IPv4 Wi-Fi")
+                        }
+                        val bits = local.prefixLength
+                        if (bits !in 1..30) throw IOException("Unsupported Wi-Fi prefix")
+                        fun ipNumber(bytes: ByteArray): Int = bytes.fold(0) { value, byte -> (value shl 8) or (byte.toInt() and 255) }
+                        val mask = -1 shl (32 - bits)
+                        val peer = ipNumber(raw.inetAddress.address)
+                        val subnet = ipNumber(local.address.address) and mask
+                        if ((peer and mask) != subnet || peer == subnet || peer == (subnet or mask.inv()) || raw.inetAddress == local.address) {
+                            throw IOException("Peer is outside the selected directly connected LAN")
+                        }
+                        raw.tcpNoDelay = true
+                        return raw
                     }
-                    val bits = local.prefixLength
-                    if (bits !in 1..30) throw IOException("Unsupported Wi-Fi prefix")
-                    fun ipNumber(bytes: ByteArray): Int = bytes.fold(0) { value, byte -> (value shl 8) or (byte.toInt() and 255) }
-                    val mask = -1 shl (32 - bits)
-                    val peer = ipNumber(raw.inetAddress.address)
-                    val subnet = ipNumber(local.address.address) and mask
-                    if ((peer and mask) != subnet || peer == subnet || peer == (subnet or mask.inv()) || raw.inetAddress == local.address) {
-                        throw IOException("Enrollment peer is outside the selected directly connected LAN")
-                    }
+                    val raw = acceptSelectedPeer(inputListener)
                     Log.i(TAG, "Accepted directly connected selected-Wi-Fi peer; awaiting local code")
                     val entered = code.get(110, TimeUnit.SECONDS)
                     val identity = store.identitySpkiSha256()
@@ -173,6 +181,31 @@ class WiFiEnrollmentProbeActivity : Activity() {
                         check(reloaded.readPairedHost()?.spkiSha256?.contentEquals(pending.hostSpkiSha256) == true)
                         Log.i(TAG, """{"state":"paired","api":${Build.VERSION.SDK_INT},"mutualTls":true,"trustReloaded":true,"identityRetained":true,"hostConfirmedPersistence":true}""")
                         runOnUiThread { status.text = "Paired over the selected LAN. Trust saved on both devices. No video/input session was started." }
+                    }
+                    if (intent.getBooleanExtra("checkSession", false)) {
+                        inputListener.soTimeout = 10000
+                        val saved = WiFiTrustStore(applicationContext)
+                        val savedHost = saved.readPairedHost() ?: throw IOException("Saved host trust disappeared")
+                        val session = WiFiPairedSession(
+                            saved.keyManagers().filterIsInstance<X509KeyManager>().single(),
+                            savedHost.spkiSha256
+                        )
+                        val capabilities = WiFiSessionProtocol.Hello(
+                            minMajor = 2, maxMajor = 2, role = WiFiSessionProtocol.TABLET, codecMask = 1,
+                            maxWidth = 1280, maxHeight = 720, maxFps = 30, h264Level = 31,
+                            maxAccessUnit = 256 * 1024, queueBytes = 512 * 1024, queueSlots = 2,
+                            statsVersion = 1, features = 1, spki = ByteArray(32), nonce = ByteArray(32)
+                        )
+                        session.acceptControl(acceptSelectedPeer(inputListener), capabilities, 5000).use { controlSession ->
+                            paired = controlSession
+                            if (stopped.get()) throw IOException("Session test cancelled")
+                            session.acceptVideo(acceptSelectedPeer(video!!), controlSession, 5000)
+                            val limits = controlSession.limits
+                            check(limits.maxWidth == 1280 && limits.maxHeight == 720 && limits.maxFps == 30)
+                            check(limits.maxAccessUnit == 256 * 1024 && limits.queueBytes == 512 * 1024 && limits.queueSlots == 2)
+                            Log.i(TAG, """{"state":"sessionReady","freshSavedTrust":true,"controlAndVideoMutualTls":true,"boundedCapabilities":true,"captureAndInputStarted":false}""")
+                            runOnUiThread { status.text = "Saved trust authenticated fresh control/video channels. No screen capture or input injection was started." }
+                        }
                     }
                     stopNetwork()
                 } catch (error: Exception) {
@@ -194,7 +227,7 @@ class WiFiEnrollmentProbeActivity : Activity() {
     private fun stopNetwork() {
         if (!stopped.compareAndSet(false, true)) return
         code.cancel(false)
-        for (resource in listOfNotNull(active, control, video)) {
+        for (resource in listOfNotNull(active, paired, control, video)) {
             try { resource.close() } catch (error: IOException) { Log.e(TAG, "Socket cleanup failed", error) }
         }
         callback?.let {

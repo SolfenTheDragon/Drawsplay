@@ -40,6 +40,14 @@ Linux host dialing pins the NIC and disables gateway routing. Other host OS
 dialing is currently disabled, and full tablet route-change/VPN enforcement
 is not established. Normal-app enrollment and capture/input sessions remain
 unwired.
+The isolated paired-channel preview now checks actual authenticated SPKI
+values in bounded capabilities and binds a separately authenticated video
+socket with a five-second single-use secret ticket. Control/video identities,
+session ID and epoch must match; failed attachment invalidates the binding.
+Fresh saved-trust channel association passed on the Tab A8 without
+capture, decoding or input injection. This is not automatic reconnect or
+product session authorization. Channel owners must close both sockets on
+failure/revocation; clearing stored trust alone does not terminate sockets.
 Their protocol has not received an independent cryptographic audit.
 See `docs/wifi-pairing.md` for exact dependency pins, key derivation caveats,
 caller obligations, revocation requirements and unverified platforms.

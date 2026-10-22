@@ -36,8 +36,11 @@ directed testing to Wi-Fi. USB benchmark work is paused; contrary baseline
 gating language below is historical, not authorization to resume those
 tests. USB source/hot paths remain outside the implementation scope.
 
-Wi-Fi discovery, framing, candidate numeric enrollment, mutual TLS and
-durable trust components now exist independently. They are not a completed
+Wi-Fi discovery, framing, candidate numeric enrollment, mutual TLS,
+durable trust and bounded paired control/video negotiation now exist
+independently. Fresh saved-trust channel association has been exercised on
+the Tab A8 without capture, decoding or input injection.
+They are not a completed
 Phase 1 session. See `wifi-discovery.md`, `wifi-wire.md`, `wifi-pairing.md`
 and `wifi-testing.md` for measured evidence and remaining caller obligations.
 The numeric candidate uses established SRP implementations rather than

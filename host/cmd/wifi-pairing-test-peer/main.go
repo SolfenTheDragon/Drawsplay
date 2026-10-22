@@ -21,10 +21,12 @@ func main() {
 	var err error
 	if len(os.Args) == 3 && os.Args[1] == "--enrollment" {
 		err = runEnrollment(os.Args[2], os.Stdout)
+	} else if len(os.Args) == 5 && os.Args[1] == "--session" {
+		err = runSession(os.Args[2], os.Args[3], os.Args[4], os.Stdout)
 	} else if len(os.Args) == 1 {
 		err = run(os.Stdin, os.Stdout)
 	} else {
-		err = fmt.Errorf("expected no arguments or --enrollment loopback-IP:port")
+		err = fmt.Errorf("expected no arguments, --enrollment loopback-IP:port, or --session control-loopback:port video-loopback:port tablet-SPKI-hex")
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Wi-Fi pairing interoperability fixture:", err)

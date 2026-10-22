@@ -132,7 +132,9 @@ DRAWSPLAY_PAIRING_TEST_PEER=/absolute/session/path/wifi-pairing-test-peer \
 The stdio peer has a public fixed test code and synthetic identities. Its
 `--enrollment numeric-loopback:port` mode initiates a real PAKE-to-mTLS TCP
 exchange with a disposable identity. Neither mode accepts LAN destinations,
-listens, or saves paired trust. The cross-language tests are explicitly skipped
+listens, or saves paired trust. Its `--session` mode authenticates separate
+numeric-loopback control/video channels and uses synthetic markers, never
+screen capture or input injection. The cross-language tests are explicitly skipped
 when that executable is not configured; CI builds/configures it. A configured
 missing/broken peer fails the test.
 
@@ -216,9 +218,40 @@ the test APK and disposable host identity even on failure.
 The isolated probe requires API 33 for network-scoped NSD; this is **not**
 an API-26 availability/listener implementation. It listens on the selected
 Wi-Fi IPv4 address, checks on-link accepted peers, and cancels on link
-changes/backgrounding/120-second expiry. Its video port is reserved only;
-no decoder, capture or input injector starts. Android `SO_DONTROUTE` stalled
+changes/backgrounding/120-second expiry. Its video port is reserved unless
+the additional channel check below is selected; no decoder, capture or
+input injector starts. Android `SO_DONTROUTE` stalled
 return traffic under this device's policy routing and is not used in the
 probe. Full route-change/VPN acceptance remains outstanding.
 Two complete real Tab A8 enrollment runs passed after the fixes; the result is
 [`performance/tab-a8-wifi-enrollment-2026-10-22.json`](performance/tab-a8-wifi-enrollment-2026-10-22.json).
+
+### Fresh paired control/video check
+
+Add `-verify-session` to the host preview, or `--verify-session` to the
+automation command above. The isolated probe receives the matching test
+option automatically. After both trust saves and enrollment-socket close,
+the host initiates **new** control and video TCP connections using pinned
+mutual TLS, without another code. The tablet reloads its saved trust and
+Keystore identity. The host sends neither desktop content nor input commands.
+
+`NegotiatePairedControl`/`WiFiPairedSession.acceptControl` validate a
+96-byte Hello and compute bounded negotiated limits before offering a
+fresh session. `AcceptPairedVideo`/`acceptVideo` bind a separately
+authenticated video socket with a five-second single-use secret ticket.
+Exact fields, limits, sequence spaces and ownership rules are in
+`FUNCTIONALITY.md` section 3.8. Setup cancellation interrupts partial
+headers; owners must close both channels on failure or control shutdown.
+Storage revocation alone still does not terminate live sockets.
+
+The Go/Kotlin loopback integration additionally exchanges a synthetic
+video-channel marker and control ping; this is not valid H.264 decoder
+configuration. The actual Tab A8 check verifies Keystore-backed TLS,
+negotiated 1280x720/30 maxima, 256-KiB AU and two-slot/512-KiB compressed
+queue bounds, and successful association/cleanup. These are negotiated
+caps, not measured FPS, allocated decoder buffers or a streaming result.
+Recorded evidence:
+[`performance/tab-a8-wifi-session-2026-10-22.json`](performance/tab-a8-wifi-session-2026-10-22.json).
+Fresh paired connections are not yet automatic reconnect: normal
+availability, lifecycle ownership, media/input pumps, Windows dialing,
+API-26 discovery and route-change/VPN enforcement remain outstanding.

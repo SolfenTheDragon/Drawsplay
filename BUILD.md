@@ -248,7 +248,8 @@ the older transitive version used unsupported socket linknames.
 
 The `:app:assembleWifiTest` Android variant builds a **separate**
 `com.drawsplay.tablet.wifitest` APK with both USB attachment activities
-removed. It is for isolated real-device Keystore and LAN-enrollment tests, not distribution or
+removed. It is for isolated real-device Keystore, LAN enrollment and paired
+control/video channel tests, not distribution or
 replacement of the production app. Normal release artifacts are unchanged
 in application ID; never install the test variant over another test
 installation without checking its ownership first.
@@ -256,17 +257,19 @@ installation without checking its ownership first.
 CI builds `host/cmd/wifi-pairing-test-peer` and supplies its path in
 `DRAWSPLAY_PAIRING_TEST_PEER` to Android tests for Go/Kotlin interoperability.
 The peer uses public synthetic test credentials over stdio. Its optional
-network-enrollment mode dials numeric loopback addresses only, with a
+network-enrollment and two-channel session modes dial numeric loopback addresses only, with a
 disposable identity and no paired trust persistence. It cannot listen or
 dial the LAN.
 
 The opt-in Linux enrollment preview builds with
 `go build -o wifi-pair ./cmd/wifi-pair` from `host/`. It performs explicit
 selected-interface discovery, PAKE, mutual TLS and local approval, but no
-video/input session. The real-device automation is
+capture/decoder/input session. Add `-verify-session` to verify fresh paired
+control/video association without media. The real-device automation is
 `tools/wifi_enrollment/run_tablet_test.py`; see `docs/wifi-pairing.md`.
 The tablet hardware probe requires API 33 for network-scoped NSD; the
-enrollment codec still targets API 26.
+enrollment and session codecs still target API 26. The automation's matching
+option is `--verify-session`.
 
 The independent discovery command builds with the existing Go 1.25 module:
 

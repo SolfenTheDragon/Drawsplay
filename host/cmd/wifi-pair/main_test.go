@@ -31,3 +31,10 @@ func TestPairCommandHelpDoesNotOpenTrust(t *testing.T) {
 		t.Fatal("help lacked options or unexpectedly performed pairing")
 	}
 }
+
+func TestPairCommandHasExplicitOptInForPairedSessionVerification(t *testing.T) {
+	var out, diagnostics bytes.Buffer
+	if code := run([]string{"-verify-session", "-help"}, strings.NewReader(""), &out, &diagnostics); code != 0 {
+		t.Fatal("paired-session diagnostic is not an explicit opt-in CLI option")
+	}
+}

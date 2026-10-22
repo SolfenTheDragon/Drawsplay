@@ -31,6 +31,7 @@ func run(arguments []string, approval io.Reader, out, diagnostics io.Writer) int
 	tablet := flags.String("tablet", "", "exact discovered tablet service name (required)")
 	directory := flags.String("trust-dir", "", "dedicated private Wi-Fi identity/trust directory (required)")
 	replace := flags.Bool("replace", false, "explicitly permit replacement of an existing paired tablet after approval")
+	verify := flags.Bool("verify-session", false, "after saving trust, verify fresh paired control/video TLS channels without capture or input")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -44,20 +45,20 @@ func run(arguments []string, approval io.Reader, out, diagnostics io.Writer) int
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	if err := pair(ctx, *iface, *tablet, *directory, *replace, approval, out, diagnostics); err != nil {
+	if err := pair(ctx, *iface, *tablet, *directory, *replace, *verify, approval, out, diagnostics); err != nil {
 		fmt.Fprintf(diagnostics, "Wi-Fi pairing: %v\n", err)
 		return 1
 	}
 	return 0
 }
 
-func pair(ctx context.Context, iface, name, directory string, replace bool, approval io.Reader, out, diagnostics io.Writer) (result error) {
+func pair(ctx context.Context, iface, name, directory string, replace, verify bool, approval io.Reader, out, diagnostics io.Writer) (result error) {
 	if _, _, err := wifilan.SelectInterface(iface); err != nil {
 		return err
 	}
 	fmt.Fprintf(diagnostics, "Looking for %q on %s (10 seconds); open Wi-Fi pairing on the tablet.\n", name, iface)
 	discovery, stop := context.WithTimeout(ctx, 10*time.Second)
-	candidates := make(map[string]bool)
+	candidates := make(map[string]string)
 	rejected := 0
 	err := wifilan.Browse(discovery, iface, func(candidate wifilan.Candidate) {
 		if candidate.Name != name {
@@ -67,7 +68,8 @@ func pair(ctx context.Context, iface, name, directory string, replace bool, appr
 			if len(candidates) >= 64 {
 				break
 			}
-			candidates[net.JoinHostPort(address.String(), fmt.Sprint(candidate.InputPort))] = true
+			candidates[net.JoinHostPort(address.String(), fmt.Sprint(candidate.InputPort))] =
+				net.JoinHostPort(address.String(), fmt.Sprint(candidate.VideoPort))
 		}
 	}, func(err error) {
 		rejected++
@@ -85,9 +87,9 @@ func pair(ctx context.Context, iface, name, directory string, replace bool, appr
 	if len(candidates) != 1 {
 		return fmt.Errorf("found %d matching endpoints; require exactly one. Check selected LAN, tablet availability and duplicate names; guest isolation, multicast filtering or a firewall may block discovery", len(candidates))
 	}
-	var endpoint string
-	for address := range candidates {
-		endpoint = address
+	var endpoint, videoEndpoint string
+	for address, videoAddress := range candidates {
+		endpoint, videoEndpoint = address, videoAddress
 	}
 	store, err := wifilan.OpenTrustStore(directory)
 	if err != nil {
@@ -115,7 +117,12 @@ func pair(ctx context.Context, iface, name, directory string, replace bool, appr
 	if err != nil {
 		return err
 	}
-	defer func() { result = errors.Join(result, secured.Close()) }()
+	enrollmentOpen := true
+	defer func() {
+		if enrollmentOpen {
+			result = errors.Join(result, secured.Close())
+		}
+	}()
 	if _, err := fmt.Fprintf(out, "Code and both TLS identities verified. Approve pairing with %q (%x)? Type yes: ", name, pin[:6]); err != nil {
 		return err
 	}
@@ -136,6 +143,9 @@ func pair(ctx context.Context, iface, name, directory string, replace bool, appr
 			return errors.New("pairing not approved locally; no host trust was changed")
 		}
 	}
+	if err := enrollment.Err(); err != nil {
+		return err
+	}
 	deadline, _ := enrollment.Deadline()
 	if err := secured.SetDeadline(deadline); err != nil {
 		return err
@@ -147,12 +157,24 @@ func pair(ctx context.Context, iface, name, directory string, replace bool, appr
 	if _, err := io.ReadFull(secured, acknowledgement[:]); err != nil || acknowledgement[0] != 1 {
 		return fmt.Errorf("tablet did not confirm saved trust: %w", errors.Join(err, wifilan.ErrPairing))
 	}
+	if err := enrollment.Err(); err != nil {
+		return err
+	}
 	if err := store.Pair(pin, name); err != nil {
 		return fmt.Errorf("tablet saved this host but host trust could not be saved; repair locally and pair again: %w", err)
 	}
 	if _, err := secured.Write([]byte{2}); err != nil {
 		return fmt.Errorf("host trust saved, but tablet did not receive final confirmation; verify trust locally: %w", err)
 	}
-	_, err = fmt.Fprintln(out, "Pairing saved on both devices. This preview does not yet stream video or inject input.")
-	return err
+	if _, err := fmt.Fprintln(out, "Pairing saved on both devices. This preview does not yet stream video or inject input."); err != nil {
+		return err
+	}
+	if verify {
+		enrollmentOpen = false
+		if err := secured.Close(); err != nil {
+			return err
+		}
+		return verifySession(ctx, iface, endpoint, videoEndpoint, store, out)
+	}
+	return nil
 }

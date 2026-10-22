@@ -2,6 +2,7 @@ package wifilan
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"net/netip"
 	"testing"
@@ -33,5 +34,11 @@ func TestLANDialRejectsInvalidSelectionAndCancelledWork(t *testing.T) {
 	}
 	if connection, err := DialSelectedLAN(context.Background(), "", "192.168.20.5:37183"); err == nil || connection != nil {
 		t.Fatal("implicit-interface dial created a connection")
+	}
+}
+
+func TestPairedLANDialRejectsMissingTrustBeforeOpeningAnyNetwork(t *testing.T) {
+	if connection, err := DialPairedLAN(context.Background(), "does-not-exist", "8.8.8.8:37183", tls.Certificate{}, [32]byte{}); err == nil || connection != nil {
+		t.Fatal("unpaired or invalid local identity attempted a paired LAN session")
 	}
 }

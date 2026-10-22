@@ -152,7 +152,11 @@ Numeric pairing, mutual TLS and durable trust
 [components and tests](docs/wifi-pairing.md) now include an opt-in Linux
 host pairing command and an automated real-LAN Tab A8 enrollment check.
 The separate `wifiTest` APK verifies Keystore-backed pairing and persistence
-without replacing the display application. Normal-app enrollment,
+without replacing the display application. Its optional
+[`--verify-session` check](tools/wifi_enrollment/README.md) additionally
+authenticates fresh saved-trust control/video channels and negotiates
+bounded capabilities; it sends no screen content or input commands.
+Normal-app enrollment,
 automatic reconnect and streaming-session integration remain unfinished;
 these tools cannot yet turn the tablet into a wireless display.
 

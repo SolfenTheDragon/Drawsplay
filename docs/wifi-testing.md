@@ -1,9 +1,9 @@
 # Wi-Fi component tests
 
 USB baseline testing was stopped at the owner's request. These tests exercise
-the Wi-Fi scaffold, discovery parser, framing and accepted-socket TLS primitive, not the completed
-host-discovers-tablet design.
-They do not install an APK, change the running host settings, or expose a LAN
+the Wi-Fi scaffold, discovery parser, pairing, framing and paired-channel
+negotiation, not a completed wireless display.
+The host/JVM commands below do not install an APK, change running host settings, or expose a LAN
 listener. Test TLS listeners use loopback and temporary generated identities.
 
 ## Run
@@ -12,8 +12,8 @@ From `host/`:
 
 ```sh
 go test -race -count=1 -v \
-  ./internal/wifilan ./cmd/wifi-discover ./cmd/wifi-frame-probe ./cmd/wifi-pairing-test-peer
-go vet ./internal/wifilan ./cmd/wifi-discover ./cmd/wifi-frame-probe ./cmd/wifi-pairing-test-peer
+  ./internal/wifilan ./cmd/wifi-discover ./cmd/wifi-frame-probe ./cmd/wifi-pairing-test-peer ./cmd/wifi-pair
+go vet ./internal/wifilan ./cmd/wifi-discover ./cmd/wifi-frame-probe ./cmd/wifi-pairing-test-peer ./cmd/wifi-pair
 go build -o /tmp/drawsplay-wifi-pairing-test-peer ./cmd/wifi-pairing-test-peer
 ```
 
@@ -25,6 +25,8 @@ DRAWSPLAY_PAIRING_TEST_PEER=/tmp/drawsplay-wifi-pairing-test-peer \
   --tests 'com.drawsplay.tablet.transport.WiFiPairingClientTest' \
   --tests 'com.drawsplay.tablet.transport.WiFiPairingInteropTest' \
   --tests 'com.drawsplay.tablet.transport.WiFiEnrollmentTest' \
+  --tests 'com.drawsplay.tablet.transport.WiFiSession*Test' \
+  --tests 'com.drawsplay.tablet.transport.WiFiPairedSessionTest' \
   --tests 'com.drawsplay.tablet.transport.WiFiMutualTlsTest' \
   --tests 'com.drawsplay.tablet.transport.WiFiTrustRecordCodecTest' \
   --tests 'com.drawsplay.tablet.transport.WiFiFrameCodecTest' \
@@ -107,6 +109,29 @@ fixes. A separate real-device regression first demonstrated that saving
 peer trust before requesting an identity stranded the record, then passed
 after saves were made to initialize/validate the local identity first.
 
+## Paired control/video association
+
+The expanded selection passed **32 Android JVM tests**, with zero failures,
+errors or skips, including production Go/Kotlin separate-channel mTLS,
+capability negotiation, video attachment and a synthetic control ping.
+Closing the Android control owner also closes video. Host tests cover
+identity/role/resource-limit validation, random session ID/epoch reuse,
+one-use/expired/wrong-identity attachment, malformed offer/attach payloads,
+missing mTLS and cancellation during a partial header without reserving a
+session. Wi-Fi-only Go race tests/vet and Windows cross-compilation passed;
+this is not Windows LAN dialing/runtime evidence.
+
+The optional hardware automation `--verify-session` passed on the API-34
+Tab A8 after numeric enrollment, using saved trust on fresh control and
+video connections. It validates negotiated bounds and association, not
+capture/decoding or input injection. A first attempt encountered a LAN
+connect timeout before enrollment. The missing tablet session accept path
+then failed as expected; after integration, a redundant host socket close
+incorrectly reported failure despite both-channel success. Fixing ownership
+made the complete command pass, including trust, channel and cleanup checks.
+See [recorded hardware evidence](performance/tab-a8-wifi-session-2026-10-22.json)
+and `tools/wifi_enrollment/README.md` for reproduction.
+
 ## Not verified by these tests
 
 The production TLS factory also passed a real Tab A8 LAN echo experiment
@@ -118,12 +143,12 @@ Real multicast discovery is covered separately by the
 [selected-interface discovery experiment](wifi-discovery.md), and synthetic
 Go/Kotlin framed TLS by the [wire experiment](wifi-wire.md).
 No claim is made about physical-tablet Wi-Fi display streaming,
-pairing, general LAN-only route enforcement, reconnect under network changes,
+normal-app pairing, general LAN-only route enforcement, reconnect under network changes,
 decode performance, power or API 26 runtime compatibility. The attached Tab A8 was not used for the JVM/Go component run.
 
 The existing scaffold still advertises the host and has the tablet discover
-it. The new host-discovery command and framing codec are not wired into
-the product's session lifecycle. Approved numeric-code pairing and
-integrated LAN-only streaming remain implementation work.
+it. The new host-discovery command, pairing and channel negotiation are not
+wired into the product's session lifecycle. Normal-app numeric-code pairing
+and integrated LAN-only streaming remain implementation work.
 Passing component tests is not a Phase 1 completion or a security
 acceptance verdict.

@@ -40,3 +40,12 @@ approval markers and both trust stores worked in that run. It is not a
 wireless-monitor, automatic-reconnect, power/performance, VPN/route-change,
 soak, Android-8 or Windows result. See `docs/wifi-pairing.md` for the
 wire layout, routing restrictions and known limitations.
+
+Add `--verify-session` to require two **new** host-initiated connections
+after pairing, authenticated with the saved identities rather than another
+code. It verifies bounded capability negotiation on control and a
+five-second, one-use video attachment ticket over separate pinned mTLS.
+Both endpoints confirm association before cleanup. This starts no capture,
+decoder or input injector and does not establish automatic reconnect.
+The JSON field `freshSavedTrustControlAndVideoVerified` records whether
+this additional check ran.

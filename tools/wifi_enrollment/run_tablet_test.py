@@ -22,6 +22,8 @@ def main():
     parser.add_argument("--apk", type=pathlib.Path, required=True)
     parser.add_argument("--interface", required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
+    parser.add_argument("--verify-session", action="store_true",
+                        help="also require fresh saved-trust control/video association; no capture or input")
     args = parser.parse_args()
     devices = subprocess.check_output(["adb", "devices"], text=True)
     attached = [line.split()[0] for line in devices.splitlines()[1:] if line.endswith("\tdevice")]
@@ -41,7 +43,8 @@ def main():
         if "Success" not in command("install", "--no-streaming", str(args.apk.resolve())):
             raise RuntimeError("Test APK installation did not succeed")
         installed = True
-        command("shell", "am", "start", "-W", "-n", ACTIVITY)
+        command("shell", "am", "start", "-W", "-n", ACTIVITY,
+                "--ez", "checkSession", str(args.verify_session).lower())
         pid = command("shell", "pidof", PACKAGE).strip()
         if not pid.isdigit():
             raise RuntimeError("Test application did not start as a single process")
@@ -63,7 +66,8 @@ def main():
             with (directory / "diagnostics.log").open("w+") as diagnostics:
                 process = subprocess.Popen(
                     [str(args.pair_command.resolve()), "-interface", args.interface,
-                     "-tablet", available["name"], "-trust-dir", str(directory / "trust")],
+                     "-tablet", available["name"], "-trust-dir", str(directory / "trust"),
+                     *(["-verify-session"] if args.verify_session else [])],
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=diagnostics,
                 )
                 selector = selectors.DefaultSelector()
@@ -114,13 +118,16 @@ def main():
                     raise RuntimeError("Host enrollment failed: " + diagnostics.read() + logs())
                 if b"Pairing saved on both devices." not in output:
                     raise RuntimeError("Host did not confirm durable trust")
+                if args.verify_session and b"Paired control/video channels verified using saved trust." not in output:
+                    raise RuntimeError("Host did not confirm fresh authenticated control/video association")
                 record = json.loads((directory / "trust" / "trust.json").read_text())
                 if not record.get("tabletSpki") or record.get("tabletLabel") != available["name"]:
                     raise RuntimeError("Host trust did not persist the selected tablet")
                 end = time.monotonic() + 5
                 while True:
                     device_logs = logs()
-                    if '"state":"paired"' in device_logs and "multicast lock released" in device_logs:
+                    session_ready = not args.verify_session or '"state":"sessionReady"' in device_logs
+                    if '"state":"paired"' in device_logs and session_ready and "multicast lock released" in device_logs:
                         break
                     if time.monotonic() >= end:
                         raise RuntimeError("Tablet did not confirm trust/cleanup: " + device_logs)
@@ -135,6 +142,7 @@ def main():
                     "hostTrustPersisted": True,
                     "tabletTrustReloaded": True,
                     "tabletIdentityRetained": True,
+                    "freshSavedTrustControlAndVideoVerified": args.verify_session,
                     "networkAndMulticastCleanupConfirmed": True,
                     "approval": "automated local test input on both devices; disposable identities",
                     "usbImplementationTested": False,
