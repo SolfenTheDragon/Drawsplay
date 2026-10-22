@@ -101,6 +101,10 @@ workloads, calibrated power and statistical equivalence comparison are
 
 ## Test
 
+Use the [whole-run comparator](COMPARISON.md) for matched baseline/candidate
+resource references. It rejects incompatible or incomplete evidence and
+never converts non-significance into an equivalence PASS.
+
 Existing AOA framing, simulated disconnect cleanup and test-only software
 input echo measurements can also be reproduced without touching hardware:
 
