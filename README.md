@@ -148,6 +148,10 @@ and reproduce [Wi-Fi TLS tests](docs/wifi-testing.md).
 An [isolated Android advertisement probe](tools/android_wifi_probe/README.md)
 tests real tablet discovery without replacing the installed display app.
 These tools do not pair devices, stream a display or authorize input.
+Numeric pairing, mutual TLS and durable trust
+[components and tests](docs/wifi-pairing.md) now exist, but their product UI
+and streaming-session integration are unfinished. The separate `wifiTest`
+APK verifies Keystore behavior without replacing the display application.
 
 ## Privacy
 

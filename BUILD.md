@@ -239,6 +239,25 @@ Installs the host binary to `~/.local/bin/drawsplay-host`, enables user-session 
 
 ### Optional Wi-Fi diagnostics
 
+Wi-Fi numeric pairing uses pinned `1Password/srp` and Bouncy Castle
+lightweight SRP implementations; see [`docs/wifi-pairing.md`](docs/wifi-pairing.md)
+for the exact suite and interoperability caveat. Only Wi-Fi enrollment code
+loads those classes; no global Android security provider is installed.
+The Go network dependency is pinned to a Go-1.25-compatible release because
+the older transitive version used unsupported socket linknames.
+
+The `:app:assembleWifiTest` Android variant builds a **separate**
+`com.drawsplay.tablet.wifitest` APK with both USB attachment activities
+removed. It is for isolated real-device Keystore tests, not distribution or
+replacement of the production app. Normal release artifacts are unchanged
+in application ID; never install the test variant over another test
+installation without checking its ownership first.
+
+CI builds `host/cmd/wifi-pairing-test-peer` and supplies its path in
+`DRAWSPLAY_PAIRING_TEST_PEER` to Android tests for Go/Kotlin interoperability.
+The peer uses public synthetic test credentials over stdio and cannot enroll
+a device or listen on the LAN.
+
 The independent discovery command builds with the existing Go 1.25 module:
 
 ```bash

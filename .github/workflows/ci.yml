@@ -85,6 +85,16 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Setup Go for Wi-Fi pairing interoperability
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: host/go.mod
+
+      - name: Build offline Wi-Fi pairing test peer
+        run: |
+          (cd ../host && go build -o "$RUNNER_TEMP/wifi-pairing-test-peer" ./cmd/wifi-pairing-test-peer)
+          echo "DRAWSPLAY_PAIRING_TEST_PEER=$RUNNER_TEMP/wifi-pairing-test-peer" >> "$GITHUB_ENV"
+
       - name: Compile Android release Kotlin
         run: ./gradlew :app:compileReleaseKotlin
 

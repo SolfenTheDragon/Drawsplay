@@ -3,7 +3,7 @@ title: Security Model
 type: topic
 tags: [security, trust-boundary, auth, tls, csrf]
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-10-22
 sources:
   - README.md
   - FUNCTIONALITY.md
@@ -26,6 +26,16 @@ summary: Summarizes current security controls, trust assumptions, and residual r
 - Elevated helpers run as on-demand scheduled tasks that execute only the Program Files binary with fixed arguments.
 
 ## Trust assumptions
+
+The Wi-Fi-v2 components are independent of the legacy scaffold: client-first,
+identity-bound SRP-6a code confirmation; paired SPKI mutual TLS; a new total
+Android handshake deadline; Linux-private/Windows-DPAPI host trust; and
+Keystore/AES-GCM Android trust without plaintext fallback. Go/Kotlin
+interoperability and Tab A8 Keystore persistence/tamper rejection are tested.
+They are not wired into product enrollment or capture/input sessions.
+Their protocol has not received an independent cryptographic audit.
+See `docs/wifi-pairing.md` for exact dependency pins, key derivation caveats,
+caller obligations, revocation requirements and unverified platforms.
 
 - Host machine is trusted by the local user.
 - USB debugging is enabled only for trusted hosts.

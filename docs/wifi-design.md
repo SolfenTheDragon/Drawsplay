@@ -29,6 +29,21 @@ feasibility does not establish transport performance or USB equivalence.
 
 ## 1. Intent, scope and decision status
 
+### Later execution revision: Wi-Fi testing only
+
+The owner subsequently explicitly stopped USB implementation testing and
+directed testing to Wi-Fi. USB benchmark work is paused; contrary baseline
+gating language below is historical, not authorization to resume those
+tests. USB source/hot paths remain outside the implementation scope.
+
+Wi-Fi discovery, framing, candidate numeric enrollment, mutual TLS and
+durable trust components now exist independently. They are not a completed
+Phase 1 session. See `wifi-discovery.md`, `wifi-wire.md`, `wifi-pairing.md`
+and `wifi-testing.md` for measured evidence and remaining caller obligations.
+The numeric candidate uses established SRP implementations rather than
+SPAKE2; exact upstream revisions and nonstandard session-key interoperability
+are documented, not described as a completed security audit.
+
 ### Owner revision: software-only baseline, no camera or physical interaction
 
 On 2026-10-22 the owner explicitly removed camera checks and required

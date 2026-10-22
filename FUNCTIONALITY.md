@@ -280,6 +280,28 @@ negotiation and channel association still need implementation. See
 `docs/wifi-wire.md` for layout, ownership and actual Tab A8 interoperability
 results.
 
+### 3.7 Wi-Fi enrollment, mutual TLS and trust components (not integrated)
+
+The Wi-Fi-only SRP-6a enrollment components bind an eight-digit code, both
+SPKI identities, protocol version and a fresh transcript. Invitations are
+local-only, 120 seconds, five attempts and single-active-exchange. Tablet
+proof precedes host proof; failed or replayed confirmation grants no trust.
+The Go/Kotlin implementations passed a real cross-language offline exchange.
+
+Independent paired-session TLS factories require mutual P-256 identities,
+SPKI pinning and TLS 1.2 ECDHE-ECDSA/AES-GCM or TLS 1.3. The new Android
+factory bounds total handshake time even for slow-dribble peers.
+Host trust persists under private Linux permissions or Windows user
+DPAPI/ACLs; Android uses non-exportable Keystore keys and bounded
+AES-GCM-authenticated records with no plaintext fallback. An isolated
+Tab A8 test verified Android trust persistence and tamper rejection.
+
+These components do not yet expose a pairing UI or authorize product
+video/input sessions. Local confirmation, live revocation/disconnect,
+network enrollment, capability negotiation and lifecycle wiring remain
+required. Existing USB/scaffold trust behavior is unchanged. Full details
+and limitations: `docs/wifi-pairing.md`.
+
 ## 4. Target MVP Functionality
 
 1. Extend desktop onto a virtual display represented by the Android tablet. **(done — M2)**

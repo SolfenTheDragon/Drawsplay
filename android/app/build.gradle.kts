@@ -46,6 +46,12 @@ android {
     }
 
     buildTypes {
+        create("wifiTest") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".wifitest"
+            versionNameSuffix = "-wifi-test"
+            matchingFallbacks += listOf("debug")
+        }
         release {
             // Production release signing is provided by keystore secrets in CI.
             // Local dev builds without those secrets still fall back to the debug
@@ -88,9 +94,17 @@ android {
 }
 
 dependencies {
+    implementation("org.bouncycastle:bcprov-jdk18on:1.86")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.google.android.material:material:1.12.0")
     testImplementation("junit:junit:4.13.2")
+}
+
+tasks.withType<Test>().configureEach {
+    val pairingPeer = System.getenv("DRAWSPLAY_PAIRING_TEST_PEER")
+    if (!pairingPeer.isNullOrEmpty()) {
+        inputs.file(pairingPeer).withPropertyName("wifiPairingTestPeer")
+    }
 }

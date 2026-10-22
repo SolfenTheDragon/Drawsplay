@@ -1,0 +1,16 @@
+{
+  "device": "Samsung SM-X200",
+  "androidApi": 34,
+  "scope": "production WiFiTrustStore in isolated wifiTest application",
+  "applicationId": "com.drawsplay.tablet.wifitest",
+  "productionApplicationReplaced": false,
+  "usbAttachmentActivitiesRemovedFromTestManifest": true,
+  "resultTime": "15:10:26.299",
+  "trustPersistence": true,
+  "corruptionRejectedWithoutIdentityReset": true,
+  "nonExportableSigningAndTrustKeys": true,
+  "revocationPersisted": true,
+  "probeUninstalled": true,
+  "hardwareBackingAttested": false,
+  "interpretation": "Real Android Keystore and encrypted storage lifecycle only. Not LAN pairing, integrated video/input, radio performance, Android 8 coverage or power evidence."
+}

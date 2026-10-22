@@ -12,14 +12,20 @@ From `host/`:
 
 ```sh
 go test -race -count=1 -v \
-  ./internal/wifilan ./cmd/wifi-discover ./cmd/wifi-frame-probe
-go vet ./internal/wifilan ./cmd/wifi-discover ./cmd/wifi-frame-probe
+  ./internal/wifilan ./cmd/wifi-discover ./cmd/wifi-frame-probe ./cmd/wifi-pairing-test-peer
+go vet ./internal/wifilan ./cmd/wifi-discover ./cmd/wifi-frame-probe ./cmd/wifi-pairing-test-peer
+go build -o /tmp/drawsplay-wifi-pairing-test-peer ./cmd/wifi-pairing-test-peer
 ```
 
 From `android/` with JDK 17:
 
 ```sh
+DRAWSPLAY_PAIRING_TEST_PEER=/tmp/drawsplay-wifi-pairing-test-peer \
 ./gradlew :app:testReleaseUnitTest \
+  --tests 'com.drawsplay.tablet.transport.WiFiPairingClientTest' \
+  --tests 'com.drawsplay.tablet.transport.WiFiPairingInteropTest' \
+  --tests 'com.drawsplay.tablet.transport.WiFiMutualTlsTest' \
+  --tests 'com.drawsplay.tablet.transport.WiFiTrustRecordCodecTest' \
   --tests 'com.drawsplay.tablet.transport.WiFiFrameCodecTest' \
   --tests 'com.drawsplay.tablet.transport.HostEndpointSelectorTest' \
   --tests 'com.drawsplay.tablet.transport.TlsSocketFactoryTest'
@@ -56,6 +62,29 @@ The expanded commands above subsequently passed with 17 Android JVM tests
 seeded malformed/truncated framing inputs. The Go Wi-Fi packages passed
 race testing and vet; both diagnostic commands cross-compiled for Windows.
 These results do not establish Windows multicast behavior.
+
+## Later authentication/storage component checks
+
+The [pairing components](wifi-pairing.md) add actual Go/Kotlin SRP
+interoperability, mismatched-code/identity rejection, single-use/expiry/
+attempt bounds, mutual TLS 1.2/1.3, rejection of absent/unpaired clients,
+and encrypted trust-record tampering tests. A slow-dribble handshake
+test was mutation-checked: delaying the absolute timeout made it fail,
+and restoring the timeout made it pass. These checks are not enrollment UI
+or integrated-session acceptance.
+
+Host storage tests cover persistence without key rotation, revocation,
+exclusive writers, bounded/corrupt/missing records, private Linux
+permissions and symlink rejection. Windows implementation/tests
+cross-compile; DPAPI and Windows ACL runtime behavior remain unverified.
+The isolated `wifiTest` APK separately passed real Tab A8 Keystore
+persistence, tamper rejection and non-exportable-key checks and was removed.
+
+The consolidated selection passed 26 Android JVM tests with zero failures,
+errors or skips, including the configured Go/Kotlin interoperability check.
+Go Wi-Fi packages passed fresh race tests and vet. The missing-record
+identity-rotation regression was observed failing before the store fix and
+passing afterward.
 
 ## Not verified by these tests
 
