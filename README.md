@@ -78,6 +78,13 @@ The tablet connects on its own, shows the extended desktop and sends touch and p
 
 DrawSplay connects to the tablet over USB. The first time, accept the prompt on the tablet.
 
+### Developer USB measurements
+
+The external [USB resource collector](tools/usb_baseline/README.md) records
+read-only Linux/ADB observations without replacing the running host or app.
+It is preparation for Wi-Fi performance validation, **not** a complete
+latency/FPS/power benchmark or proof that USB is unaffected.
+
 ## Configuration
 
 While the host is running, open `http://127.0.0.1:27180` to:

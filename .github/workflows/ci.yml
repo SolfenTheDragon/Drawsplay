@@ -24,6 +24,9 @@ jobs:
             bash -n "$script"
           done
 
+      - name: Test external USB measurement tooling
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/usb_baseline -p 'test_*.py' -v
+
   host:
     runs-on: ubuntu-latest
     defaults:

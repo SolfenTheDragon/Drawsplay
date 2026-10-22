@@ -1,0 +1,21 @@
+{
+  "acceptance": "BLOCKED",
+  "resource_window_valid": true,
+  "resource_window_issues": [],
+  "missing_acceptance_evidence": [
+    "end_to_end_latency",
+    "unique_presented_fps_and_drop_rate",
+    "input_application_rtt_and_input_to_photon",
+    "calibrated_power_proxy",
+    "controlled_workload_and_matched_thermal_conditions",
+    "exact_baseline_source_provenance",
+    "replicated_matched_trials",
+    "approved_statistical_sensitivity",
+    "profiler_off_controls",
+    "all_platform_baselines"
+  ],
+  "sample_count": 4,
+  "error_count": 0,
+  "elapsed_seconds": 8.000160653999956,
+  "interpretation": "Uncontrolled passive resource observation, not acceptance."
+}

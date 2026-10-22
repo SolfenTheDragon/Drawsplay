@@ -1,0 +1,25 @@
+{
+  "acceptance": "BLOCKED",
+  "resource_window_valid": false,
+  "resource_window_issues": [
+    "AOA streaming not confirmed throughout",
+    "host process tree generation changed",
+    "session counters, settings or transport changed"
+  ],
+  "missing_acceptance_evidence": [
+    "end_to_end_latency",
+    "unique_presented_fps_and_drop_rate",
+    "input_application_rtt_and_input_to_photon",
+    "calibrated_power_proxy",
+    "controlled_workload_and_matched_thermal_conditions",
+    "exact_baseline_source_provenance",
+    "replicated_matched_trials",
+    "approved_statistical_sensitivity",
+    "profiler_off_controls",
+    "all_platform_baselines"
+  ],
+  "sample_count": 150,
+  "error_count": 126,
+  "elapsed_seconds": 300.0002918889995,
+  "interpretation": "Uncontrolled passive resource observation, not acceptance."
+}

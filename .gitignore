@@ -23,6 +23,7 @@ Desktop.ini
 coverage.*
 *.coverprofile
 profile.cov
+tools/usb_baseline/__pycache__/
 go.work
 go.work.sum
 
