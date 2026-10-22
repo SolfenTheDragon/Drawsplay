@@ -1,0 +1,4 @@
+{"wrongPinRejected":true}
+{"protocol":"TLSv1.3","cipher":"TLS_AES_256_GCM_SHA384","handshakeMs":24.522039,"echo256MedianMs":6.920885,"echo256P95Ms":11.130616,"echo256MaxMs":218.531422,"echoIterations":100,"echoWarmupIterations":10,"verifiedPayloadBytesEachDirection":4194304,"roundtripPayloadMbitPerSecond":10.070254293297058,"tcpNoDelay":true}
+{"wrongPinRejected":true}
+{"protocol":"TLSv1.3","cipher":"TLS_AES_256_GCM_SHA384","tcpInitiator":"host","tlsServer":"host","handshakeMs":30.434961,"echo256MedianMs":7.179846,"echo256P95Ms":11.733461,"echo256MaxMs":14.750154,"echoIterations":100,"echoWarmupIterations":10,"verifiedPayloadBytesEachDirection":4194304,"roundtripPayloadMbitPerSecond":6.329696363302119,"tcpNoDelay":true}
