@@ -157,6 +157,18 @@ unit test only, not by hardware. Release-to-Surface is not physical scanout,
 latency, power, thermal, memory/allocation, soak, API 26, Windows or
 normal-app evidence.
 
+### Resource sample (900-picture run)
+
+One 900-picture (30 s) synthetic run: 900 received, 900 decoded/released, no
+drops or overflows (`performance/tab-a8-wifi-synthetic-video-900-2026-10-23.json`).
+Host-side `adb shell` sampling of the **whole isolated probe process**
+(1 s cadence, 28 samples over 46 s, which includes enrollment/TLS setup and
+teardown, not only decoding): `dumpsys meminfo` total PSS ranged 70.9-89.5 MB;
+cumulative process CPU time grew 0.83 s to 19.56 s, about 41% of one core
+averaged over the span. These are coarse, single-run, probe-process numbers
+(the sampling itself adds load); they are not steady-state decoder-only CPU,
+allocation counts, power or thermal results.
+
 ## Not verified by these tests
 
 The production TLS factory also passed a real Tab A8 LAN echo experiment
