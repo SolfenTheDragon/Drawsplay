@@ -63,11 +63,20 @@ object WiFiVideoPlayer {
             try {
                 decoderFactory(receiver.config, receiver.queue).use { decoder ->
                     ready.complete(Unit)
+                    var progressUs = System.nanoTime() / 1000
+                    var seenPending = decoder.pendingFrames
+                    var seenOutputUs = decoder.lastOutputUs
                     while (!WiFiVideoDecoder.drained(ended.get(), receiver.queue.depth, decoder.pendingFrames, decoder.holdingRecoverySlot)) {
                         if (cancelled()) throw IOException("Wi-Fi video cancelled")
                         val now = System.nanoTime() / 1000
                         if (!decoder.step(now)) Thread.sleep(1)
-                        if (decoder.pendingFrames != 0 && now - decoder.lastOutputUs > STALL_US) {
+                        // Any submit or output counts as progress; idle time before the first frame is not a stall.
+                        if (decoder.pendingFrames != seenPending || decoder.lastOutputUs != seenOutputUs) {
+                            seenPending = decoder.pendingFrames
+                            seenOutputUs = decoder.lastOutputUs
+                            progressUs = now
+                        }
+                        if (decoder.pendingFrames != 0 && now - progressUs > STALL_US) {
                             throw IOException("Wi-Fi decoder stalled for two seconds")
                         }
                     }

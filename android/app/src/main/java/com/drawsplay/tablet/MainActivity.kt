@@ -202,7 +202,10 @@ class MainActivity : AppCompatActivity() {
             { wifiPolicyTlsFingerprint }
         )
 
-        pairedWifiHost = WiFiPairedSessionHost(this, endpointSelector, { pendingForegroundSurface }) { wifiAllowedNow() }
+        pairedWifiHost = WiFiPairedSessionHost(this, endpointSelector, { pendingForegroundSurface }, { up ->
+            wifiStreamUp = up
+            runOnUiThread { updateStatus() }
+        }) { wifiAllowedNow() }
 
         videoChannel.tileSink = tileView
         inputPad.onInputBatch = { events -> inputChannel.send(events) }
@@ -271,6 +274,7 @@ class MainActivity : AppCompatActivity() {
 
     @Volatile
     private var streamUp = false
+    @Volatile private var wifiStreamUp = false
 
     // --- Host display mode (resolution matching) ---
     //
@@ -417,7 +421,7 @@ class MainActivity : AppCompatActivity() {
      * disconnects.
      */
     private fun updateStatus() {
-        if (streamUp) {
+        if (streamUp || wifiStreamUp) {
             statusOverlay.visibility = FrameLayout.GONE
         } else {
             statusOverlay.visibility = FrameLayout.VISIBLE

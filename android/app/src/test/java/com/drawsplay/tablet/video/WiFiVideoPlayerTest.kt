@@ -87,4 +87,32 @@ class WiFiVideoPlayerTest {
         assertTrue(mediaClosed)
         assertTrue(order.contains("decoder-closed"))
     }
+
+    private class DelayedOutputDecoder(private val queue: WiFiAccessUnitQueue) : PlayerDecoder {
+        var consumed = 0
+        var outputs = 0
+        override var pendingFrames = 0
+        override val holdingRecoverySlot = false
+        override val lastOutputUs = System.nanoTime() / 1000 - 10_000_000L
+        override fun step(nowUs: Long): Boolean {
+            if (pendingFrames > 0) { pendingFrames = 0; outputs++; return true }
+            val slot = queue.poll(nowUs) ?: return false
+            queue.release(slot)
+            pendingFrames = 1
+            consumed++
+            return true
+        }
+        override fun close() = Unit
+    }
+
+    @Test
+    fun firstFrameAfterLongIdleIsNotAStallJustBecauseTheDecoderWasCreatedEarlier() {
+        val idr = hex("000001091000000165b860")
+        val wire = frame(5, 2, config()) + frame(6, 3, idr) + frame(WiFiFrameCodec.CONTROL, 4, byteArrayOf(5, 0, 0, 1))
+        var decoder: DelayedOutputDecoder? = null
+        val link = WiFiControlLink(ByteArrayInputStream(ByteArray(0)), ByteArrayOutputStream(), 42)
+        WiFiVideoPlayer.run(ByteArrayInputStream(wire), {}, link, limits(), 42, { _, q -> DelayedOutputDecoder(q).also { decoder = it } }) { false }
+        assertEquals(1, decoder!!.consumed)
+        assertEquals("decoder must keep running after the first late frame", 1, decoder!!.outputs)
+    }
 }
