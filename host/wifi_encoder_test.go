@@ -77,3 +77,17 @@ func TestWiFiEncoderLibx264OutputPassesPacketizerAsConstrainedBaseline(t *testin
 		t.Fatalf("not constrained baseline: %x", ps.SPS)
 	}
 }
+
+func TestBuildFFmpegSpecWiFiBaselineIsOptInAndLeavesUSBArgsUnchanged(t *testing.T) {
+	capture := []string{"-f", "lavfi", "-i", "x"}
+	usb := buildFFmpegSpec(videoOptions{FFmpeg: "ffmpeg", FPS: 30, Bitrate: "4M"}, capture, "libx264", encoderArgs("libx264", 30))
+	for _, a := range usb.Args {
+		if a == "baseline" || a == "-level" {
+			t.Fatalf("USB spec gained Wi-Fi args: %v", usb.Args)
+		}
+	}
+	wifi := buildFFmpegSpec(videoOptions{FFmpeg: "ffmpeg", FPS: 30, Bitrate: "4M", WiFiBaseline: true}, capture, "libx264", encoderArgs("libx264", 30))
+	if strings.Join(wifi.Args, " ") == strings.Join(usb.Args, " ") || !strings.Contains(strings.Join(wifi.Args, " "), "-profile:v baseline -level 4.2") {
+		t.Fatalf("Wi-Fi spec missing baseline args: %v", wifi.Args)
+	}
+}

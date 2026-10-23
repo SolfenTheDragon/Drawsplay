@@ -87,6 +87,10 @@ type videoOptions struct {
 	X11HighRate bool
 	// NativeMedia is the nativeMediaHelper setting (auto, on, off).
 	NativeMedia string
+	// WiFiBaseline requests the paired Wi-Fi stream shape: constrained
+	// baseline, one slice per picture. False (the default) leaves every
+	// encoder setting exactly as before.
+	WiFiBaseline bool
 }
 
 // runVideoListener accepts video sessions until ctx is cancelled. If the
@@ -241,6 +245,11 @@ func serveVideoSession(ctx context.Context, conn net.Conn, store *settingsStore,
 		// Android tablet decode paths; prefer cleaner glyph edges there.
 		opts.TemporalLayering = false
 		log.Printf("Temporal layering disabled for Android client session to reduce text artifacting")
+	}
+	if transport == transportWiFiPaired {
+		opts.WiFiBaseline = true
+		opts.NativeMedia = "off"
+		opts.TemporalLayering = false
 	}
 	if cap := transportMaxBitrate(store.get(), transport); cap != "" {
 		opts.Bitrate = cappedBitrate(opts.Bitrate, cap)
