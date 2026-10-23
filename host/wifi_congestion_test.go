@@ -46,6 +46,23 @@ func TestWiFiMonitorCongestsOnSubstantialDrops(t *testing.T) {
 	}
 }
 
+// After a Wi-Fi airtime stall the tablet decodes the delayed burst and shows
+// only the newest picture. Those catch-up skips mean the stall already ended;
+// a lower bitrate would not have prevented it and its restart adds a freeze.
+func TestWiFiMonitorIgnoresCatchUpSkipsAfterALinkStall(t *testing.T) {
+	mon := feedWiFiStatsLines(t, `{"type":"stats","intervalMs":500,"framesReceived":30,"framesRendered":18,"queuedFrames":0,"frameDrops":12,"staleFrames":12}`)
+	if mon.consumeCongestion() {
+		t.Fatal("12 catch-up skips after a stall stepped the Wi-Fi bitrate down")
+	}
+}
+
+func TestWiFiMonitorStillCongestsOnNonStaleDropsBesideCatchUp(t *testing.T) {
+	mon := feedWiFiStatsLines(t, `{"type":"stats","intervalMs":500,"framesReceived":30,"framesRendered":18,"queuedFrames":0,"frameDrops":12,"staleFrames":4}`)
+	if !mon.consumeCongestion() {
+		t.Fatal("8 queue drops of 30 did not report congestion")
+	}
+}
+
 func TestWiFiCongestionGateKeepsAWatchableFloor(t *testing.T) {
 	rc := newRateControllerKbps(26666)
 	gate := sessionCongestionGate(captureTarget{}, true)

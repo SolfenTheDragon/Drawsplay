@@ -23,14 +23,17 @@ class WiFiVideoReceiverTest {
             putShort(sps.size.toShort()).putShort(pps.size.toShort()).putInt(0).put(sps).put(pps)
         }.array()
     }
-    private fun frame(type: Int, sequence: Long, payload: ByteArray, epoch: Long = 42): ByteArray =
+    private fun frame(type: Int, sequence: Long, payload: ByteArray, epoch: Long = 42, captureUs: Long = 0): ByteArray =
         ByteArrayOutputStream().also { output ->
             WiFiFrameCodec.Writer(output).writeFrame(WiFiFrameCodec.Header().apply {
                 this.type = type
                 this.sequence = sequence
                 this.epoch = epoch
                 payloadLength = payload.size
-                if (type == WiFiFrameCodec.VIDEO_AU) durationUs = 33333
+                if (type == WiFiFrameCodec.VIDEO_AU) {
+                    durationUs = 33333
+                    captureMonoUs = captureUs
+                }
             }, payload, 0, payload.size)
         }.toByteArray()
 
@@ -111,5 +114,22 @@ class WiFiVideoReceiverTest {
         receiver.receive()
         assertNull(receiver.queue.poll(1_000_000 + 250_000))
         assertEquals(1L, receiver.queue.ageEvents)
+    }
+
+    private val idrAu = hex("000001091000000165b860")
+    private val predictedAu = hex("0000010930000001419a18")
+
+    @Test
+    fun picturesDeliveredLateByAWiFiStallAreStillDecoded() {
+        // Discarding late pictures cannot make the link deliver sooner; it
+        // only adds an IDR round trip, while newest-output skips stale ones.
+        val wire = frame(5, 2, config()) + frame(6, 3, idrAu, captureUs = 0) +
+            frame(6, 4, predictedAu, captureUs = 33_333)
+        val arrivals = ArrayDeque(listOf(1_000_000L, 1_033_333L + 500_000L))
+        val receiver = WiFiVideoReceiver(ByteArrayInputStream(wire), limits(), 42) { arrivals.removeFirst() }
+        receiver.receive()
+        receiver.receive()
+        assertEquals(2, receiver.queue.depth)
+        assertEquals(0L, receiver.queue.discardEvents)
     }
 }

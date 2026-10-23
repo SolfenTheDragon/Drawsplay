@@ -143,7 +143,12 @@ object WiFiVideoPlayer {
             while (!Thread.currentThread().isInterrupted) {
                 Thread.sleep(minOf(intervalMs, KEYFRAME_POLL_MS))
                 val queue = receiver.queue
-                if (stats.keyframeNeeded(queue.discardEvents)) link.sendControl(WiFiVideoStats.KEYFRAME_REQUEST)
+                if (stats.keyframeNeeded(queue.discardEvents)) {
+                    Log.i(TAG, "Requesting keyframe: queue overflows=${queue.overflowEvents} ageOuts=${queue.ageEvents} " +
+                        "maxGapMs=${receiver.maxInterArrivalUs / 1000} bursts=${receiver.burstArrivals} " +
+                        "decoderPending=${active.get()?.pendingFrames}")
+                    link.sendControl(WiFiVideoStats.KEYFRAME_REQUEST)
+                }
                 val nowMs = System.nanoTime() / 1_000_000
                 if (nowMs < nextReportMs) continue
                 nextReportMs = nowMs + intervalMs

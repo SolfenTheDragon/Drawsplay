@@ -54,6 +54,40 @@ class WiFiAccessUnitQueueTest {
     }
 
     @Test
+    fun aFullQueueWaitsForTheDecoderInsteadOfDiscardingABurst() {
+        // A Wi-Fi airtime stall delivers several pictures at once; discarding
+        // them costs a freeze until a fresh IDR, waiting costs a few ms.
+        val queue = WiFiAccessUnitQueue(65536, 2, 131072, 100000)
+        val idr = queue.acquire()
+        assertTrue(queue.publish(idr, 5, true, 100))
+        val reading = queue.poll(100)!!
+        val predicted = queue.acquire()
+        assertTrue(queue.publish(predicted, 5, false, 200))
+        val decoder = Thread { Thread.sleep(30); queue.release(reading) }.apply { start() }
+        val next = queue.acquire(100_000)
+        decoder.join()
+        assertSame(reading, next)
+        assertEquals(0L, queue.overflowEvents)
+        assertEquals(0L, queue.dropped)
+        assertEquals(1, queue.depth)
+    }
+
+    @Test
+    fun aDecoderThatNeverFreesASlotStillOverflowsAfterTheWait() {
+        val queue = WiFiAccessUnitQueue(65536, 2, 131072, 100000)
+        val idr = queue.acquire()
+        assertTrue(queue.publish(idr, 5, true, 100))
+        val reading = queue.poll(100)!!
+        val predicted = queue.acquire()
+        assertTrue(queue.publish(predicted, 5, false, 200))
+        val slot = queue.acquire(20_000)
+        assertSame(predicted, slot)
+        assertEquals(1L, queue.overflowEvents)
+        assertEquals(0, queue.depth)
+        queue.release(reading)
+    }
+
+    @Test
     fun invalidOwnershipAndBoundsFailWithoutGrowingStorage() {
         for (create in listOf<() -> Unit>(
             { WiFiAccessUnitQueue(65536, 5, 8 * 1024 * 1024, 50000) },

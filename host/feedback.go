@@ -52,6 +52,9 @@ type sessionMonitor struct {
 	// reach this share of the frames received in the report; 0 (USB) means
 	// any drop does.
 	minDropPercent int64
+	// excludeStaleDrops: a Wi-Fi tablet's catch-up skips after an airtime
+	// stall are not congestion (see dropsCongested).
+	excludeStaleDrops bool
 	// keyframeWanted: the client discarded pictures and waits for an IDR.
 	keyframeWanted atomic.Bool
 	// lastKeyframeRestart is owned by the session goroutine.
@@ -68,7 +71,7 @@ const keyframeRequestCooldown = time.Second
 const wifiMinDropPercent = 10
 
 func newWiFiSessionMonitor() *sessionMonitor {
-	return &sessionMonitor{minDropPercent: wifiMinDropPercent}
+	return &sessionMonitor{minDropPercent: wifiMinDropPercent, excludeStaleDrops: true}
 }
 
 var latestClientVideoStats = struct {
@@ -115,11 +118,19 @@ func decodeQueueCongested(stats *clientStatsMsg) bool {
 	return stats.QueuedFrames >= congestQueueDepth && stats.StaleFrames == 0
 }
 
+// dropsCongested reports whether the client dropped enough frames for a lower
+// bitrate to help. On Wi-Fi the stale catch-up skips that follow an airtime
+// stall are excluded: the stall already ended, and the encoder restart a
+// step-down costs would only add a second freeze.
 func (m *sessionMonitor) dropsCongested(stats *clientStatsMsg) bool {
-	if stats.FrameDrops <= 0 {
+	drops := stats.FrameDrops
+	if m.excludeStaleDrops {
+		drops -= min(stats.StaleFrames, drops)
+	}
+	if drops <= 0 {
 		return false
 	}
-	return stats.FrameDrops*100 >= m.minDropPercent*max(stats.FramesReceived, 1)
+	return drops*100 >= m.minDropPercent*max(stats.FramesReceived, 1)
 }
 
 // consumeKeyframeRequest reports a pending client keyframe request once the

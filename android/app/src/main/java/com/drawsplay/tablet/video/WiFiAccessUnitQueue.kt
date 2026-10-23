@@ -24,6 +24,8 @@ class WiFiAccessUnitQueue(maxAccessUnit: Int, slots: Int, budgetBytes: Int, priv
     }
 
     private val pool = Array(slots) { Slot(maxAccessUnit) }
+    @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
+    private val monitor = this as java.lang.Object
     val storageBytes = maxAccessUnit * slots
     @Volatile var dropped = 0L
         private set
@@ -46,17 +48,36 @@ class WiFiAccessUnitQueue(maxAccessUnit: Int, slots: Int, budgetBytes: Int, priv
             return count
         }
 
+    /**
+     * Waits up to [waitUs] for the decoder to free a slot, so a burst after a
+     * short link stall applies backpressure instead of discarding reference
+     * pictures; only a decoder that frees nothing in time forces an IDR.
+     */
     @Synchronized
-    fun acquire(): Slot {
+    fun acquire(waitUs: Long = 0): Slot {
         ensureOpen()
         if (writer != null) throw IOException("Wi-Fi AU writer still owns a slot")
-        var available: Slot? = null
-        for (slot in pool) if (slot.state == FREE) { available = slot; break }
+        var available = freeSlot()
+        if (available == null && waitUs > 0) {
+            val deadlineNs = System.nanoTime() + waitUs * 1000
+            while (available == null) {
+                val remainingNs = deadlineNs - System.nanoTime()
+                if (remainingNs <= 0) break
+                try {
+                    monitor.wait(remainingNs / 1_000_000, (remainingNs % 1_000_000).toInt())
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw IOException("Wi-Fi AU writer interrupted")
+                }
+                ensureOpen()
+                available = freeSlot()
+            }
+        }
         if (available == null) {
             overflowEvents++
             discardReady()
             needsIdr = true
-            for (slot in pool) if (slot.state == FREE) { available = slot; break }
+            available = freeSlot()
         }
         val selected = available ?: throw IOException("Wi-Fi AU pool exhausted by invalid ownership")
         selected.state = WRITING
@@ -119,6 +140,7 @@ class WiFiAccessUnitQueue(maxAccessUnit: Int, slots: Int, budgetBytes: Int, priv
         if (reader !== slot || slot.state != READING) throw IOException("Invalid Wi-Fi AU decoder release")
         reader = null
         slot.state = FREE
+        monitor.notifyAll()
     }
 
     @Synchronized
@@ -126,6 +148,12 @@ class WiFiAccessUnitQueue(maxAccessUnit: Int, slots: Int, budgetBytes: Int, priv
         closed = true
         discardReady()
         needsIdr = true
+        monitor.notifyAll()
+    }
+
+    private fun freeSlot(): Slot? {
+        for (slot in pool) if (slot.state == FREE) return slot
+        return null
     }
 
     private fun ensureOpen() {
@@ -137,6 +165,7 @@ class WiFiAccessUnitQueue(maxAccessUnit: Int, slots: Int, budgetBytes: Int, priv
             slot.state = FREE
             dropped++
         }
+        monitor.notifyAll()
     }
 
     companion object {

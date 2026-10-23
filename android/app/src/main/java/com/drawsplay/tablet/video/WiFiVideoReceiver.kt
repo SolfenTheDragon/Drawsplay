@@ -26,6 +26,7 @@ class WiFiVideoReceiver(
     var burstArrivals = 0L
         private set
     private var lastArrivalUs = 0L
+    private val queueWaitUs: Long
 
     init {
         val header = reader.readHeader()
@@ -36,7 +37,9 @@ class WiFiVideoReceiver(
         reader.readPayload(raw)
         config = WiFiH264.decodeConfig(raw, limits)
         h264 = WiFiH264(config)
-        queue = WiFiAccessUnitQueue(limits.maxAccessUnit, limits.queueSlots, limits.queueBytes, maxQueueAgeUs(config.fps))
+        val maxAgeUs = maxQueueAgeUs(config.fps)
+        queue = WiFiAccessUnitQueue(limits.maxAccessUnit, limits.queueSlots, limits.queueBytes, maxAgeUs)
+        queueWaitUs = maxAgeUs
     }
 
     /** Network-reader thread only. Receives directly into a reusable queue slot. */
@@ -57,7 +60,9 @@ class WiFiVideoReceiver(
         if (header.type != WiFiFrameCodec.VIDEO_AU || header.payloadLength > limits.maxAccessUnit ||
             header.captureMonoUs < 0L || header.durationUs != 1000000L / config.fps
         ) throw IOException("Invalid Wi-Fi video sequence, type, duration or negotiated AU size; reconnect video")
-        val slot = queue.acquire()
+        // Late pictures still decode: the newest-output renderer skips the
+        // stale ones, whereas a discard adds an IDR round trip on top.
+        val slot = queue.acquire(queueWaitUs)
         try {
             val length = reader.readPayload(slot.bytes)
             val idr = h264.inspect(slot.bytes, length)
