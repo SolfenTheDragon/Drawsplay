@@ -401,6 +401,26 @@ before parameter sets and mid-session SPS/PPS changes fail the bridge closed
 (the first implementation reconnects). `wifiInputConn` presents the control
 socket as a byte stream: tablet-to-host and host-to-tablet bytes travel in
 `FrameInput` payloads of at most 4096 bytes, each direction authenticated by
+
+#### 3.8.1 Host product startup and Android client pieces (development preview)
+
+- The host starts the paired Wi-Fi path only when `DRAWSPLAY_FEATURE_WIFI` is
+  on, `DRAWSPLAY_WIFI_INTERFACE` names the LAN interface, `<configDir>/wifi-trust`
+  already exists (created only by the `wifi-pair` CLI) and a paired peer is
+  saved. Otherwise nothing changes. A discovery loop yields to USB: it skips
+  candidates while a non-Wi-Fi transport owns the session.
+- Paired sessions use transport `wifi-paired` and an opt-in H.264 baseline
+  encoder shape (ffmpeg only, level 4.2, no native media, no temporal
+  layering). USB encoder arguments are unchanged.
+- Adaptive bitrate is idle on Wi-Fi: there is no tablet-to-host stats path yet.
+- Android has `WiFiControlLink` (control socket as a byte stream),
+  `WiFiVideoPlayer` (receive plus decode, sends decoder-ready `[7,0,0,1]`
+  after the decoder exists) and an additive paired-socket input candidate that
+  is always last, so USB and accessory ordering are unchanged.
+- Not yet built: the tablet-side foreground service and pairing UI, the
+  tablet dropping Wi-Fi when USB appears, and an API 26 discovery fallback.
+  Until then a paired session is only exercisable through the isolated probe.
+
 the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wraps the bridge as the `net.Conn` the video session writes to; its read side blocks until close because the first Wi-Fi release has no upstream decode-stats path, so adaptive-bitrate feedback stays idle on Wi-Fi.
 ## 4. Target MVP Functionality
 
