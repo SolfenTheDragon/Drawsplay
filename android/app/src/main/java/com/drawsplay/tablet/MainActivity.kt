@@ -18,6 +18,8 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.WindowManager
+import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.media.ImageReader
@@ -69,6 +71,12 @@ class MainActivity : AppCompatActivity() {
     private val endpointSelector = HostEndpointSelector()
     private lateinit var wifiDiscoveryManager: WiFiDiscoveryManager
     private lateinit var pairedWifiHost: WiFiPairedSessionHost
+    private lateinit var waitingGroup: View
+    private lateinit var wifiPairPanel: View
+    private lateinit var wifiPairStatus: TextView
+    private lateinit var wifiPairCode: EditText
+    private lateinit var wifiPairSubmit: Button
+    private var pairing: WiFiPairingSession? = null
     private var backgroundSink: ImageReader? = null
     @Volatile
     private var pendingForegroundSurface: Surface? = null
@@ -100,8 +108,18 @@ class MainActivity : AppCompatActivity() {
         videoSurface = findViewById(R.id.videoSurface)
         tileView = findViewById(R.id.tileView)
         statusOverlay = findViewById(R.id.statusOverlay)
-        findViewById<View>(R.id.wifiConnectButton).setOnClickListener {
-            startActivity(Intent(this, WiFiPairingActivity::class.java))
+        waitingGroup = findViewById(R.id.waitingGroup)
+        wifiPairPanel = findViewById(R.id.wifiPairPanel)
+        wifiPairStatus = findViewById(R.id.wifiPairStatus)
+        wifiPairCode = findViewById(R.id.wifiPairCode)
+        wifiPairSubmit = findViewById(R.id.wifiPairSubmit)
+        findViewById<View>(R.id.wifiConnectButton).setOnClickListener { openWifiPairing() }
+        findViewById<View>(R.id.wifiPairClose).setOnClickListener { closeWifiPairing() }
+        wifiPairSubmit.setOnClickListener {
+            if (pairing?.submitCode(wifiPairCode.text.toString()) == true) {
+                wifiPairCode.text.clear()
+                wifiPairSubmit.isEnabled = false
+            }
         }
         statusText = findViewById(R.id.statusText)
         inputPad = findViewById(R.id.inputPad)
@@ -264,7 +282,16 @@ class MainActivity : AppCompatActivity() {
         }
         wifiDiscoveryManager.stop()
         pairedWifiHost.stop()
+        pairing?.cancel()
+        pairing = null
+        wifiPairPanel.visibility = View.GONE
+        waitingGroup.visibility = View.VISIBLE
         super.onStop()
+    }
+
+    @Deprecated("Back closes the Wi-Fi pairing panel before leaving the app")
+    override fun onBackPressed() {
+        if (wifiPairPanel.visibility == View.VISIBLE) closeWifiPairing() else super.onBackPressed()
     }
 
     override fun onDestroy() {
@@ -395,6 +422,7 @@ class MainActivity : AppCompatActivity() {
     // to them; device-local keys (back, volume, power) stay local.
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (wifiPairPanel.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
         if (isLocalKey(event.keyCode)) return super.dispatchKeyEvent(event)
         val action = when (event.action) {
             KeyEvent.ACTION_DOWN -> "down"
@@ -416,6 +444,29 @@ class MainActivity : AppCompatActivity() {
         KeyEvent.KEYCODE_VOLUME_DOWN,
         KeyEvent.KEYCODE_VOLUME_MUTE -> true
         else -> false
+    }
+
+    /** Shows the pairing panel; only reachable from the waiting screen's "Wi-Fi connect" button. */
+    private fun openWifiPairing() {
+        if (pairing != null) return
+        // The paired session advertises the same service type, so it pauses while pairing.
+        pairedWifiHost.stop()
+        waitingGroup.visibility = View.GONE
+        wifiPairPanel.visibility = View.VISIBLE
+        wifiPairStatus.setText(R.string.wifi_hint)
+        wifiPairSubmit.isEnabled = true
+        pairing = WiFiPairingSession(this, { wifiPairStatus.text = it }) { _ ->
+            wifiPairSubmit.isEnabled = false
+            pairing = null
+        }.also { it.start() }
+    }
+
+    private fun closeWifiPairing() {
+        pairing?.cancel()
+        pairing = null
+        wifiPairPanel.visibility = View.GONE
+        waitingGroup.visibility = View.VISIBLE
+        pairedWifiHost.start()
     }
 
     /**

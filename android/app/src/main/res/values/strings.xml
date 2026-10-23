@@ -2,5 +2,11 @@
 <resources>
     <string name="app_name">DrawSplay</string>
     <string name="wifi_connect">Wi-Fi connect</string>
+    <string name="wifi_eyebrow">WI-FI</string>
+    <string name="wifi_title">Pair with a computer</string>
+    <string name="wifi_hint">Run wifi-pair on the computer, then enter the eight-digit code it shows.</string>
+    <string name="wifi_code_hint">Eight-digit code</string>
+    <string name="wifi_pair">Pair this computer</string>
+    <string name="wifi_back">Back</string>
     <string name="status_waiting_for_host">Waiting for host…</string>
 </resources>

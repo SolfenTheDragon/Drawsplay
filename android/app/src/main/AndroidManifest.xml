@@ -48,12 +48,6 @@
                 android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
                 android:resource="@xml/accessory_filter_manual" />
         </activity>
-        <!-- Opened from the "Wi-Fi connect" button on the waiting screen. -->
-        <activity
-            android:name=".WiFiPairingActivity"
-            android:exported="false"
-            android:label="DrawSplay Wi-Fi pairing"
-            android:screenOrientation="sensorLandscape" />
     </application>
 
 </manifest>
