@@ -196,6 +196,16 @@ button.danger { background: var(--err); }
 #msg.err { color: var(--err); }
 #warnings { color: var(--warn); white-space: pre-line; }
 #connection-info { white-space: pre-line; }
+.wifi-signal { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.signal-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.signal-bars span { width: 4px; border-radius: 1px; background: var(--border); }
+.signal-bars span:nth-child(1) { height: 25%; }
+.signal-bars span:nth-child(2) { height: 50%; }
+.signal-bars span:nth-child(3) { height: 75%; }
+.signal-bars span:nth-child(4) { height: 100%; }
+.signal-bars.ok span.lit { background: var(--ok); }
+.signal-bars.warn span.lit { background: var(--warn); }
+.signal-bars.err span.lit { background: var(--err); }
 .hint { margin-top: .25rem; color: var(--muted); font-size: .78rem; }
 .recommended-resolution {
   margin: 0 0 14px; padding: 10px 14px;

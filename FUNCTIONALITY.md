@@ -140,6 +140,7 @@ Video channel upstream (`stats`, every 250 ms; all counters are per-interval del
 - `avgDecodeMs`: mean in-codec latency (queue → output) over the interval, across all decoded frames.
 - `queuedFrames`: decode backlog at report time — the host's congestion signal (≥ 8 triggers a bitrate step-down unless `staleFrames` > 0 in the same report).
 - `staleFrames`: frames never shown because the client was catching up after a stall: decoded but not rendered, dropped ahead of a newer keyframe, or dropped by the 128-NAL backlog bound. Omitted by older clients.
+- `wifiRssiDbm`, `wifiLinkMbps`, `wifiFrequencyMhz`: paired Wi-Fi tablets only — the tablet's current association (signal dBm, link rate, channel frequency), additive and omitted when unknown. Surfaced via `/api/status` `clientVideoStats` for the web UI signal indicator.
 
 Input packets on port 27183 are now carried inside mux frames (stream `control` for `hello`/host-control messages, stream `input` for `input`/`key`); payloads remain UTF-8 JSON.
 
@@ -435,6 +436,10 @@ Any other record type, epoch or a replayed sequence ends the video session. A ke
   `activeTransport` and the Host overview shows "Wi-Fi: connected to <name>"
   instead of the USB/ADB lines and hides the accessory-mode button. The tablet's
   native info is shown on its own line as "Target Information: …".
+  Below the connection line a live signal indicator (4 bars plus
+  "Signal: Excellent/Good/Fair/Weak (dBm) · Mbps · band") renders the
+  tablet-reported Wi-Fi link (≥ −55 / ≥ −67 / ≥ −75 dBm thresholds),
+  refreshed with each status poll (~2 s).
 - Paired sessions use transport `wifi-paired` and an opt-in H.264 baseline
   encoder shape (ffmpeg only, level 5.0, no native media, no temporal
   layering). USB encoder arguments are unchanged.

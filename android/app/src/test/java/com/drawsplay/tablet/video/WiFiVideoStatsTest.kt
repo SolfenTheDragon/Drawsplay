@@ -18,6 +18,19 @@ class WiFiVideoStatsTest {
     }
 
     @Test
+    fun recordsCarryTheTabletWiFiLinkSampleWhenKnown() {
+        val stats = WiFiVideoStats()
+        val raw = stats.next(
+            WiFiVideoStats.Counters(received = 1, rendered = 1, decodeDrops = 0, queueDropped = 0, queued = 0), 500, true,
+            WiFiVideoStats.Link(rssiDbm = -61, linkMbps = 433, frequencyMhz = 5180)
+        )
+        assertTrue(
+            String(raw, 4, raw.size - 4, Charsets.UTF_8)
+                .endsWith(",\"appForeground\":true,\"wifiRssiDbm\":-61,\"wifiLinkMbps\":433,\"wifiFrequencyMhz\":5180}")
+        )
+    }
+
+    @Test
     fun eachNewQueueDiscardAsksForOneKeyframe() {
         val stats = WiFiVideoStats()
         assertFalse(stats.keyframeNeeded(0))

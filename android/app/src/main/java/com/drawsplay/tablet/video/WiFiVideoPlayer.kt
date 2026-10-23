@@ -48,10 +48,11 @@ object WiFiVideoPlayer {
         epoch: Long,
         surface: Surface,
         statsLink: WiFiControlLink?,
+        linkSample: () -> WiFiVideoStats.Link?,
         cancelled: () -> Boolean
     ) = run(media, closeMedia, link, limits, epoch, { config, queue ->
         MediaCodecPlayerDecoder(WiFiVideoDecoder(surface, config, queue, limits.maxAccessUnit))
-    }, statsLink, STATS_INTERVAL_MS, cancelled)
+    }, statsLink, STATS_INTERVAL_MS, linkSample, cancelled)
 
     fun run(
         media: InputStream,
@@ -62,6 +63,7 @@ object WiFiVideoPlayer {
         decoderFactory: (WiFiH264.Config, WiFiAccessUnitQueue) -> PlayerDecoder,
         statsLink: WiFiControlLink? = null,
         statsIntervalMs: Long = STATS_INTERVAL_MS,
+        linkSample: () -> WiFiVideoStats.Link? = { null },
         cancelled: () -> Boolean
     ) {
         val receiver = WiFiVideoReceiver(media, limits, epoch)
@@ -101,7 +103,7 @@ object WiFiVideoPlayer {
         }, "wifi-decoder")
         thread.start()
         val reporter = statsLink?.takeIf { limits.features and WiFiSessionProtocol.FEATURE_VIDEO_STATS != 0L }?.let {
-            startStatsReporter(it, statsIntervalMs, receiver, active)
+            startStatsReporter(it, statsIntervalMs, receiver, active, linkSample)
         }
         try {
             ready.get(5, TimeUnit.SECONDS)
@@ -132,7 +134,8 @@ object WiFiVideoPlayer {
         link: WiFiControlLink,
         intervalMs: Long,
         receiver: WiFiVideoReceiver,
-        active: AtomicReference<PlayerDecoder>
+        active: AtomicReference<PlayerDecoder>,
+        linkSample: () -> WiFiVideoStats.Link?
     ): Thread = Thread({
         val stats = WiFiVideoStats()
         var nextReportMs = System.nanoTime() / 1_000_000 + intervalMs
@@ -151,7 +154,7 @@ object WiFiVideoPlayer {
                     decodeDrops = decoder?.decodeDrops ?: 0L,
                     queueDropped = queue.dropped,
                     queued = queue.depth + (decoder?.pendingFrames ?: 0)
-                ), intervalMs, true))
+                ), intervalMs, true, runCatching(linkSample).getOrNull()))
             }
         } catch (_: InterruptedException) {
         } catch (error: IOException) {

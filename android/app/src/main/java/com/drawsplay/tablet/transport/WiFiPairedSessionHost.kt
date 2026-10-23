@@ -33,6 +33,7 @@ class WiFiPairedSessionHost(
     private val wifiAllowed: () -> Boolean
 ) {
     private val app = context.applicationContext
+    private val linkProbe = WiFiLinkProbe(app)
     private val running = AtomicBoolean(false)
     @Volatile private var thread: Thread? = null
     @Volatile private var session: ActiveSession? = null
@@ -125,7 +126,7 @@ class WiFiPairedSessionHost(
             onStreaming(true)
             // The attach record used video-socket sequence 1; stats records continue from 2.
             val statsLink = WiFiControlLink(media.inputStream, media.outputStream, established.epoch)
-            WiFiVideoPlayer.run(media.inputStream, { active.close() }, link, established.limits, established.epoch, target, statsLink) {
+            WiFiVideoPlayer.run(media.inputStream, { active.close() }, link, established.limits, established.epoch, target, statsLink, linkProbe::sample) {
                 !running.get() || !wifiAllowed()
             }
         } finally {

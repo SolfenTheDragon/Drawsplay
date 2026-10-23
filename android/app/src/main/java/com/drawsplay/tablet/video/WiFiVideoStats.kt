@@ -14,6 +14,9 @@ class WiFiVideoStats {
         val queued: Int
     )
 
+    /** The tablet's current Wi-Fi association, shown live in the host web UI. */
+    data class Link(val rssiDbm: Int, val linkMbps: Int, val frequencyMhz: Int)
+
     private var last = Counters(0, 0, 0, 0, 0)
     private var discards = 0L
 
@@ -24,14 +27,16 @@ class WiFiVideoStats {
         return needed
     }
 
-    fun next(now: Counters, intervalMs: Long, foreground: Boolean): ByteArray {
+    fun next(now: Counters, intervalMs: Long, foreground: Boolean, link: Link? = null): ByteArray {
         val stale = now.decodeDrops - last.decodeDrops
         val drops = stale + (now.queueDropped - last.queueDropped)
         val json = "{\"type\":\"stats\",\"intervalMs\":$intervalMs" +
             ",\"framesReceived\":${now.received - last.received}" +
             ",\"framesRendered\":${now.rendered - last.rendered}" +
             ",\"avgDecodeMs\":0,\"queuedFrames\":${now.queued}" +
-            ",\"frameDrops\":$drops,\"staleFrames\":$stale,\"appForeground\":$foreground}"
+            ",\"frameDrops\":$drops,\"staleFrames\":$stale,\"appForeground\":$foreground" +
+            (link?.let { ",\"wifiRssiDbm\":${it.rssiDbm},\"wifiLinkMbps\":${it.linkMbps},\"wifiFrequencyMhz\":${it.frequencyMhz}" } ?: "") +
+            "}"
         last = now
         return PREFIX + json.toByteArray(Charsets.UTF_8)
     }

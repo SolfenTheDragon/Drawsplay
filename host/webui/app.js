@@ -584,12 +584,49 @@ const AOA_STATE_LABELS = {
 };
 
 // Shows only the connection details for transports that are turned on.
+// Tablet-reported RSSI thresholds, in dBm.
+function wifiSignalQuality(rssi) {
+  if (!Number.isFinite(rssi) || rssi >= 0) return null;
+  if (rssi >= -55) return { bars: 4, label: "Excellent", tone: "ok" };
+  if (rssi >= -67) return { bars: 3, label: "Good", tone: "ok" };
+  if (rssi >= -75) return { bars: 2, label: "Fair", tone: "warn" };
+  return { bars: 1, label: "Weak", tone: "err" };
+}
+
+function renderWifiSignal(stats) {
+  const row = document.createElement("div");
+  row.className = "wifi-signal";
+  const rssi = stats ? stats.wifiRssiDbm : undefined;
+  const quality = wifiSignalQuality(rssi);
+  const meter = document.createElement("span");
+  meter.className = `signal-bars${quality ? ` ${quality.tone}` : ""}`;
+  meter.setAttribute("aria-hidden", "true");
+  for (let i = 1; i <= 4; i++) {
+    const bar = document.createElement("span");
+    if (quality && i <= quality.bars) bar.className = "lit";
+    meter.appendChild(bar);
+  }
+  const text = document.createElement("span");
+  if (!quality) {
+    text.textContent = "Signal: waiting for tablet…";
+  } else {
+    const parts = [`Signal: ${quality.label} (${rssi} dBm)`];
+    if (stats.wifiLinkMbps > 0) parts.push(`${stats.wifiLinkMbps} Mbps`);
+    if (stats.wifiFrequencyMhz > 0) parts.push(stats.wifiFrequencyMhz >= 5900 ? "6 GHz" : stats.wifiFrequencyMhz >= 4900 ? "5 GHz" : "2.4 GHz");
+    text.textContent = parts.join(" · ");
+  }
+  row.append(meter, text);
+  return row;
+}
+
 function renderConnectionInfo(st) {
   if (st.activeTransport === "wifi-paired") {
     // A live Wi-Fi session makes the USB details irrelevant.
     $("switch-aoa-btn").hidden = true;
     const name = (wifiView && wifiView.pairedName) || "tablet";
-    $("connection-info").textContent = `Wi-Fi: connected to ${name}`;
+    const info = $("connection-info");
+    info.textContent = `Wi-Fi: connected to ${name}`;
+    info.appendChild(renderWifiSignal(st.clientVideoStats));
     return;
   }
   const lines = [];

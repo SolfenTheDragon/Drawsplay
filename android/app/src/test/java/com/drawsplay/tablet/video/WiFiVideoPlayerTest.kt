@@ -130,7 +130,8 @@ class WiFiVideoPlayerTest {
         feed.flush()
         val player = Thread {
             try {
-                WiFiVideoPlayer.run(media, { feed.close() }, control, negotiated, 42, { _, queue -> FakeDecoder(queue, mutableListOf()) }, statsLink, 20L) { false }
+                WiFiVideoPlayer.run(media, { feed.close() }, control, negotiated, 42, { _, queue -> FakeDecoder(queue, mutableListOf()) }, statsLink, 20L,
+                    { WiFiVideoStats.Link(rssiDbm = -58, linkMbps = 390, frequencyMhz = 5745) }) { false }
             } catch (_: IOException) {
             }
         }
@@ -142,7 +143,9 @@ class WiFiVideoPlayerTest {
         assertEquals(WiFiFrameCodec.CONTROL, header.type)
         assertEquals(2L, header.sequence)
         assertArrayEquals(byteArrayOf(8, 0, 0, 1), payload.copyOf(4))
-        assertTrue(String(payload, 4, payload.size - 4, Charsets.UTF_8).contains("\"framesReceived\":1"))
+        val json = String(payload, 4, payload.size - 4, Charsets.UTF_8)
+        assertTrue(json.contains("\"framesReceived\":1"))
+        assertTrue(json, json.contains("\"wifiRssiDbm\":-58,\"wifiLinkMbps\":390,\"wifiFrequencyMhz\":5745"))
         feed.write(frame(WiFiFrameCodec.CONTROL, 4, byteArrayOf(5, 0, 0, 1)))
         feed.flush()
         player.join(5000)
