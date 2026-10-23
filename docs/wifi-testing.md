@@ -132,6 +132,31 @@ made the complete command pass, including trust, channel and cleanup checks.
 See [recorded hardware evidence](performance/tab-a8-wifi-session-2026-10-22.json)
 and `tools/wifi_enrollment/README.md` for reproduction.
 
+## Synthetic media receive/decode (isolated preview)
+
+Combined Wi-Fi transport and media JVM run: **48 tests, zero failures,
+errors or skips** (Go interoperability fixture configured). Review fixes
+were each made test-first: coded-size/DPB limits in the config SPS,
+rejection of slices from different pictures in one access unit, and a
+drain condition that waits for a held post-flush recovery IDR.
+
+Actual Tab A8 (API 34, `OMX.sprd.h264.decoder`, 640x360 target 30 FPS,
+FFmpeg `testsrc2` fixture, LAN after numeric enrollment and fresh saved-trust
+channels):
+
+| Run | Received | Decoded/released | Queue drops | Overflows |
+| --- | --- | --- | --- | --- |
+| Clean (`tab-a8-wifi-synthetic-video-2026-10-22.json`, before review fixes) | 300 | 300 | 0 | 0 |
+| Clean, after review fixes | 300 | 300 | 0 | 0 |
+| Forced recovery (`tab-a8-wifi-forced-recovery-2026-10-23.json`) | 300 | 270 | 30 | 1 |
+
+Forced recovery stalls the probe decoder for 700 ms; the queue overflowed,
+dropped dependent pictures until the next IDR and decoding resumed. The
+end-of-stream-during-post-flush-hold case is covered by a pure drain-condition
+unit test only, not by hardware. Release-to-Surface is not physical scanout,
+latency, power, thermal, memory/allocation, soak, API 26, Windows or
+normal-app evidence.
+
 ## Not verified by these tests
 
 The production TLS factory also passed a real Tab A8 LAN echo experiment

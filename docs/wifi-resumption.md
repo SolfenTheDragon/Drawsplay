@@ -199,7 +199,16 @@ automation's ambiguous field name before recording future results.
 - No active shell jobs were listed at handoff. The existing product app
   and host were not stopped.
 
-## Open review findings: fix before committing media
+## Update 2026-10-23
+
+The three review findings below were fixed test-first and the media batch
+was committed (`4fb2ca4`, docs `917e0e0`, forced-recovery probe `ae6ce55`).
+Steps 2-4, 6 (partly: FUNCTIONALITY, enrollment README, wifi-testing) and 7
+are done; clean and forced-recovery tablet runs passed. Remaining: CPU/PSS/
+allocation measurements, other design/pairing/wiki docs, and step 8
+(normal-app integration). The text below is the historical finding record.
+
+## Open review findings (historical; now fixed)
 
 A read-only review of this uncommitted batch found three concrete issues.
 **None has been fixed yet.** They are important correctness/resource
