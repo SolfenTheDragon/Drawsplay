@@ -21,6 +21,7 @@ class WiFiPairedSession(private val identity: X509KeyManager, pairedHostPin: Byt
         private val raw: Socket,
         private val offer: WiFiSessionProtocol.Offer
     ) : Closeable {
+        val epoch: Long get() = offer.epoch
         private var videoRaw: Socket? = null
         private var video: Socket? = null
         private var attempted = false

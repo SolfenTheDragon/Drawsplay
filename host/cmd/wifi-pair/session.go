@@ -9,7 +9,7 @@ import (
 	"drawsplay/host/internal/wifilan"
 )
 
-func verifySession(ctx context.Context, iface, controlEndpoint, videoEndpoint string, store *wifilan.TrustStore, out io.Writer) (result error) {
+func verifySession(ctx context.Context, iface, controlEndpoint, videoEndpoint string, store *wifilan.TrustStore, testVideo string, out io.Writer) (result error) {
 	// Trust the paired identity, never identity claims from discovery metadata.
 	peer, paired := store.Peer()
 	if !paired {
@@ -31,7 +31,7 @@ func verifySession(ctx context.Context, iface, controlEndpoint, videoEndpoint st
 		StatsVersion: 1, Features: 1, SPKI: pin,
 	}
 	var registry wifilan.SessionRegistry
-	binding, _, err := wifilan.NegotiatePairedControl(ctx, control, local, peer, &registry)
+	binding, limits, err := wifilan.NegotiatePairedControl(ctx, control, local, peer, &registry)
 	if err != nil {
 		return fmt.Errorf("paired control negotiation failed: %w", err)
 	}
@@ -44,6 +44,11 @@ func verifySession(ctx context.Context, iface, controlEndpoint, videoEndpoint st
 	if err := wifilan.AcceptPairedVideo(ctx, video, binding, peer); err != nil {
 		return fmt.Errorf("video channel could not attach to paired control: %w", err)
 	}
-	_, err = fmt.Fprintln(out, "Paired control/video channels verified using saved trust. No capture or input was started.")
-	return err
+	if _, err = fmt.Fprintln(out, "Paired control/video channels verified using saved trust. No capture or input was started."); err != nil {
+		return err
+	}
+	if testVideo != "" {
+		return streamSyntheticVideo(ctx, testVideo, control, video, binding, limits, out)
+	}
+	return nil
 }

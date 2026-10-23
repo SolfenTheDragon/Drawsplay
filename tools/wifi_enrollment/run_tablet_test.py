@@ -24,7 +24,11 @@ def main():
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--verify-session", action="store_true",
                         help="also require fresh saved-trust control/video association; no capture or input")
+    parser.add_argument("--test-video", type=pathlib.Path,
+                        help="optional local DSVT synthetic video fixture; implies --verify-session")
     args = parser.parse_args()
+    if args.test_video:
+        args.verify_session = True
     devices = subprocess.check_output(["adb", "devices"], text=True)
     attached = [line.split()[0] for line in devices.splitlines()[1:] if line.endswith("\tdevice")]
     if len(attached) != 1:
@@ -44,7 +48,8 @@ def main():
             raise RuntimeError("Test APK installation did not succeed")
         installed = True
         command("shell", "am", "start", "-W", "-n", ACTIVITY,
-                "--ez", "checkSession", str(args.verify_session).lower())
+                "--ez", "checkSession", str(args.verify_session).lower(),
+                "--ez", "checkVideo", str(bool(args.test_video)).lower())
         pid = command("shell", "pidof", PACKAGE).strip()
         if not pid.isdigit():
             raise RuntimeError("Test application did not start as a single process")
@@ -67,7 +72,8 @@ def main():
                 process = subprocess.Popen(
                     [str(args.pair_command.resolve()), "-interface", args.interface,
                      "-tablet", available["name"], "-trust-dir", str(directory / "trust"),
-                     *(["-verify-session"] if args.verify_session else [])],
+                     *(["-verify-session"] if args.verify_session else []),
+                     *(["-test-video", str(args.test_video.resolve())] if args.test_video else [])],
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=diagnostics,
                 )
                 selector = selectors.DefaultSelector()
@@ -109,7 +115,7 @@ def main():
                 # This is explicit synthetic approval in a disposable test, not
                 # an automatic-approval option in the product pairing command.
                 try:
-                    output, _ = process.communicate(input=b"yes\n", timeout=35)
+                    output, _ = process.communicate(input=b"yes\n", timeout=100 if args.test_video else 35)
                 except subprocess.TimeoutExpired as error:
                     diagnostics.seek(0)
                     raise RuntimeError("Enrollment timed out: " + diagnostics.read() + logs()) from error
@@ -120,6 +126,8 @@ def main():
                     raise RuntimeError("Host did not confirm durable trust")
                 if args.verify_session and b"Paired control/video channels verified using saved trust." not in output:
                     raise RuntimeError("Host did not confirm fresh authenticated control/video association")
+                if args.test_video and b"Synthetic Wi-Fi video decoded:" not in output:
+                    raise RuntimeError("Host did not confirm bounded synthetic decode acceptance")
                 record = json.loads((directory / "trust" / "trust.json").read_text())
                 if not record.get("tabletSpki") or record.get("tabletLabel") != available["name"]:
                     raise RuntimeError("Host trust did not persist the selected tablet")
@@ -143,12 +151,20 @@ def main():
                     "tabletTrustReloaded": True,
                     "tabletIdentityRetained": True,
                     "freshSavedTrustControlAndVideoVerified": args.verify_session,
+                    "syntheticVideoDecoded": bool(args.test_video),
                     "networkAndMulticastCleanupConfirmed": True,
                     "approval": "automated local test input on both devices; disposable identities",
                     "usbImplementationTested": False,
                     "videoOrInputSessionStarted": False,
                     "limitations": "One API 34/Linux IPv4 LAN run; not streaming, power, soak, Android 8 or Windows evidence",
                 }
+                if args.test_video:
+                    media = next((json.loads(line[line.index("{"):]) for line in device_logs.splitlines()
+                                  if '{"state":"videoComplete"' in line), None)
+                    if media is None:
+                        raise RuntimeError("Tablet did not record synthetic decode counts")
+                    report["syntheticMedia"] = media
+                    report["limitations"] = "Synthetic AVC only; not desktop streaming, input, power, soak, Android 8 or Windows evidence"
                 args.output.write_text(json.dumps(report, indent=2) + "\n")
     finally:
         if process is not None and process.poll() is None:

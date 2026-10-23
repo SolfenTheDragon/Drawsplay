@@ -37,4 +37,12 @@ func TestPairCommandHasExplicitOptInForPairedSessionVerification(t *testing.T) {
 	if code := run([]string{"-verify-session", "-help"}, strings.NewReader(""), &out, &diagnostics); code != 0 {
 		t.Fatal("paired-session diagnostic is not an explicit opt-in CLI option")
 	}
+
+}
+
+func TestPairCommandHasExplicitSyntheticVideoOptIn(t *testing.T) {
+	var out, diagnostics bytes.Buffer
+	if code := run([]string{"-test-video", "synthetic.dsvt", "-help"}, strings.NewReader(""), &out, &diagnostics); code != 0 {
+		t.Fatal("synthetic media diagnostic is not an explicit opt-in CLI option")
+	}
 }

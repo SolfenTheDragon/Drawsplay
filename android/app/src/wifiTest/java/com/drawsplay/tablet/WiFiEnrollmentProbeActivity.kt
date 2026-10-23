@@ -15,6 +15,9 @@ import android.os.Bundle
 import android.text.InputType
 import android.util.Log
 import android.view.WindowManager
+import android.view.Surface
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -23,6 +26,10 @@ import com.drawsplay.tablet.transport.WiFiEnrollment
 import com.drawsplay.tablet.transport.WiFiPairedSession
 import com.drawsplay.tablet.transport.WiFiSessionProtocol
 import com.drawsplay.tablet.transport.WiFiTrustStore
+import com.drawsplay.tablet.transport.WiFiFrameCodec
+import com.drawsplay.tablet.video.WiFiVideoReceiver
+import com.drawsplay.tablet.video.WiFiVideoDecoder
+import java.nio.ByteBuffer
 import java.io.IOException
 import java.net.Inet4Address
 import java.net.InetSocketAddress
@@ -32,6 +39,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.X509KeyManager
 
 /** Test-only foreground LAN enrollment, never registered for USB attachments. */
@@ -50,6 +58,7 @@ class WiFiEnrollmentProbeActivity : Activity() {
     private var connectivity: ConnectivityManager? = null
     private var callback: ConnectivityManager.NetworkCallback? = null
     private lateinit var status: TextView
+    private val renderSurface = CompletableFuture<Surface>()
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -79,6 +88,15 @@ class WiFiEnrollmentProbeActivity : Activity() {
             addView(status)
             addView(entry)
             addView(approve)
+            if (intent.getBooleanExtra("checkVideo", false)) {
+                addView(SurfaceView(this@WiFiEnrollmentProbeActivity).apply {
+                    holder.addCallback(object : SurfaceHolder.Callback {
+                        override fun surfaceCreated(holder: SurfaceHolder) { renderSurface.complete(holder.surface) }
+                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+                        override fun surfaceDestroyed(holder: SurfaceHolder) { failProbe("Synthetic render surface closed") }
+                    })
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 400))
+            }
         })
         try {
             if (Build.VERSION.SDK_INT < 33) throw IOException("This network-scoped NSD hardware probe requires API 33; enrollment codec itself supports API 26")
@@ -199,12 +217,15 @@ class WiFiEnrollmentProbeActivity : Activity() {
                         session.acceptControl(acceptSelectedPeer(inputListener), capabilities, 5000).use { controlSession ->
                             paired = controlSession
                             if (stopped.get()) throw IOException("Session test cancelled")
-                            session.acceptVideo(acceptSelectedPeer(video!!), controlSession, 5000)
+                            val media = session.acceptVideo(acceptSelectedPeer(video!!), controlSession, 5000)
                             val limits = controlSession.limits
                             check(limits.maxWidth == 1280 && limits.maxHeight == 720 && limits.maxFps == 30)
                             check(limits.maxAccessUnit == 256 * 1024 && limits.queueBytes == 512 * 1024 && limits.queueSlots == 2)
                             Log.i(TAG, """{"state":"sessionReady","freshSavedTrust":true,"controlAndVideoMutualTls":true,"boundedCapabilities":true,"captureAndInputStarted":false}""")
                             runOnUiThread { status.text = "Saved trust authenticated fresh control/video channels. No screen capture or input injection was started." }
+                            if (intent.getBooleanExtra("checkVideo", false)) {
+                                checkSyntheticVideo(media, controlSession, controlSession.epoch)
+                            }
                         }
                     }
                     stopNetwork()
@@ -222,6 +243,75 @@ class WiFiEnrollmentProbeActivity : Activity() {
     private fun failProbe(message: String) {
         runOnUiThread { status.text = message }
         stopNetwork()
+    }
+
+    private fun checkSyntheticVideo(media: Socket, session: WiFiPairedSession.Control, epoch: Long) {
+        media.soTimeout = 10000
+        val receiver = WiFiVideoReceiver(media.inputStream, session.limits, epoch)
+        val surface = renderSurface.get(5, TimeUnit.SECONDS)
+        val ready = CompletableFuture<WiFiVideoDecoder>()
+        val ended = AtomicBoolean(false)
+        val failure = AtomicReference<Throwable>()
+        val decoderThread = Thread({
+            try {
+                WiFiVideoDecoder(surface, receiver.config, receiver.queue, session.limits.maxAccessUnit).use { decoder ->
+                    ready.complete(decoder)
+                    while (!WiFiVideoDecoder.drained(ended.get(), receiver.queue.depth, decoder.pendingFrames, decoder.holdingRecoverySlot)) {
+                        if (stopped.get()) throw IOException("Wi-Fi synthetic decode cancelled")
+                        val now = System.nanoTime() / 1000
+                        if (!decoder.step(now)) Thread.sleep(1)
+                        if (decoder.pendingFrames != 0 && now - decoder.lastOutputUs > 2000000) {
+                            throw IOException("Wi-Fi decoder stalled for two seconds: received=${receiver.received} submitted=${decoder.submitted} decoded=${decoder.decoded} pending=${decoder.pendingFrames} queueDrops=${receiver.queue.dropped}")
+                        }
+                    }
+                }
+            } catch (error: Exception) {
+                Log.e(TAG, "Synthetic decoder failed", error)
+                failure.set(error)
+                ready.completeExceptionally(error)
+                try { media.close() } catch (closeError: IOException) { error.addSuppressed(closeError) }
+            }
+        }, "wifi-synthetic-decoder")
+        decoderThread.start()
+        try {
+            val decoder = ready.get(5, TimeUnit.SECONDS)
+            val controlWriter = WiFiFrameCodec.Writer(session.socket.outputStream)
+            val header = WiFiFrameCodec.Header().apply {
+                type = WiFiFrameCodec.CONTROL
+                this.epoch = epoch
+                sequence = 2
+                payloadLength = 4
+            }
+            val result = ByteArray(24)
+            result[0] = 7
+            result[3] = 1
+            controlWriter.writeFrame(header, result, 0, 4)
+            while (receiver.receive()) {
+                failure.get()?.let { throw IOException("Synthetic Wi-Fi decoder failed", it) }
+            }
+            ended.set(true)
+            decoderThread.join(3000)
+            if (decoderThread.isAlive) throw IOException("Synthetic decoder did not drain promptly")
+            failure.get()?.let { throw IOException("Synthetic Wi-Fi decode failed", it) }
+            ByteBuffer.wrap(result).apply {
+                put(6).put(0).putShort(1)
+                putInt(receiver.received.toInt()).putInt(decoder.decoded.toInt()).putInt(decoder.renderReleased.toInt())
+                putInt(receiver.queue.dropped.toInt()).putInt(decoder.decodeDrops.toInt())
+            }
+            header.sequence = 3
+            header.payloadLength = result.size
+            controlWriter.writeFrame(header, result, 0, result.size)
+            Log.i(TAG, """{"state":"videoComplete","received":${receiver.received},"decoded":${decoder.decoded},"renderReleased":${decoder.renderReleased},"queueDrops":${receiver.queue.dropped},"decodeDrops":${decoder.decodeDrops},"overflowEvents":${receiver.queue.overflowEvents},"ageEvents":${receiver.queue.ageEvents},"maxInterArrivalUs":${receiver.maxInterArrivalUs},"burstArrivals":${receiver.burstArrivals},"compressedPoolBytes":${receiver.queue.storageBytes},"decoder":"${decoder.name}","width":${receiver.config.width},"height":${receiver.config.height},"fpsTarget":${receiver.config.fps}}""")
+            runOnUiThread { status.text = "Synthetic Wi-Fi AVC decoded and released ${decoder.renderReleased}/${receiver.received} pictures to Surface. No desktop content or input injection." }
+        } finally {
+            ended.set(true)
+            if (decoderThread.isAlive) {
+                decoderThread.interrupt()
+                decoderThread.join(3000)
+                if (decoderThread.isAlive) throw IOException("Wi-Fi decoder thread cleanup timed out")
+            }
+            receiver.queue.close()
+        }
     }
 
     private fun stopNetwork() {

@@ -367,6 +367,19 @@ saved-trust channels without media. API-34 Tab A8 evidence is recorded in
 `docs/performance/tab-a8-wifi-session-2026-10-22.json`; automatic reconnect,
 normal-app availability and performance acceptance are still outstanding.
 
+**Synthetic Wi-Fi media (isolated test preview only).** The Android Wi-Fi
+receiver (`video/WiFi*.kt`) validates a bounded baseline-AVC stream before
+any MediaCodec use; this is not wired into the product display path. The
+config SPS must be progressive constrained baseline within the negotiated
+level and maxima; the coded size may exceed the visible size only by
+macroblock alignment padding (crop under 16 px) and must stay within the
+maxima rounded up to 16; `max_num_ref_frames` must fit the level's decoded
+picture buffer (MaxDpbMbs / coded macroblocks, capped at 16). Each access
+unit is one AUD-delimited picture: all its slices must share PPS, IDR flag,
+`nal_ref_idc` zero/non-zero status, `frame_num`, `idr_pic_id` and (POC type
+0) `pic_order_cnt_lsb`, with strictly increasing `first_mb_in_slice`;
+otherwise the stream is rejected. On end-of-stream the decoder drains only
+after any held post-flush recovery IDR has been submitted.
 ## 4. Target MVP Functionality
 
 1. Extend desktop onto a virtual display represented by the Android tablet. **(done — M2)**
