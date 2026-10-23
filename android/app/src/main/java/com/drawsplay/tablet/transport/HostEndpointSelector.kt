@@ -19,6 +19,8 @@ class HostEndpointSelector {
     @Volatile
     private var accessoryAttached = false
 
+    fun isAccessoryAttached(): Boolean = accessoryAttached
+
     fun updateAccessoryAttached(attached: Boolean) {
         accessoryAttached = attached
     }

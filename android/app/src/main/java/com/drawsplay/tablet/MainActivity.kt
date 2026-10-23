@@ -1,6 +1,8 @@
 ﻿package com.drawsplay.tablet
 
 import com.drawsplay.tablet.video.TileView
+import com.drawsplay.tablet.transport.UsbPriorityPolicy
+import com.drawsplay.tablet.transport.WiFiPairedSessionHost
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
@@ -66,6 +68,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var videoChannel: VideoChannel
     private val endpointSelector = HostEndpointSelector()
     private lateinit var wifiDiscoveryManager: WiFiDiscoveryManager
+    private lateinit var pairedWifiHost: WiFiPairedSessionHost
     private var backgroundSink: ImageReader? = null
     @Volatile
     private var pendingForegroundSurface: Surface? = null
@@ -199,6 +202,8 @@ class MainActivity : AppCompatActivity() {
             { wifiPolicyTlsFingerprint }
         )
 
+        pairedWifiHost = WiFiPairedSessionHost(this, endpointSelector, { pendingForegroundSurface }) { wifiAllowedNow() }
+
         videoChannel.tileSink = tileView
         inputPad.onInputBatch = { events -> inputChannel.send(events) }
 
@@ -233,6 +238,7 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         appForeground = true
         updateWiFiDiscoveryState()
+        pairedWifiHost.start()
         AccessoryTransport.refresh()
         AccessoryTransport.setPolling(true)
         inputChannel.start()
@@ -251,6 +257,7 @@ class MainActivity : AppCompatActivity() {
             inputChannel.stop()
         }
         wifiDiscoveryManager.stop()
+        pairedWifiHost.stop()
         super.onStop()
     }
 
@@ -522,6 +529,14 @@ class MainActivity : AppCompatActivity() {
         if (wifiPolicyAuthToken.isBlank()) return false
         if (wifiPolicyTlsRequired && wifiPolicyTlsFingerprint.isBlank()) return false
         return true
+    }
+
+    /** USB (accessory, or USB power with adb on) has priority over a paired Wi-Fi session. */
+    private fun wifiAllowedNow(): Boolean {
+        val battery = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val usbPowered = battery?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) == android.os.BatteryManager.BATTERY_PLUGGED_USB
+        val adbEnabled = android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.ADB_ENABLED, 0) == 1
+        return UsbPriorityPolicy.allowWifi(endpointSelector.isAccessoryAttached(), usbPowered, adbEnabled)
     }
 
     private fun updateWiFiDiscoveryState() {
