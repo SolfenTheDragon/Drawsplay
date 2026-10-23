@@ -2,7 +2,7 @@ package main
 
 // wifiH264Level is the level requested from encoders on the paired Wi-Fi path;
 // it matches the H264Level the host offers during negotiation.
-const wifiH264Level = "4.2"
+const wifiH264Level = "5.0"
 
 // wifiProfileArgs are the settings appended after the normal encoder args for
 // the paired Wi-Fi path: H.264 constrained baseline, a single slice per

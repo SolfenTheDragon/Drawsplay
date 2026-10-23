@@ -29,6 +29,7 @@ class WiFiPairedSessionHost(
     context: Context,
     private val selector: HostEndpointSelector,
     private val surface: () -> Surface?,
+    private val onStreaming: (Boolean) -> Unit = {},
     private val wifiAllowed: () -> Boolean
 ) {
     private val app = context.applicationContext
@@ -121,10 +122,12 @@ class WiFiPairedSessionHost(
             // The control socket and the paired Wi-Fi endpoint stop being offered once the session ends.
             selector.updatePairedControl(linkSocket)
             val target = waitForSurface()
+            onStreaming(true)
             WiFiVideoPlayer.run(media.inputStream, { active.close() }, link, established.limits, established.epoch, target) {
                 !running.get() || !wifiAllowed()
             }
         } finally {
+            onStreaming(false)
             watcher.interrupt()
             selector.updatePairedControl(null)
             session?.close()
@@ -172,7 +175,7 @@ class WiFiPairedSessionHost(
 
         private val CAPABILITIES = WiFiSessionProtocol.Hello(
             minMajor = 2, maxMajor = 2, role = WiFiSessionProtocol.TABLET, codecMask = 1,
-            maxWidth = 1920, maxHeight = 1200, maxFps = 60, h264Level = 42,
+            maxWidth = 1920, maxHeight = 1200, maxFps = 60, h264Level = 50,
             maxAccessUnit = 512 * 1024, queueBytes = 1536 * 1024, queueSlots = 3,
             statsVersion = 1, features = 1, spki = ByteArray(32), nonce = ByteArray(32)
         )

@@ -411,7 +411,7 @@ the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wra
   saved. Otherwise nothing changes. A discovery loop yields to USB: it skips
   candidates while a non-Wi-Fi transport owns the session.
 - Paired sessions use transport `wifi-paired` and an opt-in H.264 baseline
-  encoder shape (ffmpeg only, level 4.2, no native media, no temporal
+  encoder shape (ffmpeg only, level 5.0, no native media, no temporal
   layering). USB encoder arguments are unchanged.
 - Adaptive bitrate is idle on Wi-Fi: there is no tablet-to-host stats path yet.
 - Android has `WiFiControlLink` (control socket as a byte stream),
@@ -433,11 +433,18 @@ the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wra
   (`WiFiPairingActivity`): run the `wifi-pair` CLI on the host, enter its
   eight-digit code on the tablet. Trust is stored in the Android Keystore
   backed store.
-- Limits advertised by the tablet: 1920x1200, 60 fps, level 4.2, 512 KiB
-  access units, 3 queue slots. Level 4.2 and 60 fps are the host's maximum.
-- Not yet verified: the integrated product path on real hardware (only the
-  isolated probe and synthetic streams were run on a tablet). No API 26
-  discovery fallback beyond skipping network-scoped NSD; Android 16+ local
+- Limits advertised by the tablet: 1920x1200, 60 fps, level 5.0, 512 KiB
+  access units, 3 queue slots. Level 5.0 is required: 1920x1200 is 9000 macroblocks, above level 4.2's 8704.
+- Verified on one Samsung SM-X200 (API 34) against an X11 host over Wi-Fi
+  while adb ran over Wi-Fi and the USB cable stayed attached, with USB power
+  and adb simulated off via `dumpsys battery unplug`: pairing, discovery, a
+  1920x1200 libx264 baseline stream rendered on the tablet, tablet touch moving
+  the host cursor on the virtual display, and the Wi-Fi session ending within
+  seconds of USB power and adb returning. Not verified: a real cable pull,
+  pen input, other tablets or hosts, and sustained-latency numbers. This
+  tablet's decoder is `OMX.sprd.h264.decoder` and holds one frame back. VAAPI
+  is skipped for paired Wi-Fi because it does not emit a baseline SPS. No API
+  26 discovery fallback beyond skipping network-scoped NSD; Android 16+ local
   network permission is not requested.
 
 ## 4. Target MVP Functionality

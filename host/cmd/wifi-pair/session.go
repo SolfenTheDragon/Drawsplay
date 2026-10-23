@@ -26,7 +26,7 @@ func verifySession(ctx context.Context, iface, controlEndpoint, videoEndpoint st
 	defer func() { result = errors.Join(result, control.NetConn().Close()) }()
 	local := wifilan.SessionHello{
 		MinMajor: 2, MaxMajor: 2, Role: wifilan.SessionRoleHost, CodecMask: 1,
-		MaxWidth: 1920, MaxHeight: 1200, MaxFPS: 60, H264Level: 42,
+		MaxWidth: 1920, MaxHeight: 1200, MaxFPS: 60, H264Level: 50,
 		MaxAccessUnit: 1024 * 1024, QueueBytes: 3 * 1024 * 1024, QueueSlots: 3,
 		StatsVersion: 1, Features: 1, SPKI: pin,
 	}

@@ -87,7 +87,7 @@ func TestBuildFFmpegSpecWiFiBaselineIsOptInAndLeavesUSBArgsUnchanged(t *testing.
 		}
 	}
 	wifi := buildFFmpegSpec(videoOptions{FFmpeg: "ffmpeg", FPS: 30, Bitrate: "4M", WiFiBaseline: true}, capture, "libx264", encoderArgs("libx264", 30))
-	if strings.Join(wifi.Args, " ") == strings.Join(usb.Args, " ") || !strings.Contains(strings.Join(wifi.Args, " "), "-profile:v baseline -level 4.2") {
+	if strings.Join(wifi.Args, " ") == strings.Join(usb.Args, " ") || !strings.Contains(strings.Join(wifi.Args, " "), "-profile:v baseline -level 5.0") {
 		t.Fatalf("Wi-Fi spec missing baseline args: %v", wifi.Args)
 	}
 }
