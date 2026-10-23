@@ -34,6 +34,17 @@
     <div id="connection-info" class="hint"></div>
     <button id="switch-aoa-btn" type="button" hidden>Switch to USB accessory mode</button>
     <div id="warnings" class="hint" hidden></div>
+    <div id="wifi-pairing-card" class="wifi-pairing-card" hidden>
+      <div class="eyebrow">WI-FI PAIRING</div>
+      <div id="wifi-pair-code" class="wifi-pair-code" hidden></div>
+      <div id="wifi-pair-text" class="hint"></div>
+      <div class="wifi-pair-actions">
+        <button id="wifi-pair-approve" type="button" hidden>Approve</button>
+        <button id="wifi-pair-deny" type="button" class="danger" hidden>Deny</button>
+        <button id="wifi-pair-start" type="button" hidden>Show pairing code</button>
+        <button id="wifi-pair-cancel" type="button" hidden>Cancel</button>
+      </div>
+    </div>
     <div class="metrics-row">
       <div id="metrics-summary" class="hint"></div>
       <label class="autostart-check" title="Start the host automatically at login">
@@ -116,6 +127,20 @@
             <span class="slider"></span>
           </label>
         </div>
+      </section>
+      <section class="input-options wifi-options" data-feature-wifi hidden>
+        <strong>Wi-Fi connection</strong>
+        <div class="hint">Use the tablet wirelessly on the same network. USB always takes priority when the tablet is plugged in.</div>
+        <div class="toggle-row">
+          <span>Wi-Fi</span>
+          <label class="switch">
+            <input id="paired-wifi-enabled" type="checkbox">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <label for="paired-wifi-interface">Network interface</label>
+        <select id="paired-wifi-interface"></select>
+        <div class="hint">Save settings to apply. The pairing code appears in Host overview.</div>
       </section>
       <details class="advanced">
         <summary>Advanced settings</summary>

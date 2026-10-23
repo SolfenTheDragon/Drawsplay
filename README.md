@@ -143,6 +143,11 @@ On Linux the frame rate is limited to 60, except on X11 hosts with VA-API (Intel
 ## Wi-Fi development diagnostics
 
 The new host-discovers-tablet Wi-Fi path is **not ready for normal use**.
+Wi-Fi (opt-in, start the host with `DRAWSPLAY_FEATURE_WIFI=1`): turn on
+**Wi-Fi** in the web UI configuration, choose your network interface and save;
+the pairing code appears in Host overview. On the tablet tap **Wi-Fi connect**,
+enter the code, then approve in the web UI. USB always takes priority.
+
 Developers can run bounded, LAN-only [tablet discovery](docs/wifi-discovery.md)
 and reproduce [Wi-Fi TLS tests](docs/wifi-testing.md).
 An [isolated Android advertisement probe](tools/android_wifi_probe/README.md)

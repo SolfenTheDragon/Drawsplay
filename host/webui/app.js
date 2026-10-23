@@ -165,6 +165,95 @@ function applyPlatformVisibility(hostOS) {
   }
 }
 
+let wifiSelectedInterface = "";
+let wifiView = null;
+
+function formatPairCode(code) {
+  return code && code.length === 8 ? code.slice(0, 4) + " " + code.slice(4) : code || "";
+}
+
+function renderWifiPairing() {
+  const card = $("wifi-pairing-card");
+  const v = wifiView;
+  if (!featureFlags.wifi || !v || !v.enabled) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  const p = v.pairing || { phase: "idle" };
+  const code = $("wifi-pair-code");
+  const text = $("wifi-pair-text");
+  const show = (id, on) => { $(id).hidden = !on; };
+  code.hidden = p.phase !== "waiting" || !p.code;
+  code.textContent = formatPairCode(p.code);
+  show("wifi-pair-approve", p.phase === "approval");
+  show("wifi-pair-deny", p.phase === "approval");
+  show("wifi-pair-cancel", p.phase === "waiting");
+  const idleLike = p.phase === "idle" || p.phase === "failed" || p.phase === "done";
+  show("wifi-pair-start", idleLike);
+  $("wifi-pair-start").textContent = v.paired ? "Pair another tablet" : "Show pairing code";
+  if (p.phase === "waiting") {
+    const left = Math.max(0, Math.round((p.expiresAtMs - Date.now()) / 1000));
+    text.textContent = "On the tablet tap Wi-Fi connect, then enter this code. Expires in " + left + "s.";
+  } else if (p.phase === "approval") {
+    text.textContent = "Allow \"" + p.tablet + "\" (fingerprint " + p.fingerprint + ") to use this computer as a display and input device?";
+  } else if (p.phase === "failed") {
+    text.textContent = p.error || "Pairing failed.";
+  } else if (p.phase === "done") {
+    text.textContent = "Paired with \"" + p.tablet + "\". It will connect over Wi-Fi when USB is not plugged in.";
+  } else if (v.paired) {
+    text.textContent = "Paired with \"" + (v.pairedName || "tablet") + "\".";
+  } else {
+    text.textContent = "No tablet is paired yet.";
+  }
+}
+
+function renderWifiInterfaces(v) {
+  const select = $("paired-wifi-interface");
+  const wanted = wifiSelectedInterface || v.interface || "";
+  const names = (v.interfaces || []).slice();
+  if (wanted && !names.includes(wanted)) names.push(wanted);
+  const signature = names.join("|");
+  if (select.dataset.names !== signature) {
+    select.dataset.names = signature;
+    select.innerHTML = "";
+    for (const name of names) {
+      const opt = document.createElement("option");
+      opt.value = opt.textContent = name;
+      select.appendChild(opt);
+    }
+  }
+  if (document.activeElement !== select && wanted) select.value = wanted;
+}
+
+async function refreshWifiPairing() {
+  if (!featureFlags.wifi) {
+    renderWifiPairing();
+    return;
+  }
+  try {
+    wifiView = await api("/api/wifi/pairing");
+    renderWifiInterfaces(wifiView);
+  } catch (e) {
+    wifiView = null;
+  }
+  renderWifiPairing();
+}
+
+async function wifiPairAction(action, body) {
+  try {
+    wifiView = await api("/api/wifi/pairing/" + action, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+  } catch (e) {
+    $("wifi-pair-text").textContent = String(e.message || e);
+    return;
+  }
+  renderWifiPairing();
+}
+
 function applyFeatureVisibility(flags) {
   const wifiEnabled = !!(flags && flags.wifi);
   featureFlags.wifi = wifiEnabled;
@@ -335,6 +424,8 @@ async function loadSettings() {
   $("ffmpeg").value = s.ffmpeg;
   $("adb").value = s.adb;
   $("adb-serial").value = s.preferredADBSerial || "";
+  $("paired-wifi-enabled").checked = !!s.pairedWifiEnabled;
+  wifiSelectedInterface = s.pairedWifiInterface || "";
   $("wifi-enabled").checked = !!s.wifiEnabled;
   $("wifi-service-name").value = s.wifiServiceName || "DrawSplay";
   $("wifi-bind-address").value = s.wifiBindAddress || "0.0.0.0";
@@ -631,6 +722,8 @@ $("form").addEventListener("submit", async (ev) => {
       adbTunnelEnabled: $("adb-tunnel-enabled").checked,
     };
     if (featureFlags.wifi) {
+      body.pairedWifiEnabled = $("paired-wifi-enabled").checked;
+      body.pairedWifiInterface = $("paired-wifi-interface").value;
       body.wifiEnabled = $("wifi-enabled").checked;
       body.wifiServiceName = $("wifi-service-name").value.trim();
       body.wifiBindAddress = $("wifi-bind-address").value.trim();
@@ -911,4 +1004,11 @@ setCalibrationForm("", { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 });
 loadSettings().catch((e) => showMsg(e.message, false));
 refreshStatus();
 setInterval(refreshStatus, 2000);
+setInterval(refreshWifiPairing, 2000);
+setInterval(renderWifiPairing, 1000);
+$("wifi-pair-start").addEventListener("click", () => wifiPairAction("start", { replace: !!(wifiView && wifiView.paired) }));
+$("paired-wifi-interface").addEventListener("change", (e) => { wifiSelectedInterface = e.target.value; });
+$("wifi-pair-cancel").addEventListener("click", () => wifiPairAction("cancel"));
+$("wifi-pair-approve").addEventListener("click", () => wifiPairAction("approve"));
+$("wifi-pair-deny").addEventListener("click", () => wifiPairAction("deny"));
 setInterval(refreshDebugConsole, 1000);

@@ -21,6 +21,8 @@ type Candidate struct {
 	Addresses []netip.Addr `json:"addresses"`
 	InputPort int          `json:"inputPort"`
 	VideoPort int          `json:"videoPort"`
+	// Pairing is true while the tablet's Wi-Fi connect panel is open.
+	Pairing bool `json:"pairing"`
 }
 
 func ParseCandidate(entry *zeroconf.ServiceEntry, prefixes []netip.Prefix) (Candidate, error) {
@@ -63,7 +65,7 @@ func ParseCandidate(entry *zeroconf.ServiceEntry, prefixes []netip.Prefix) (Cand
 		entry.Port < 1024 || entry.Port > 65535 || entry.Port == videoPort {
 		return Candidate{}, fmt.Errorf("tablet requires distinct input/video ports in 1024..65535")
 	}
-	candidate := Candidate{Name: entry.Instance, InputPort: entry.Port, VideoPort: videoPort}
+	candidate := Candidate{Name: entry.Instance, InputPort: entry.Port, VideoPort: videoPort, Pairing: attributes["pairing"] == "1"}
 	for _, ip := range entry.AddrIPv4 {
 		address, ok := netip.AddrFromSlice(ip)
 		if !ok {

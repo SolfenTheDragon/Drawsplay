@@ -13,16 +13,16 @@ func TestPairedWiFiStartIsInertWithoutFlagInterfaceOrTrust(t *testing.T) {
 	t.Setenv("APPDATA", cfg)
 	t.Setenv(wifiFeatureFlagEnv, "")
 	t.Setenv(wifiPairedInterfaceEnv, "lo")
-	if started := startPairedWiFi(context.Background(), nil); started {
+	if started := startPairedWiFiRuntime(context.Background(), nil); started != nil {
 		t.Fatal("started with the feature flag off")
 	}
 	t.Setenv(wifiFeatureFlagEnv, "1")
 	t.Setenv(wifiPairedInterfaceEnv, "")
-	if startPairedWiFi(context.Background(), nil) {
+	if startPairedWiFiRuntime(context.Background(), nil) != nil {
 		t.Fatal("started without an explicit interface")
 	}
 	t.Setenv(wifiPairedInterfaceEnv, "lo")
-	if startPairedWiFi(context.Background(), nil) {
+	if startPairedWiFiRuntime(context.Background(), nil) != nil {
 		t.Fatal("started without a pairing")
 	}
 	entries, _ := os.ReadDir(filepath.Join(cfg, "DrawSplay", wifiTrustDirName))

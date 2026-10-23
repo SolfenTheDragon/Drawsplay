@@ -76,7 +76,12 @@ type settings struct {
 	WifiTLS         bool   `json:"wifiTLS"`
 	WifiAuthToken   string `json:"wifiAuthToken,omitempty"`
 	WifiMaxBitrate  string `json:"wifiMaxBitrate"`
-	AOAEnabled      bool   `json:"aoaEnabled"`
+	// PairedWifiEnabled turns on the paired mutual-TLS Wi-Fi transport (needs
+	// DRAWSPLAY_FEATURE_WIFI). It is separate from the legacy token transport.
+	PairedWifiEnabled bool `json:"pairedWifiEnabled"`
+	// PairedWifiInterface is the explicit LAN interface for paired Wi-Fi.
+	PairedWifiInterface string `json:"pairedWifiInterface,omitempty"`
+	AOAEnabled          bool   `json:"aoaEnabled"`
 	// AOAAutoSwitch makes the host switch an attached tablet into accessory mode on its own; when off, only the web UI button does.
 	AOAAutoSwitch bool `json:"aoaAutoSwitch"`
 	// ADBTunnelEnabled turns on the legacy adb-reverse transport. It needs

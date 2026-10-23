@@ -34,7 +34,8 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	go startWiFiTransport(ctx, store)
 	// Paired mutual-TLS Wi-Fi: inert unless DRAWSPLAY_FEATURE_WIFI, an
 	// explicit interface and an existing pairing are all present.
-	startPairedWiFi(ctx, store)
+	pairedWiFiRuntime.init(ctx, store)
+	wifiPairing = newHostWiFiPairingService(store)
 
 	// Default USB transport: Android Open Accessory, without ADB or debugging.
 	startAOATransport(ctx, store)

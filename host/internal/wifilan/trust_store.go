@@ -204,6 +204,14 @@ func (s *TrustStore) Peer() ([32]byte, bool) {
 	return [32]byte(decoded), true
 }
 
+// Label is the paired tablet's saved name, or empty when unpaired.
+func (s *TrustStore) Label() string {
+	if _, paired := s.Peer(); !paired {
+		return ""
+	}
+	return s.record.Label
+}
+
 func (s *TrustStore) Pair(pin [32]byte, label string) error {
 	if pin == [32]byte{} || !validTabletLabel(label) {
 		return errors.New("Wi-Fi pairing requires a nonzero identity and a printable tablet name of 1..63 bytes")

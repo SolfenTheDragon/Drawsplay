@@ -406,10 +406,24 @@ the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wra
 #### 3.8.1 Host product startup and Android client pieces (development preview)
 
 - The host starts the paired Wi-Fi path only when `DRAWSPLAY_FEATURE_WIFI` is
-  on, `DRAWSPLAY_WIFI_INTERFACE` names the LAN interface, `<configDir>/wifi-trust`
-  already exists (created only by the `wifi-pair` CLI) and a paired peer is
-  saved. Otherwise nothing changes. A discovery loop yields to USB: it skips
-  candidates while a non-Wi-Fi transport owns the session.
+  on, the **Wi-Fi** toggle in the web UI configuration (above Advanced
+  settings, setting `pairedWifiEnabled`) is on, a network interface is chosen
+  (`pairedWifiInterface`, falling back to `DRAWSPLAY_WIFI_INTERFACE`) and a
+  paired peer is saved. Otherwise nothing changes. Saving the toggle or
+  interface restarts only the paired runtime, never USB. A discovery loop
+  yields to USB: it skips candidates while a non-Wi-Fi transport owns the
+  session.
+- Pairing is done in the web UI Host overview, which shows a Wi-Fi pairing card
+  only while the toggle is saved on. Turning the toggle on with nobody paired
+  generates an eight-digit code (valid 120 s) shown there; the card also offers
+  "Show pairing code" / "Pair another tablet". The tablet must have its Wi-Fi
+  connect panel open (it advertises `pairing=1`); the host then dials it, and
+  once the code and both TLS identities verify the card asks for **Approve** or
+  **Deny**. Only approval saves trust. The paired runtime is stopped while
+  pairing (it holds the trust-store lock) and restarted afterwards. API:
+  `GET /api/wifi/pairing`, `POST /api/wifi/pairing/{start,approve,deny,cancel}`
+  (CSRF protected, 404 when the feature flag is off). The `wifi-pair` CLI
+  remains for development.
 - Paired sessions use transport `wifi-paired` and an opt-in H.264 baseline
   encoder shape (ffmpeg only, level 5.0, no native media, no temporal
   layering). USB encoder arguments are unchanged.
@@ -432,8 +446,8 @@ the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wra
 - Pairing is part of the regular app's main screen, styled like the host web
   UI (dark panel, blue accent). The "Wi-Fi connect" button on the "Waiting for
   host" screen reveals a pairing panel (`WiFiPairingSession`); nothing Wi-Fi
-  related shows until it is tapped. Run the `wifi-pair` CLI on the host, then
-  enter its eight-digit code. The paired session is paused while the panel is
+  related shows until it is tapped. Enter the eight-digit code shown in the
+  host web UI Host overview. The paired session is paused while the panel is
   open and the panel closes when the app leaves the foreground. Trust is
   stored in the Android Keystore backed store.
 - Limits advertised by the tablet: 1920x1200, 60 fps, level 5.0, 512 KiB

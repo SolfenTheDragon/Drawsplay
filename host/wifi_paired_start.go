@@ -5,8 +5,7 @@ import (
 	"log"
 	"net"
 	"os"
-	"path/filepath"
-	"strings"
+	"sync"
 	"time"
 
 	"drawsplay/host/internal/wifilan"
@@ -20,40 +19,58 @@ const (
 	wifiTrustDirName = "wifi-trust"
 )
 
-// startPairedWiFi starts paired Wi-Fi discovery and sessions. It returns false
-// and does nothing unless the feature flag is on, an interface is named and a
-// pairing already exists; USB is never affected.
-func startPairedWiFi(ctx context.Context, store *settingsStore) bool {
+// pairedWiFiHandle is a running paired Wi-Fi runtime.
+type pairedWiFiHandle struct {
+	Label string
+	stop  func()
+}
+
+// startPairedWiFiRuntime starts paired Wi-Fi discovery and sessions. It returns
+// nil and does nothing unless the feature flag is on, the setting is on (when a
+// settings store is supplied), an interface is named and a pairing already
+// exists; USB is never affected. stop releases the trust-store lock before
+// returning so pairing can take it.
+func startPairedWiFiRuntime(parent context.Context, store *settingsStore) *pairedWiFiHandle {
 	if !wifiFeatureEnabled() {
-		return false
+		return nil
 	}
-	iface := strings.TrimSpace(os.Getenv(wifiPairedInterfaceEnv))
+	if store != nil && !store.get().PairedWifiEnabled {
+		return nil
+	}
+	iface := wifiPairedIface(store)
 	if iface == "" {
-		return false
+		return nil
 	}
-	base, err := configDir()
+	dir, err := wifiPairingTrustDir()
 	if err != nil {
-		return false
+		return nil
 	}
-	dir := filepath.Join(base, wifiTrustDirName)
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		return false
+		return nil
 	}
 	trust, err := wifilan.OpenTrustStore(dir)
 	if err != nil {
 		log.Printf("Paired Wi-Fi disabled: cannot open trust store: %v", err)
-		return false
+		return nil
 	}
 	if _, paired := trust.Peer(); !paired {
 		trust.Close()
-		return false
+		return nil
 	}
+	ctx, cancel := context.WithCancel(parent)
 	inputs, videos := newWiFiConnListener(), newWiFiConnListener()
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			cancel()
+			inputs.Close()
+			videos.Close()
+			trust.Close()
+		})
+	}
 	go func() {
 		<-ctx.Done()
-		inputs.Close()
-		videos.Close()
-		trust.Close()
+		stop()
 	}()
 	go runInputListener(ctx, inputs, store, transportWiFiPaired)
 	go runVideoListenerAt(ctx, store, "wifi-session", transportWiFiPaired, func(string) (net.Listener, error) { return videos, nil })
@@ -69,5 +86,57 @@ func startPairedWiFi(ctx context.Context, store *settingsStore) bool {
 	}
 	go manager.run(ctx)
 	log.Printf("Paired Wi-Fi enabled on interface %q", iface)
-	return true
+	return &pairedWiFiHandle{Label: trust.Label(), stop: stop}
+}
+
+// pairedWiFiController owns the runtime so settings changes and pairing can
+// stop and restart it without restarting the host.
+type pairedWiFiController struct {
+	mu      sync.Mutex
+	ctx     context.Context
+	store   *settingsStore
+	runtime *pairedWiFiHandle
+}
+
+var pairedWiFiRuntime = &pairedWiFiController{}
+
+func (c *pairedWiFiController) init(ctx context.Context, store *settingsStore) {
+	c.mu.Lock()
+	c.ctx, c.store = ctx, store
+	c.mu.Unlock()
+	c.reconcile()
+}
+
+func (c *pairedWiFiController) stopLocked() {
+	if c.runtime != nil {
+		c.runtime.stop()
+		c.runtime = nil
+	}
+}
+
+func (c *pairedWiFiController) pause() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stopLocked()
+}
+
+// reconcile makes the running runtime match the current settings.
+func (c *pairedWiFiController) reconcile() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stopLocked()
+	if c.ctx == nil || c.ctx.Err() != nil {
+		return
+	}
+	c.runtime = startPairedWiFiRuntime(c.ctx, c.store)
+}
+
+// paired reports the paired tablet's name while the runtime is running.
+func (c *pairedWiFiController) paired() (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.runtime == nil {
+		return "", false
+	}
+	return c.runtime.Label, true
 }
