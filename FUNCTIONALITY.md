@@ -388,6 +388,20 @@ strips in-band SPS/PPS/SEI/filler (SPS/PPS are kept for the decoder config
 and a changed pair is reported), and requires one slice per picture so a
 picture NAL ends its AU with no added frame of latency. Multi-slice,
 partitioned or start-code-less input is rejected.
+
+Two host adapters let the existing session code run over a paired Wi-Fi
+session without edits to the USB accept loops (neither is wired into the
+product yet). `wifiVideoBridge` is the `io.Writer` the video session writes
+its `[type][len][payload]` packets to: it sends one config frame (schema 1,
+fixed width/height from the session, fps from the config packet, SPS, PPS)
+when both parameter sets are known, then waits for the tablet's decoder-ready
+control record, then sends AU frames from sequence 3 with capture time and
+`1000000/fps` duration. Unknown packet types, oversized packets, pictures
+before parameter sets and mid-session SPS/PPS changes fail the bridge closed
+(the first implementation reconnects). `wifiInputConn` presents the control
+socket as a byte stream: tablet-to-host and host-to-tablet bytes travel in
+`FrameInput` payloads of at most 4096 bytes, each direction authenticated by
+the session epoch with strictly increasing sequence numbers.
 ## 4. Target MVP Functionality
 
 1. Extend desktop onto a virtual display represented by the Android tablet. **(done — M2)**
