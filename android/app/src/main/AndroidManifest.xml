@@ -48,18 +48,12 @@
                 android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
                 android:resource="@xml/accessory_filter_manual" />
         </activity>
-        <!-- Separate opt-in entry for Wi-Fi pairing; USB use never touches it. -->
+        <!-- Opened from the "Wi-Fi connect" button on the waiting screen. -->
         <activity
             android:name=".WiFiPairingActivity"
-            android:exported="true"
+            android:exported="false"
             android:label="DrawSplay Wi-Fi pairing"
-            android:screenOrientation="sensorLandscape">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:screenOrientation="sensorLandscape" />
     </application>
 
 </manifest>

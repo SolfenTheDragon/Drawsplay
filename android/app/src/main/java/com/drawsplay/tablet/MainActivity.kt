@@ -100,6 +100,9 @@ class MainActivity : AppCompatActivity() {
         videoSurface = findViewById(R.id.videoSurface)
         tileView = findViewById(R.id.tileView)
         statusOverlay = findViewById(R.id.statusOverlay)
+        findViewById<View>(R.id.wifiConnectButton).setOnClickListener {
+            startActivity(Intent(this, WiFiPairingActivity::class.java))
+        }
         statusText = findViewById(R.id.statusText)
         inputPad = findViewById(R.id.inputPad)
 

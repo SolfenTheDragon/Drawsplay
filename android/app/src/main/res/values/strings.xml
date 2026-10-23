@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">DrawSplay</string>
+    <string name="wifi_connect">Wi-Fi connect</string>
     <string name="status_waiting_for_host">Waiting for host…</string>
 </resources>

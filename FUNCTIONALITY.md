@@ -429,10 +429,10 @@ the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wra
   closes any Wi-Fi session, stops advertising, and the host releases the
   display so USB connects. The host refuses USB while a Wi-Fi session is
   active, so this tablet-side rule is what hands over.
-- Pairing uses a separate launcher entry, "DrawSplay Wi-Fi pairing"
-  (`WiFiPairingActivity`): run the `wifi-pair` CLI on the host, enter its
-  eight-digit code on the tablet. Trust is stored in the Android Keystore
-  backed store.
+- Pairing is part of the regular app: the "Wi-Fi connect" button on the
+  "Waiting for host" screen opens `WiFiPairingActivity` (no separate launcher
+  entry). Run the `wifi-pair` CLI on the host, then enter its eight-digit code
+  on the tablet. Trust is stored in the Android Keystore backed store.
 - Limits advertised by the tablet: 1920x1200, 60 fps, level 5.0, 512 KiB
   access units, 3 queue slots. Level 5.0 is required: 1920x1200 is 9000 macroblocks, above level 4.2's 8704.
 - Verified on one Samsung SM-X200 (API 34) against an X11 host over Wi-Fi

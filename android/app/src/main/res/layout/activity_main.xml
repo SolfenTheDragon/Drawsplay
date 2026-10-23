@@ -64,6 +64,13 @@
                 android:text="@string/status_waiting_for_host"
                 android:textColor="@android:color/white"
                 android:textSize="18sp" />
+
+            <Button
+                android:id="@+id/wifiConnectButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="@string/wifi_connect" />
         </LinearLayout>
     </FrameLayout>
 
