@@ -35,6 +35,7 @@ class WiFiPairingActivity : Activity() {
     private val code = CompletableFuture<String>()
     private val worker = Executors.newSingleThreadExecutor()
     @Volatile private var server: ServerSocket? = null
+    @Volatile private var placeholderVideo: ServerSocket? = null
     @Volatile private var active: Socket? = null
     private var multicast: WifiManager.MulticastLock? = null
     private var nsd: NsdManager? = null
@@ -75,6 +76,9 @@ class WiFiPairingActivity : Activity() {
             val (local, network) = WiFiLan.select(this) ?: throw IOException("Connect to exactly one Wi-Fi network (no VPN) to pair")
             val listener = ServerSocket().apply { bind(InetSocketAddress(local.address, 0), 1); soTimeout = 1000 }
             server = listener
+            // The host requires distinct input and video ports even while pairing; no video is ever served here.
+            val placeholder = ServerSocket().apply { bind(InetSocketAddress(local.address, 0), 1) }
+            placeholderVideo = placeholder
             multicast = (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
                 .createMulticastLock("DrawSplay-pairing").apply { setReferenceCounted(false); acquire() }
             val manager = getSystemService(Context.NSD_SERVICE) as NsdManager
@@ -92,7 +96,7 @@ class WiFiPairingActivity : Activity() {
                 port = listener.localPort
                 if (Build.VERSION.SDK_INT >= 33) setNetwork(network)
                 setAttribute("v", "2")
-                setAttribute("videoPort", "0")
+                setAttribute("videoPort", placeholder.localPort.toString())
                 setAttribute("pairing", "1")
                 setAttribute("streaming", "0")
             }, NsdManager.PROTOCOL_DNS_SD, registrationListener)
@@ -142,7 +146,7 @@ class WiFiPairingActivity : Activity() {
 
     private fun release() {
         if (!stopped.compareAndSet(false, true)) return
-        for (resource in listOfNotNull(server, active)) {
+        for (resource in listOfNotNull(server, placeholderVideo, active)) {
             try { resource.close() } catch (_: IOException) {}
         }
         registration?.let { try { nsd?.unregisterService(it) } catch (_: IllegalArgumentException) {} }
