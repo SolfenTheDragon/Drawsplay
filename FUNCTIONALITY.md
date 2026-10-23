@@ -330,7 +330,7 @@ Hello payloads are exactly 96 bytes, unsigned big-endian:
 | 14 | H.264 level u16: 31, 32, 40, 41, 42, 50, 51 or 52 |
 | 16, 20 | Maximum access-unit bytes and compressed-queue bytes, u32 each |
 | 24, 26 | Queue slots u16; statistics schema u16 = 1 |
-| 28 | Feature mask u32; bit 0 = low latency |
+| 28 | Feature mask u32; bit 0 = low latency, bit 1 = upstream video stats |
 | 32, 64 | Actual authenticated SPKI SHA-256 and fresh nonce, 32 bytes each |
 
 Dimensions are 320..8192, FPS 1..120, access units 64 KiB..1 MiB,
@@ -401,7 +401,14 @@ before parameter sets and mid-session SPS/PPS changes fail the bridge closed
 (the first implementation reconnects). `wifiInputConn` presents the control
 socket as a byte stream: tablet-to-host and host-to-tablet bytes travel in
 `FrameInput` payloads of at most 4096 bytes, each direction authenticated by
-the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wraps the bridge as the `net.Conn` the video session writes to; its read side blocks until close because the first Wi-Fi release has no upstream decode-stats path, so adaptive-bitrate feedback stays idle on Wi-Fi.
+the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wraps the bridge as the `net.Conn` the video session writes to. Without the negotiated video-stats feature (bit 1) its read side blocks until close and adaptive bitrate stays idle. With it, the tablet sends control records on the video socket (same epoch, sequence 2 upward after the attach record) and the read side turns each one into the newline-delimited JSON the USB stats reader already parses:
+
+| Control subtype | Payload | Meaning |
+| --- | --- | --- |
+| 8 | `[8,0,0,1]` + one-line JSON in the §3.0 `clientStatsMsg` schema | Decode stats, every 500 ms |
+| 9 | `[9,0,0,1]` | Keyframe request: the tablet discarded queued access units and is waiting for an IDR |
+
+Any other record type, epoch or a replayed sequence ends the video session. A keyframe request restarts the encoder at the same rung (at most once per second; a request inside that window is held, not dropped), so the tablet recovers in about 300 ms instead of waiting up to the 2 s GOP.
 
 #### 3.8.1 Host product startup and Android client pieces (development preview)
 
@@ -431,10 +438,12 @@ the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wra
 - Paired sessions use transport `wifi-paired` and an opt-in H.264 baseline
   encoder shape (ffmpeg only, level 5.0, no native media, no temporal
   layering). USB encoder arguments are unchanged.
-- Adaptive bitrate is idle on Wi-Fi: there is no tablet-to-host stats path yet.
+- Adaptive bitrate on Wi-Fi uses the upstream stats above with two Wi-Fi-only rules: tablet frame drops count as congestion only when they reach 10% of the frames received in the report (isolated jitter drops would otherwise walk the ladder to ~0.7 Mbps without helping), and the ladder never steps below an eighth of its top. USB thresholds are unchanged.
+- Session fps is capped at the negotiated Hello `maxFps`. The tablet sets it from its hardware AVC decoder's rated frame rate at 1920x1200 (`WiFiDecoderBudget`, clamped 24..60) and rejects a config above it. Measured on the SM-X200 (`OMX.sprd.h264.decoder`, rated 54 fps at 1920x1200): at 60 fps the decoder had no slack, its queue overflowed with 10–15 keyframe restarts per 40 s and the ladder fell to 9.6–16 Mbps; capped at 54 there were none, the stream held 26.7 Mbps and the longest presentation gap fell from up to 550 ms to 67 ms. SurfaceFlinger still presents about 40–48 fps, because bursty Wi-Fi arrival lands two frames in one refresh.
 - Android has `WiFiControlLink` (control socket as a byte stream),
   `WiFiVideoPlayer` (receive plus decode, sends decoder-ready `[7,0,0,1]`
-  after the decoder exists) and an additive paired-socket input candidate that
+  after the decoder exists, then the stats and keyframe-request records
+  when negotiated) and an additive paired-socket input candidate that
   is always last, so USB and accessory ordering are unchanged.
 - The tablet app hosts the paired session itself while `MainActivity` is
   started (`WiFiPairedSessionHost`): with a saved paired host it advertises
@@ -454,8 +463,12 @@ the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wra
   host web UI Host overview. The paired session is paused while the panel is
   open and the panel closes when the app leaves the foreground. Trust is
   stored in the Android Keystore backed store.
-- Limits advertised by the tablet: 1920x1200, 60 fps, level 5.0, 512 KiB
-  access units, 3 queue slots. Level 5.0 is required: 1920x1200 is 9000 macroblocks, above level 4.2's 8704.
+- Limits advertised by the tablet: 1920x1200, fps from the decoder budget (at
+  most 60), level 5.0, 512 KiB access units, 3 queue slots. Queued access
+  units older than `max(100 ms, 4 frames)` are discarded (then the tablet waits
+  for an IDR and requests one). The decoder output loop drains every ready
+  output and renders only the newest; superseded outputs are dropped and
+  counted. Level 5.0 is required: 1920x1200 is 9000 macroblocks, above level 4.2's 8704.
 - Verified on one Samsung SM-X200 (API 34) against an X11 host over Wi-Fi
   while adb ran over Wi-Fi and the USB cable stayed attached, with USB power
   and adb simulated off via `dumpsys battery unplug`: pairing, discovery, a

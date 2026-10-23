@@ -22,5 +22,25 @@ func newWiFiSessionConns(control, video net.Conn, epoch uint64, limits wifilan.S
 	bridge := newWiFiVideoBridge(video, epoch, int(limits.MaxAccessUnit), func() error {
 		return gate.Wait(readyTimeout)
 	})
-	return in, newWiFiVideoConn(video, bridge), nil
+	var out *wifiVideoConn
+	if limits.Features&wifilan.FeatureVideoStats != 0 {
+		out = newWiFiVideoConnWithStats(video, bridge, epoch)
+	} else {
+		out = newWiFiVideoConn(video, bridge)
+	}
+	out.maxFPS = int(limits.MaxFPS)
+	return in, out, nil
+}
+
+// capWiFiSessionFPS clamps a session frame rate to the paired tablet's
+// negotiated Hello MaxFPS, which the tablet derives from its decoder's rated
+// throughput at its maximum size. Other conns are returned unchanged.
+func capWiFiSessionFPS(fps int, conn net.Conn) int {
+	if wrapped, ok := conn.(*closeNotifyConn); ok {
+		conn = wrapped.Conn
+	}
+	if c, ok := conn.(*wifiVideoConn); ok && c.maxFPS > 0 && fps > c.maxFPS {
+		return c.maxFPS
+	}
+	return fps
 }

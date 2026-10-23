@@ -8,6 +8,9 @@ import java.security.MessageDigest
 object WiFiSessionProtocol {
     const val TABLET = 1
     const val HOST = 2
+    const val FEATURE_LOW_LATENCY = 1L
+    /** Tablet sends decode statistics (control subtype 8) upstream on the video socket. */
+    const val FEATURE_VIDEO_STATS = 2L
     const val HELLO_SIZE = 96
 
     data class Hello(
@@ -75,7 +78,7 @@ object WiFiSessionProtocol {
             maxAccessUnit = minOf(host.maxAccessUnit, tablet.maxAccessUnit),
             queueBytes = minOf(host.queueBytes, tablet.queueBytes),
             queueSlots = minOf(host.queueSlots, tablet.queueSlots),
-            features = host.features and tablet.features and 1L
+            features = host.features and tablet.features and (FEATURE_LOW_LATENCY or FEATURE_VIDEO_STATS)
         ).also { validate(it) }
     }
 

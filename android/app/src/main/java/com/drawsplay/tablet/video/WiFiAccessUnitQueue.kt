@@ -31,6 +31,8 @@ class WiFiAccessUnitQueue(maxAccessUnit: Int, slots: Int, budgetBytes: Int, priv
         private set
     @Volatile var ageEvents = 0L
         private set
+    /** Queue discards that left the decoder waiting for an IDR. */
+    val discardEvents: Long get() = overflowEvents + ageEvents
     private var nextOrder = 0L
     private var needsIdr = true
     private var closed = false

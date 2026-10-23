@@ -250,6 +250,10 @@ func serveVideoSession(ctx context.Context, conn net.Conn, store *settingsStore,
 		opts.WiFiBaseline = true
 		opts.NativeMedia = "off"
 		opts.TemporalLayering = false
+		if capped := capWiFiSessionFPS(opts.FPS, conn); capped != opts.FPS {
+			log.Printf("Wi-Fi session fps capped %d -> %d by the tablet decoder budget", opts.FPS, capped)
+			opts.FPS = capped
+		}
 	}
 	if cap := transportMaxBitrate(store.get(), transport); cap != "" {
 		opts.Bitrate = cappedBitrate(opts.Bitrate, cap)
@@ -696,6 +700,9 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 
 	// Upstream stats reader: congestion feedback + fast dead-peer signal.
 	monitor := &sessionMonitor{}
+	if opts.WiFiBaseline {
+		monitor = newWiFiSessionMonitor()
+	}
 	go monitor.runStatsReader(conn)
 
 	rc := newRateController(opts.Bitrate)
@@ -754,13 +761,14 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		if target.Kind == captureX11Grab && !opts.X11HighRate && effOpts.FPS > 60 {
 			effOpts.FPS = 60
 		}
+		effOpts.FPS = capWiFiSessionFPS(effOpts.FPS, conn)
 		if lastEffectiveFPS != 0 && effOpts.FPS != lastEffectiveFPS {
 			log.Printf("Capture framerate now following active display refresh: %d fps", effOpts.FPS)
 			publishModeChange(target.Width, target.Height, effOpts.FPS)
 		}
 		lastEffectiveFPS = effOpts.FPS
 		effOpts.Bitrate = rc.current()
-		gate := newSessionCongestionGate(target)
+		gate := sessionCongestionGate(target, opts.WiFiBaseline)
 		blackout := sessionDisplayBlackout()
 		specs, err := buildSessionPipelines(target, effOpts, blackout)
 		if err != nil {
@@ -773,7 +781,7 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		for _, spec := range specs {
 			pipelineStarted := time.Now()
 			produced, err := runEncodePipeline(ctx, writer, effOpts, spec, monitor, rc, temporal, blackout, gate)
-			if errors.Is(err, errRateChanged) || errors.Is(err, errAccessUnitResync) || errors.Is(err, errPumpLagged) {
+			if errors.Is(err, errRateChanged) || errors.Is(err, errAccessUnitResync) || errors.Is(err, errPumpLagged) || errors.Is(err, errKeyframeRequested) {
 				if produced {
 					goodSpecs[spec.Name] = true
 				}
@@ -901,6 +909,11 @@ var errRateChanged = errors.New("bitrate changed")
 // other applications); the pipeline restarts at the same rung for a fresh
 // keyframe rather than streaming seconds-old video.
 var errPumpLagged = errors.New("host pump lagged behind encoder")
+
+// errKeyframeRequested restarts the pipeline at the same rung because the
+// client discarded pictures and cannot resume until the next IDR; the GOP
+// alone would leave its picture frozen for up to two seconds.
+var errKeyframeRequested = errors.New("client requested a keyframe")
 
 const (
 	// pumpLagChunks: chunk-queue depth (of 16) that counts as lagging.
@@ -1217,6 +1230,11 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 				}
 				if len(buf) > nalBufferMax {
 					return produced.Load(), fmt.Errorf("NAL unit exceeded %d bytes", nalBufferMax)
+				}
+
+				if produced.Load() && monitor.consumeKeyframeRequest(time.Now()) {
+					log.Printf("Pipeline %s: client discarded pictures and requested a keyframe; restarting encoder", spec.Name)
+					return true, errKeyframeRequested
 				}
 
 				// Adaptive bitrate: react to congestion / sustained recovery.

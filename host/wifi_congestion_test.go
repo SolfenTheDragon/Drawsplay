@@ -1,0 +1,79 @@
+package main
+
+import (
+	"net"
+	"testing"
+	"time"
+)
+
+func feedWiFiStatsLines(t *testing.T, lines ...string) *sessionMonitor {
+	t.Helper()
+	hostConn, clientConn := net.Pipe()
+	defer hostConn.Close()
+	mon := newWiFiSessionMonitor()
+	done := make(chan struct{})
+	go func() {
+		mon.runStatsReader(hostConn)
+		close(done)
+	}()
+	for _, line := range lines {
+		if _, err := clientConn.Write([]byte(line + "\n")); err != nil {
+			t.Fatalf("write stats: %v", err)
+		}
+	}
+	_ = clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stats reader did not finish")
+	}
+	return mon
+}
+
+// A paired tablet drops the odd frame to presentation jitter; a lower bitrate
+// cannot prevent that, so only a substantial share of drops is congestion.
+func TestWiFiMonitorIgnoresOccasionalJitterDrops(t *testing.T) {
+	mon := feedWiFiStatsLines(t, `{"type":"stats","intervalMs":500,"framesReceived":30,"framesRendered":28,"queuedFrames":1,"frameDrops":2}`)
+	if mon.consumeCongestion() {
+		t.Fatal("2 of 30 dropped frames stepped the Wi-Fi bitrate down")
+	}
+}
+
+func TestWiFiMonitorCongestsOnSubstantialDrops(t *testing.T) {
+	mon := feedWiFiStatsLines(t, `{"type":"stats","intervalMs":500,"framesReceived":30,"framesRendered":24,"queuedFrames":1,"frameDrops":6}`)
+	if !mon.consumeCongestion() {
+		t.Fatal("6 of 30 dropped frames did not report congestion")
+	}
+}
+
+func TestWiFiCongestionGateKeepsAWatchableFloor(t *testing.T) {
+	rc := newRateControllerKbps(26666)
+	gate := sessionCongestionGate(captureTarget{}, true)
+	for steps := 0; steps < 20 && gate.allowsStepDown(rc); steps++ {
+		rc.idx++
+	}
+	if low := rc.ladder[rc.idx]; low < 26666/8 || low > 26666/4 {
+		t.Fatalf("Wi-Fi ladder floor is %dk, want between top/8 and top/4", low)
+	}
+	if usb := sessionCongestionGate(captureTarget{}, false); usb.floorDivisor != 0 {
+		t.Fatalf("USB gate gained a floor: %d", usb.floorDivisor)
+	}
+}
+
+func TestKeyframeRequestsAreHonouredAtMostOncePerCooldown(t *testing.T) {
+	mon := feedWiFiStatsLines(t, `{"type":"keyframe"}`)
+	start := time.Now()
+	if !mon.consumeKeyframeRequest(start) {
+		t.Fatal("keyframe request was not reported")
+	}
+	if mon.consumeKeyframeRequest(start) {
+		t.Fatal("one request was reported twice")
+	}
+	mon.keyframeWanted.Store(true)
+	if mon.consumeKeyframeRequest(start.Add(keyframeRequestCooldown / 2)) {
+		t.Fatal("a second restart was allowed inside the cooldown")
+	}
+	if !mon.consumeKeyframeRequest(start.Add(keyframeRequestCooldown + time.Millisecond)) {
+		t.Fatal("a request held through the cooldown was dropped")
+	}
+}

@@ -18,6 +18,7 @@ class WiFiVideoDecoder(
 ) : Closeable {
     private val codec: MediaCodec
     private val info = MediaCodec.BufferInfo()
+    private val outputs = WiFiNewestOutput()
     private var inputBuffers: Array<ByteBuffer>
     private var reserved = -1
     private var lastPts = 0L
@@ -96,13 +97,20 @@ class WiFiVideoDecoder(
                 continue
             }
             if (index < 0) continue
-            val render = nowUs >= info.presentationTimeUs && nowUs - info.presentationTimeUs <= 2000000L / config.fps
-            codec.releaseOutputBuffer(index, render)
+            val superseded = outputs.offer(index)
+            if (superseded >= 0) {
+                codec.releaseOutputBuffer(superseded, false)
+                decodeDrops++
+            }
             decoded++
             if (pendingFrames > 0) pendingFrames--
-            if (render) renderReleased++ else decodeDrops++
             lastOutputUs = nowUs
             worked = true
+        }
+        val newest = outputs.takeNewest()
+        if (newest >= 0) {
+            codec.releaseOutputBuffer(newest, true)
+            renderReleased++
         }
         if (reserved < 0) reserved = codec.dequeueInputBuffer(0)
         if (reserved < 0) {

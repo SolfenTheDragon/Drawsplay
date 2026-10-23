@@ -82,4 +82,13 @@ class WiFiSessionProtocolTest {
             // Role confusion cannot open a session.
         }
     }
+
+    @Test
+    fun negotiationKeepsVideoStatsOnlyWhenBothPeersOfferIt() {
+        val tablet = WiFiSessionProtocol.decodeHello(fixture(), WiFiSessionProtocol.TABLET, ByteArray(32) { 7 })
+            .copy(features = WiFiSessionProtocol.FEATURE_LOW_LATENCY or WiFiSessionProtocol.FEATURE_VIDEO_STATS)
+        val host = tablet.copy(role = WiFiSessionProtocol.HOST)
+        assertEquals(3L, WiFiSessionProtocol.negotiate(host, tablet).features)
+        assertEquals(1L, WiFiSessionProtocol.negotiate(host.copy(features = 1L), tablet).features)
+    }
 }

@@ -115,7 +115,7 @@ func NegotiateSession(host, tablet SessionHello) (SessionHello, error) {
 	result.MaxFPS, result.H264Level = min(host.MaxFPS, tablet.MaxFPS), min(host.H264Level, tablet.H264Level)
 	result.MaxAccessUnit = min(host.MaxAccessUnit, tablet.MaxAccessUnit)
 	result.QueueBytes, result.QueueSlots = min(host.QueueBytes, tablet.QueueBytes), min(host.QueueSlots, tablet.QueueSlots)
-	result.Features = host.Features & tablet.Features & 1
+	result.Features = host.Features & tablet.Features & knownFeatures
 	return result, result.validate()
 }
 

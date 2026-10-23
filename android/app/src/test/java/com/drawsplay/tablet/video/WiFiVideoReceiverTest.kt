@@ -91,4 +91,25 @@ class WiFiVideoReceiverTest {
         val malformed = WiFiVideoReceiver(ByteArrayInputStream(frame(5, 2, config()) + wrong), limits(), 42) { 100 }
         assertThrows(IOException::class.java) { malformed.receive() }
     }
+
+    @Test
+    fun aPictureDelayedByTwoFrameIntervalsOfDecoderJitterIsStillDecoded() {
+        // Discarding a queued picture costs a freeze until the next IDR, so a
+        // short decoder hiccup must not age the queue out.
+        val wire = frame(5, 2, config()) + frame(6, 3, hex("000001091000000165b860"))
+        val receiver = WiFiVideoReceiver(ByteArrayInputStream(wire), limits(), 42) { 1_000_000 }
+        receiver.receive()
+        val slot = receiver.queue.poll(1_000_000 + 2 * 33_333 + 1)
+        assertNotNull(slot)
+        assertEquals(0L, receiver.queue.ageEvents)
+    }
+
+    @Test
+    fun aQueueStuckBehindAStalledDecoderIsStillDiscarded() {
+        val wire = frame(5, 2, config()) + frame(6, 3, hex("000001091000000165b860"))
+        val receiver = WiFiVideoReceiver(ByteArrayInputStream(wire), limits(), 42) { 1_000_000 }
+        receiver.receive()
+        assertNull(receiver.queue.poll(1_000_000 + 250_000))
+        assertEquals(1L, receiver.queue.ageEvents)
+    }
 }

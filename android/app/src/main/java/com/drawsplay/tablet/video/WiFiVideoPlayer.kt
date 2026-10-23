@@ -17,6 +17,8 @@ interface PlayerDecoder : Closeable {
     val pendingFrames: Int
     val holdingRecoverySlot: Boolean
     val lastOutputUs: Long
+    val renderReleased: Long get() = 0L
+    val decodeDrops: Long get() = 0L
     fun step(nowUs: Long): Boolean
 }
 
@@ -24,6 +26,8 @@ private class MediaCodecPlayerDecoder(private val decoder: WiFiVideoDecoder) : P
     override val pendingFrames get() = decoder.pendingFrames
     override val holdingRecoverySlot get() = decoder.holdingRecoverySlot
     override val lastOutputUs get() = decoder.lastOutputUs
+    override val renderReleased get() = decoder.renderReleased
+    override val decodeDrops get() = decoder.decodeDrops
     override fun step(nowUs: Long) = decoder.step(nowUs)
     override fun close() = decoder.close()
 }
@@ -33,6 +37,8 @@ object WiFiVideoPlayer {
     private const val TAG = "WiFiVideoPlayer"
     private const val STALL_US = 2_000_000L
     private val DECODER_READY = byteArrayOf(7, 0, 0, 1)
+    private const val STATS_INTERVAL_MS = 500L
+    private const val KEYFRAME_POLL_MS = 20L
 
     fun run(
         media: InputStream,
@@ -41,10 +47,11 @@ object WiFiVideoPlayer {
         limits: WiFiSessionProtocol.Hello,
         epoch: Long,
         surface: Surface,
+        statsLink: WiFiControlLink?,
         cancelled: () -> Boolean
     ) = run(media, closeMedia, link, limits, epoch, { config, queue ->
         MediaCodecPlayerDecoder(WiFiVideoDecoder(surface, config, queue, limits.maxAccessUnit))
-    }, cancelled)
+    }, statsLink, STATS_INTERVAL_MS, cancelled)
 
     fun run(
         media: InputStream,
@@ -53,15 +60,19 @@ object WiFiVideoPlayer {
         limits: WiFiSessionProtocol.Hello,
         epoch: Long,
         decoderFactory: (WiFiH264.Config, WiFiAccessUnitQueue) -> PlayerDecoder,
+        statsLink: WiFiControlLink? = null,
+        statsIntervalMs: Long = STATS_INTERVAL_MS,
         cancelled: () -> Boolean
     ) {
         val receiver = WiFiVideoReceiver(media, limits, epoch)
         val ready = CompletableFuture<Unit>()
         val ended = AtomicBoolean(false)
         val failure = AtomicReference<Throwable>()
+        val active = AtomicReference<PlayerDecoder>()
         val thread = Thread({
             try {
                 decoderFactory(receiver.config, receiver.queue).use { decoder ->
+                    active.set(decoder)
                     ready.complete(Unit)
                     var progressUs = System.nanoTime() / 1000
                     var seenPending = decoder.pendingFrames
@@ -89,6 +100,9 @@ object WiFiVideoPlayer {
             }
         }, "wifi-decoder")
         thread.start()
+        val reporter = statsLink?.takeIf { limits.features and WiFiSessionProtocol.FEATURE_VIDEO_STATS != 0L }?.let {
+            startStatsReporter(it, statsIntervalMs, receiver, active)
+        }
         try {
             ready.get(5, TimeUnit.SECONDS)
             link.sendControl(DECODER_READY)
@@ -103,6 +117,7 @@ object WiFiVideoPlayer {
             try { closeMedia() } catch (closeError: IOException) { error.addSuppressed(closeError) }
             throw error
         } finally {
+            reporter?.interrupt()
             ended.set(true)
             if (thread.isAlive) {
                 thread.interrupt()
@@ -110,5 +125,40 @@ object WiFiVideoPlayer {
             }
             receiver.queue.close()
         }
+    }
+
+    /** Small records on a daemon thread so a slow upstream write never blocks receive or decode. */
+    private fun startStatsReporter(
+        link: WiFiControlLink,
+        intervalMs: Long,
+        receiver: WiFiVideoReceiver,
+        active: AtomicReference<PlayerDecoder>
+    ): Thread = Thread({
+        val stats = WiFiVideoStats()
+        var nextReportMs = System.nanoTime() / 1_000_000 + intervalMs
+        try {
+            while (!Thread.currentThread().isInterrupted) {
+                Thread.sleep(minOf(intervalMs, KEYFRAME_POLL_MS))
+                val queue = receiver.queue
+                if (stats.keyframeNeeded(queue.discardEvents)) link.sendControl(WiFiVideoStats.KEYFRAME_REQUEST)
+                val nowMs = System.nanoTime() / 1_000_000
+                if (nowMs < nextReportMs) continue
+                nextReportMs = nowMs + intervalMs
+                val decoder = active.get()
+                link.sendControl(stats.next(WiFiVideoStats.Counters(
+                    received = receiver.received,
+                    rendered = decoder?.renderReleased ?: 0L,
+                    decodeDrops = decoder?.decodeDrops ?: 0L,
+                    queueDropped = queue.dropped,
+                    queued = queue.depth + (decoder?.pendingFrames ?: 0)
+                ), intervalMs, true))
+            }
+        } catch (_: InterruptedException) {
+        } catch (error: IOException) {
+            Log.d(TAG, "Wi-Fi stats reporter stopped: ${error.message}")
+        }
+    }, "wifi-video-stats").apply {
+        isDaemon = true
+        start()
     }
 }

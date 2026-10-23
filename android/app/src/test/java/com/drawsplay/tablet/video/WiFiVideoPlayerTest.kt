@@ -115,4 +115,37 @@ class WiFiVideoPlayerTest {
         assertEquals(1, decoder!!.consumed)
         assertEquals("decoder must keep running after the first late frame", 1, decoder!!.outputs)
     }
+
+    @Test
+    fun negotiatedStatsAreSentUpstreamOnTheVideoLinkWhileStreaming() {
+        val media = java.io.PipedInputStream(1 shl 16)
+        val feed = java.io.PipedOutputStream(media)
+        val upstream = java.io.PipedOutputStream()
+        val upstreamIn = java.io.PipedInputStream(upstream, 1 shl 16)
+        val statsLink = WiFiControlLink(ByteArrayInputStream(ByteArray(0)), upstream, 42)
+        val control = WiFiControlLink(ByteArrayInputStream(ByteArray(0)), ByteArrayOutputStream(), 42)
+        val negotiated = limits().copy(features = WiFiSessionProtocol.FEATURE_LOW_LATENCY or WiFiSessionProtocol.FEATURE_VIDEO_STATS)
+        val idr = hex("000001091000000165b860")
+        feed.write(frame(5, 2, config()) + frame(6, 3, idr))
+        feed.flush()
+        val player = Thread {
+            try {
+                WiFiVideoPlayer.run(media, { feed.close() }, control, negotiated, 42, { _, queue -> FakeDecoder(queue, mutableListOf()) }, statsLink, 20L) { false }
+            } catch (_: IOException) {
+            }
+        }
+        player.start()
+        val reader = WiFiFrameCodec.Reader(upstreamIn)
+        val header = reader.readHeader()
+        val payload = ByteArray(header.payloadLength)
+        reader.readPayload(payload)
+        assertEquals(WiFiFrameCodec.CONTROL, header.type)
+        assertEquals(2L, header.sequence)
+        assertArrayEquals(byteArrayOf(8, 0, 0, 1), payload.copyOf(4))
+        assertTrue(String(payload, 4, payload.size - 4, Charsets.UTF_8).contains("\"framesReceived\":1"))
+        feed.write(frame(WiFiFrameCodec.CONTROL, 4, byteArrayOf(5, 0, 0, 1)))
+        feed.flush()
+        player.join(5000)
+        assertFalse(player.isAlive)
+    }
 }

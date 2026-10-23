@@ -36,7 +36,7 @@ class WiFiVideoReceiver(
         reader.readPayload(raw)
         config = WiFiH264.decodeConfig(raw, limits)
         h264 = WiFiH264(config)
-        queue = WiFiAccessUnitQueue(limits.maxAccessUnit, limits.queueSlots, limits.queueBytes, 1000000L / config.fps)
+        queue = WiFiAccessUnitQueue(limits.maxAccessUnit, limits.queueSlots, limits.queueBytes, maxQueueAgeUs(config.fps))
     }
 
     /** Network-reader thread only. Receives directly into a reusable queue slot. */
@@ -76,5 +76,14 @@ class WiFiVideoReceiver(
         received++
         nextSequence++
         return true
+    }
+
+    companion object {
+        /**
+         * A queued picture older than this means the decoder stalled, not
+         * jittered: discard and resume at the next IDR. Shorter bounds turn
+         * ordinary decode jitter into a freeze lasting until the next IDR.
+         */
+        fun maxQueueAgeUs(fps: Int): Long = maxOf(100_000L, 4_000_000L / fps)
     }
 }

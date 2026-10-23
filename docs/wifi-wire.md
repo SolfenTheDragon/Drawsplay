@@ -26,6 +26,8 @@ epoch/sequence. Duration must be zero outside type 6. Epoch is an opaque
 64-bit tag, including values with the high bit set, not an auth token.
 Major version 2 must still be negotiated in an authenticated bootstrap
 payload; this header layout does not imply negotiation has happened.
+Control payload subtypes (offer, attach, decoder-ready, upstream stats and
+keyframe request) are specified in `FUNCTIONALITY.md` §3.8.
 
 Payload ceilings: hello/control/input/attach 4096 bytes, config 65536 bytes,
 video AU 1048576 bytes. Empty payloads are invalid. A larger AU must fail
