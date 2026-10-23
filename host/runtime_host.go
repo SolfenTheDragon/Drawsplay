@@ -32,6 +32,9 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	// Optional Wi-Fi transport is additive and disabled by default so USB
 	// behavior and performance stay unchanged.
 	go startWiFiTransport(ctx, store)
+	// Paired mutual-TLS Wi-Fi: inert unless DRAWSPLAY_FEATURE_WIFI, an
+	// explicit interface and an existing pairing are all present.
+	startPairedWiFi(ctx, store)
 
 	// Default USB transport: Android Open Accessory, without ADB or debugging.
 	startAOATransport(ctx, store)
