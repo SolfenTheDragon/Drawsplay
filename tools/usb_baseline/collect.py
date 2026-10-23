@@ -391,7 +391,8 @@ def collect(args, output):
         summary["resources"] = resource_summary(json.loads(line) for line in recorded)
     summary.update({"sample_count": count, "error_count": len(errors),
                     "elapsed_seconds": time.monotonic() - started,
-                    "interpretation": "Uncontrolled passive resource observation, not acceptance."})
+                    "interpretation": "Software resource observation; workload conditions require "
+                                      "separate validation, not an acceptance verdict."})
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     return summary
 

@@ -26,6 +26,10 @@ requirements. Optical/physical checks are optional. A resource observation repor
 
 ## Run
 
+For an external synthetic scene on an existing X11 tablet output, use the
+[controlled workload helper](WORKLOAD.md). Otherwise the collector observes
+the existing desktop without changing its contents.
+
 Verify the host PID and select the tablet's ADB serial locally:
 
 ```sh
