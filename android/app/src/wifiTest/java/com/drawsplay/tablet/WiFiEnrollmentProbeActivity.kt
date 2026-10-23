@@ -224,7 +224,7 @@ class WiFiEnrollmentProbeActivity : Activity() {
                             Log.i(TAG, """{"state":"sessionReady","freshSavedTrust":true,"controlAndVideoMutualTls":true,"boundedCapabilities":true,"captureAndInputStarted":false}""")
                             runOnUiThread { status.text = "Saved trust authenticated fresh control/video channels. No screen capture or input injection was started." }
                             if (intent.getBooleanExtra("checkVideo", false)) {
-                                checkSyntheticVideo(media, controlSession, controlSession.epoch)
+                                checkSyntheticVideo(media, controlSession, controlSession.epoch, intent.getBooleanExtra("forceVideoRecovery", false))
                             }
                         }
                     }
@@ -245,7 +245,7 @@ class WiFiEnrollmentProbeActivity : Activity() {
         stopNetwork()
     }
 
-    private fun checkSyntheticVideo(media: Socket, session: WiFiPairedSession.Control, epoch: Long) {
+    private fun checkSyntheticVideo(media: Socket, session: WiFiPairedSession.Control, epoch: Long, forceRecovery: Boolean) {
         media.soTimeout = 10000
         val receiver = WiFiVideoReceiver(media.inputStream, session.limits, epoch)
         val surface = renderSurface.get(5, TimeUnit.SECONDS)
@@ -256,8 +256,14 @@ class WiFiEnrollmentProbeActivity : Activity() {
             try {
                 WiFiVideoDecoder(surface, receiver.config, receiver.queue, session.limits.maxAccessUnit).use { decoder ->
                     ready.complete(decoder)
+                    var stalled = !forceRecovery
                     while (!WiFiVideoDecoder.drained(ended.get(), receiver.queue.depth, decoder.pendingFrames, decoder.holdingRecoverySlot)) {
                         if (stopped.get()) throw IOException("Wi-Fi synthetic decode cancelled")
+                        // Test-only: pause the codec owner so the bounded queue overflows and must recover at an IDR.
+                        if (!stalled && decoder.decoded >= 60) {
+                            stalled = true
+                            Thread.sleep(700)
+                        }
                         val now = System.nanoTime() / 1000
                         if (!decoder.step(now)) Thread.sleep(1)
                         if (decoder.pendingFrames != 0 && now - decoder.lastOutputUs > 2000000) {

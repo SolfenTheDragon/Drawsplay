@@ -26,7 +26,11 @@ def main():
                         help="also require fresh saved-trust control/video association; no capture or input")
     parser.add_argument("--test-video", type=pathlib.Path,
                         help="optional local DSVT synthetic video fixture; implies --verify-session")
+    parser.add_argument("--force-recovery", action="store_true",
+                        help="with --test-video, stall the probe decoder to exercise overflow/IDR recovery")
     args = parser.parse_args()
+    if args.force_recovery and not args.test_video:
+        parser.error("--force-recovery requires --test-video")
     if args.test_video:
         args.verify_session = True
     devices = subprocess.check_output(["adb", "devices"], text=True)
@@ -49,7 +53,8 @@ def main():
         installed = True
         command("shell", "am", "start", "-W", "-n", ACTIVITY,
                 "--ez", "checkSession", str(args.verify_session).lower(),
-                "--ez", "checkVideo", str(bool(args.test_video)).lower())
+                "--ez", "checkVideo", str(bool(args.test_video)).lower(),
+                "--ez", "forceVideoRecovery", str(args.force_recovery).lower())
         pid = command("shell", "pidof", PACKAGE).strip()
         if not pid.isdigit():
             raise RuntimeError("Test application did not start as a single process")
@@ -73,7 +78,8 @@ def main():
                     [str(args.pair_command.resolve()), "-interface", args.interface,
                      "-tablet", available["name"], "-trust-dir", str(directory / "trust"),
                      *(["-verify-session"] if args.verify_session else []),
-                     *(["-test-video", str(args.test_video.resolve())] if args.test_video else [])],
+                     *(["-test-video", str(args.test_video.resolve())] if args.test_video else []),
+                     *(["-test-video-force-recovery"] if args.force_recovery else [])],
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=diagnostics,
                 )
                 selector = selectors.DefaultSelector()
@@ -152,6 +158,7 @@ def main():
                     "tabletIdentityRetained": True,
                     "freshSavedTrustControlAndVideoVerified": args.verify_session,
                     "syntheticVideoDecoded": bool(args.test_video),
+                    "forcedVideoRecovery": args.force_recovery,
                     "networkAndMulticastCleanupConfirmed": True,
                     "approval": "automated local test input on both devices; disposable identities",
                     "usbImplementationTested": False,

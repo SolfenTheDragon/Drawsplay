@@ -58,3 +58,26 @@ func TestSyntheticVideoFixtureHasBoundedHeaderAndCompleteAccessUnits(t *testing.
 		t.Fatal("truncated AU accepted")
 	}
 }
+
+func TestCheckDecodeResultRecoveryModeRequiresRealRecovery(t *testing.T) {
+	// Clean mode keeps the strict >=90% release requirement.
+	if err := checkDecodeResult(300, 300, 300, 300, 0, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkDecodeResult(300, 300, 200, 200, 90, 0, false); err == nil {
+		t.Fatal("clean mode accepted dropped pictures")
+	}
+	// Recovery mode must observe drops, and every picture the queue kept must be decoded.
+	if err := checkDecodeResult(300, 300, 200, 190, 100, 5, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkDecodeResult(300, 300, 300, 300, 0, 0, true); err == nil {
+		t.Fatal("recovery mode accepted a run that never exercised recovery")
+	}
+	if err := checkDecodeResult(300, 300, 150, 150, 100, 0, true); err == nil {
+		t.Fatal("recovery mode accepted undecoded surviving pictures")
+	}
+	if err := checkDecodeResult(300, 300, 0, 0, 300, 0, true); err == nil {
+		t.Fatal("recovery mode accepted a run that never resumed decoding")
+	}
+}

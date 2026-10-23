@@ -76,7 +76,7 @@ func (s *syntheticVideo) finish() error {
 	return nil
 }
 
-func streamSyntheticVideo(ctx context.Context, path string, control, video *tls.Conn, binding *wifilan.SessionBinding, limits wifilan.SessionHello, out io.Writer) error {
+func streamSyntheticVideo(ctx context.Context, path string, control, video *tls.Conn, binding *wifilan.SessionBinding, limits wifilan.SessionHello, forceRecovery bool, out io.Writer) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return err
@@ -172,10 +172,25 @@ func streamSyntheticVideo(ctx context.Context, path string, control, video *tls.
 	renderReleased := binary.BigEndian.Uint32(payload[12:])
 	queueDrops := binary.BigEndian.Uint32(payload[16:])
 	decodeDrops := binary.BigEndian.Uint32(payload[20:])
-	if received != source.frames || decoded > received || renderReleased > decoded ||
-		uint64(renderReleased)*100 < uint64(received)*90 {
-		return fmt.Errorf("synthetic decode acceptance failed: sent=%d received=%d decoded=%d renderReleased=%d queueDrops=%d decodeDrops=%d (requires >=90%% render releases)", source.frames, received, decoded, renderReleased, queueDrops, decodeDrops)
+	if err := checkDecodeResult(source.frames, received, decoded, renderReleased, queueDrops, decodeDrops, forceRecovery); err != nil {
+		return err
 	}
 	_, err = fmt.Fprintf(out, "Synthetic Wi-Fi video decoded: received=%d decoded=%d renderReleased=%d queueDrops=%d decodeDrops=%d\n", received, decoded, renderReleased, queueDrops, decodeDrops)
 	return err
+}
+
+// recoveryInFlightSlack bounds pictures the codec may discard from its own pipeline on a flush.
+const recoveryInFlightSlack = 16
+
+func checkDecodeResult(sent, received, decoded, renderReleased, queueDrops, decodeDrops uint32, forceRecovery bool) error {
+	ok := received == sent && decoded <= received && renderReleased <= decoded
+	if forceRecovery {
+		ok = ok && queueDrops > 0 && decoded > 0 && decoded+queueDrops+recoveryInFlightSlack >= received
+	} else {
+		ok = ok && uint64(renderReleased)*100 >= uint64(received)*90
+	}
+	if !ok {
+		return fmt.Errorf("synthetic decode acceptance failed: sent=%d received=%d decoded=%d renderReleased=%d queueDrops=%d decodeDrops=%d (forceRecovery=%t; clean mode requires >=90%% render releases, recovery mode requires observed queue drops and decoding resumed)", sent, received, decoded, renderReleased, queueDrops, decodeDrops, forceRecovery)
+	}
+	return nil
 }

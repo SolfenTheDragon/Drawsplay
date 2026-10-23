@@ -9,7 +9,7 @@ import (
 	"drawsplay/host/internal/wifilan"
 )
 
-func verifySession(ctx context.Context, iface, controlEndpoint, videoEndpoint string, store *wifilan.TrustStore, testVideo string, out io.Writer) (result error) {
+func verifySession(ctx context.Context, iface, controlEndpoint, videoEndpoint string, store *wifilan.TrustStore, testVideo string, forceRecovery bool, out io.Writer) (result error) {
 	// Trust the paired identity, never identity claims from discovery metadata.
 	peer, paired := store.Peer()
 	if !paired {
@@ -48,7 +48,7 @@ func verifySession(ctx context.Context, iface, controlEndpoint, videoEndpoint st
 		return err
 	}
 	if testVideo != "" {
-		return streamSyntheticVideo(ctx, testVideo, control, video, binding, limits, out)
+		return streamSyntheticVideo(ctx, testVideo, control, video, binding, limits, forceRecovery, out)
 	}
 	return nil
 }

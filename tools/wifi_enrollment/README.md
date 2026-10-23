@@ -59,3 +59,10 @@ and a `syntheticMedia` object (received/decoded/released counts, drops,
 overflow/age events, decoder name). The tablet rejects streams whose SPS or
 slices violate the baseline rules in `FUNCTIONALITY.md` section 3.8.
 Release-to-Surface is not physical scanout, latency, power or soak evidence.
+
+Add `--force-recovery` (requires `--test-video`) to stall the probe's decoder
+thread for 700 ms after 60 decoded pictures, forcing queue overflow and
+drop-until-IDR recovery. The host then requires observed queue drops and
+resumed decoding instead of the clean-run >=90% release threshold. Evidence:
+`docs/performance/tab-a8-wifi-forced-recovery-2026-10-23.json` (300 received,
+270 decoded and released, 30 dropped, one overflow, no failure).

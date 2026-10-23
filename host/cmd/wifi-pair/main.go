@@ -32,6 +32,7 @@ func run(arguments []string, approval io.Reader, out, diagnostics io.Writer) int
 	directory := flags.String("trust-dir", "", "dedicated private Wi-Fi identity/trust directory (required)")
 	replace := flags.Bool("replace", false, "explicitly permit replacement of an existing paired tablet after approval")
 	verify := flags.Bool("verify-session", false, "after saving trust, verify fresh paired control/video TLS channels without capture or input")
+	forceRecovery := flags.Bool("test-video-force-recovery", false, "with -test-video, make the isolated tablet probe stall its decoder to exercise queue overflow and IDR recovery")
 	testVideo := flags.String("test-video", "", "explicit local DSVT synthetic-video fixture; implies -verify-session, never captures desktop")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -44,16 +45,20 @@ func run(arguments []string, approval io.Reader, out, diagnostics io.Writer) int
 		fmt.Fprintln(diagnostics, "Wi-Fi pairing requires -interface, -tablet (printable exact service name), and -trust-dir; no positional arguments")
 		return 1
 	}
+	if *forceRecovery && *testVideo == "" {
+		fmt.Fprintln(diagnostics, "-test-video-force-recovery requires -test-video")
+		return 1
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	if err := pair(ctx, *iface, *tablet, *directory, *replace, *verify || *testVideo != "", *testVideo, approval, out, diagnostics); err != nil {
+	if err := pair(ctx, *iface, *tablet, *directory, *replace, *verify || *testVideo != "", *testVideo, *forceRecovery, approval, out, diagnostics); err != nil {
 		fmt.Fprintf(diagnostics, "Wi-Fi pairing: %v\n", err)
 		return 1
 	}
 	return 0
 }
 
-func pair(ctx context.Context, iface, name, directory string, replace, verify bool, testVideo string, approval io.Reader, out, diagnostics io.Writer) (result error) {
+func pair(ctx context.Context, iface, name, directory string, replace, verify bool, testVideo string, forceRecovery bool, approval io.Reader, out, diagnostics io.Writer) (result error) {
 	if _, _, err := wifilan.SelectInterface(iface); err != nil {
 		return err
 	}
@@ -175,7 +180,7 @@ func pair(ctx context.Context, iface, name, directory string, replace, verify bo
 		if err := secured.Close(); err != nil {
 			return err
 		}
-		return verifySession(ctx, iface, endpoint, videoEndpoint, store, testVideo, out)
+		return verifySession(ctx, iface, endpoint, videoEndpoint, store, testVideo, forceRecovery, out)
 	}
 	return nil
 }
