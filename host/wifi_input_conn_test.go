@@ -71,3 +71,37 @@ func TestWiFiInputConnRejectsBadFrames(t *testing.T) {
 		}
 	}
 }
+
+func TestWiFiInputConnRoutesControlFramesToHandler(t *testing.T) {
+	conn, _, w, _ := newInputPair(t)
+	var seen [][]byte
+	conn.SetControlHandler(func(h wifilan.FrameHeader, payload []byte) error {
+		seen = append(seen, append([]byte(nil), payload...))
+		return nil
+	})
+	go func() {
+		w.WriteFrame(wifilan.FrameHeader{Type: wifilan.FrameControl, Epoch: 9, Sequence: 10, PayloadLength: 2}, []byte{7, 0})
+		w.WriteFrame(wifilan.FrameHeader{Type: wifilan.FrameInput, Epoch: 9, Sequence: 11, PayloadLength: 1}, []byte("z"))
+	}()
+	buf := make([]byte, 4)
+	n, err := conn.Read(buf)
+	if err != nil || string(buf[:n]) != "z" || len(seen) != 1 || seen[0][0] != 7 {
+		t.Fatalf("n=%d err=%v seen=%v", n, err, seen)
+	}
+}
+
+func TestWiFiDecoderGateOpensOnlyOnReadyRecord(t *testing.T) {
+	g := newWiFiDecoderGate()
+	if err := g.Handle(wifilan.FrameHeader{}, []byte{9, 9, 9, 9}); err == nil {
+		t.Fatal("bad record accepted")
+	}
+	if err := g.Wait(time.Millisecond); err == nil {
+		t.Fatal("gate opened without ready")
+	}
+	if err := g.Handle(wifilan.FrameHeader{}, []byte{7, 0, 0, 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Wait(time.Second); err != nil {
+		t.Fatal(err)
+	}
+}

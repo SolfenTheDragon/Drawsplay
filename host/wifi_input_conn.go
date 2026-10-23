@@ -22,6 +22,7 @@ type wifiInputConn struct {
 	epoch   uint64
 	pending []byte
 	buffer  []byte
+	control func(wifilan.FrameHeader, []byte) error
 
 	writeMu  sync.Mutex
 	writer   *wifilan.FrameWriter
@@ -37,6 +38,11 @@ func newWiFiInputConn(conn net.Conn, epoch uint64, guard *wifilan.SequenceGuard,
 	}
 }
 
+// SetControlHandler receives authenticated control records (for example the
+// tablet's decoder-ready message) that share the socket; call before Read.
+// The payload is only valid during the call.
+func (c *wifiInputConn) SetControlHandler(h func(wifilan.FrameHeader, []byte) error) { c.control = h }
+
 func (c *wifiInputConn) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
@@ -46,7 +52,8 @@ func (c *wifiInputConn) Read(p []byte) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		if header.Type != wifilan.FrameInput || header.Epoch != c.epoch {
+		isControl := header.Type == wifilan.FrameControl && c.control != nil
+		if (header.Type != wifilan.FrameInput && !isControl) || header.Epoch != c.epoch {
 			return 0, errWiFiInputFrame
 		}
 		if err := c.guard.Accept(header); err != nil {
@@ -55,6 +62,12 @@ func (c *wifiInputConn) Read(p []byte) (int, error) {
 		body, err := c.reader.ReadPayload(c.buffer)
 		if err != nil {
 			return 0, err
+		}
+		if isControl {
+			if err := c.control(header, body); err != nil {
+				return 0, err
+			}
+			continue
 		}
 		c.pending = body
 	}
