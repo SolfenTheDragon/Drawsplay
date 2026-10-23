@@ -23,7 +23,7 @@ type bridgeFixture struct {
 
 func newBridgeFixture(t *testing.T) *bridgeFixture {
 	f := &bridgeFixture{}
-	f.bridge = newWiFiVideoBridge(&f.out, 5, 640, 360, 1<<16, func() error { f.ready++; return nil })
+	f.bridge = newWiFiVideoBridge(&f.out, 5, 1<<16, func() error { f.ready++; return nil })
 	return f
 }
 
@@ -42,7 +42,7 @@ func (f *bridgeFixture) frames(t *testing.T) (headers []wifilan.FrameHeader, pay
 
 func TestWiFiVideoBridgeEmitsConfigOnceThenAccessUnits(t *testing.T) {
 	f := newBridgeFixture(t)
-	sps := []byte{0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0xda, 0x02, 0x80, 0xbf}
+	sps := []byte{0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x28, 0xda, 0x02, 0x80, 0xbf, 0xe5, 0xc0, 0x44, 0, 0, 3, 0, 4, 0, 0, 3, 0, 0xf2, 0x3c, 0x60, 0xca, 0x80}
 	pps := []byte{0, 0, 0, 1, 0x68, 0xce, 0x0f, 0xc8}
 	stream := bridgePacket(0, []byte(`{"codec":"h264","fps":30}`))
 	for _, nal := range [][]byte{sps, pps, {0, 0, 0, 1, 0x65, 0xb8, 0x60}, {0, 0, 0, 1, 0x41, 0x9a, 0x18}} {
@@ -101,8 +101,18 @@ func TestWiFiVideoBridgeFailsClosed(t *testing.T) {
 	f := newBridgeFixture(t)
 	f.bridge.ready = func() error { return errors.New("tablet never became ready") }
 	f.bridge.Write(bridgePacket(0, []byte(`{"fps":30}`)))
-	f.bridge.Write(bridgePacket(1, []byte{0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0xda, 0x02, 0x80, 0xbf}))
+	f.bridge.Write(bridgePacket(1, []byte{0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x28, 0xda, 0x02, 0x80, 0xbf, 0xe5, 0xc0, 0x44, 0, 0, 3, 0, 4, 0, 0, 3, 0, 0xf2, 0x3c, 0x60, 0xca, 0x80}))
 	if _, err := f.bridge.Write(bridgePacket(1, []byte{0, 0, 0, 1, 0x68, 0xce, 0x0f, 0xc8})); err == nil {
 		t.Error("ready failure not surfaced")
+	}
+}
+
+func TestWiFiVideoBridgeRejectsSPSWithUnreadableSize(t *testing.T) {
+	f := newBridgeFixture(t)
+	stream := bridgePacket(0, []byte(`{"codec":"h264","fps":30}`))
+	stream = append(stream, bridgePacket(1, []byte{0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0xda})...)
+	stream = append(stream, bridgePacket(1, []byte{0, 0, 0, 1, 0x68, 0xce, 0x0f, 0xc8})...)
+	if _, err := f.bridge.Write(stream); err == nil || f.out.Len() != 0 || f.ready != 0 {
+		t.Fatalf("err=%v out=%d ready=%d", err, f.out.Len(), f.ready)
 	}
 }

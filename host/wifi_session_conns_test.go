@@ -14,7 +14,7 @@ func TestWiFiSessionConnsSendConfigOnlyAfterTabletDecoderReady(t *testing.T) {
 	defer tabCtl.Close()
 	defer tabVid.Close()
 	limits := wifilan.SessionHello{MaxWidth: 1920, MaxHeight: 1200, MaxAccessUnit: 1 << 16}
-	input, video, err := newWiFiSessionConns(hostCtl, hostVid, 5, limits, 640, 360, time.Second)
+	input, video, err := newWiFiSessionConns(hostCtl, hostVid, 5, limits, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestWiFiSessionConnsSendConfigOnlyAfterTabletDecoderReady(t *testing.T) {
 	}()
 	stream := bridgePacket(0, []byte(`{"codec":"h264","fps":30}`))
 	for _, nal := range [][]byte{
-		{0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0xda, 0x02, 0x80, 0xbf},
+		{0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x28, 0xda, 0x02, 0x80, 0xbf, 0xe5, 0xc0, 0x44, 0, 0, 3, 0, 4, 0, 0, 3, 0, 0xf2, 0x3c, 0x60, 0xca, 0x80},
 		{0, 0, 0, 1, 0x68, 0xce, 0x0f, 0xc8},
 		{0, 0, 0, 1, 0x65, 0xb8, 0x60},
 	} {

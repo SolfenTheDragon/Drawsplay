@@ -393,7 +393,7 @@ Two host adapters let the existing session code run over a paired Wi-Fi
 session without edits to the USB accept loops (neither is wired into the
 product yet). `wifiVideoBridge` is the `io.Writer` the video session writes
 its `[type][len][payload]` packets to: it sends one config frame (schema 1,
-fixed width/height from the session, fps from the config packet, SPS, PPS)
+width/height read from the SPS (the tablet requires the config size to equal the SPS size), fps from the config packet, SPS, PPS)
 when both parameter sets are known, then waits for the tablet's decoder-ready
 control record, then sends AU frames from sequence 3 with capture time and
 `1000000/fps` duration. Unknown packet types, oversized packets, pictures

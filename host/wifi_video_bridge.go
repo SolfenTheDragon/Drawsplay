@@ -15,12 +15,11 @@ import (
 // [type][len][payload] packet stream) feed a paired Wi-Fi video channel
 // without modifying that code. It is an io.Writer for one Wi-Fi session only.
 type wifiVideoBridge struct {
-	out           io.Writer
-	frames        *wifilan.FrameWriter
-	epoch         uint64
-	width, height int
-	maxPacket     int
-	ready         func() error
+	out       io.Writer
+	frames    *wifilan.FrameWriter
+	epoch     uint64
+	maxPacket int
+	ready     func() error
 
 	header     [5]byte
 	headerLen  int
@@ -37,9 +36,9 @@ type wifiVideoBridge struct {
 	err        error
 }
 
-func newWiFiVideoBridge(out io.Writer, epoch uint64, width, height, maxAccessUnit int, ready func() error) *wifiVideoBridge {
+func newWiFiVideoBridge(out io.Writer, epoch uint64, maxAccessUnit int, ready func() error) *wifiVideoBridge {
 	return &wifiVideoBridge{
-		out: out, frames: wifilan.NewFrameWriter(out), epoch: epoch, width: width, height: height,
+		out: out, frames: wifilan.NewFrameWriter(out), epoch: epoch,
 		maxPacket: maxAccessUnit, ready: ready,
 		payload: make([]byte, maxAccessUnit), au: make([]byte, maxAccessUnit),
 		sequence: 3, start: time.Now(),
@@ -135,10 +134,14 @@ func (b *wifiVideoBridge) maybeSendConfig() error {
 	if !ok {
 		return nil
 	}
+	width, height, err := wifilan.SPSDimensions(sets.SPS)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errWiFiVideoStream, err)
+	}
 	cfg := make([]byte, 16, 16+len(sets.SPS)+len(sets.PPS))
 	binary.BigEndian.PutUint16(cfg[0:], 1)
-	binary.BigEndian.PutUint16(cfg[2:], uint16(b.width))
-	binary.BigEndian.PutUint16(cfg[4:], uint16(b.height))
+	binary.BigEndian.PutUint16(cfg[2:], uint16(width))
+	binary.BigEndian.PutUint16(cfg[4:], uint16(height))
 	binary.BigEndian.PutUint16(cfg[6:], uint16(b.fps))
 	binary.BigEndian.PutUint16(cfg[8:], uint16(len(sets.SPS)))
 	binary.BigEndian.PutUint16(cfg[10:], uint16(len(sets.PPS)))
