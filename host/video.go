@@ -250,10 +250,6 @@ func serveVideoSession(ctx context.Context, conn net.Conn, store *settingsStore,
 		opts.WiFiBaseline = true
 		opts.NativeMedia = "off"
 		opts.TemporalLayering = false
-		if capped := capWiFiSessionFPS(opts.FPS, conn); capped != opts.FPS {
-			log.Printf("Wi-Fi session fps capped %d -> %d by the tablet decoder budget", opts.FPS, capped)
-			opts.FPS = capped
-		}
 	}
 	if cap := transportMaxBitrate(store.get(), transport); cap != "" {
 		opts.Bitrate = cappedBitrate(opts.Bitrate, cap)
@@ -761,7 +757,12 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		if target.Kind == captureX11Grab && !opts.X11HighRate && effOpts.FPS > 60 {
 			effOpts.FPS = 60
 		}
-		effOpts.FPS = capWiFiSessionFPS(effOpts.FPS, conn)
+		if capped := capWiFiSessionFPS(effOpts.FPS, target.Width, target.Height, conn); capped != effOpts.FPS {
+			if capped != lastEffectiveFPS {
+				log.Printf("Wi-Fi session fps capped %d -> %d by the tablet decoder budget at %dx%d", effOpts.FPS, capped, target.Width, target.Height)
+			}
+			effOpts.FPS = capped
+		}
 		if lastEffectiveFPS != 0 && effOpts.FPS != lastEffectiveFPS {
 			log.Printf("Capture framerate now following active display refresh: %d fps", effOpts.FPS)
 			publishModeChange(target.Width, target.Height, effOpts.FPS)

@@ -70,7 +70,7 @@ class WiFiH264Test {
         assertEquals(30, config.fps)
         assertArrayEquals(sps, config.sps)
         for (raw in listOf(
-            config(1280, 720), config(640, 360, 60),
+            config(1280, 720), config(640, 360, 118),
             config().also { it[20 + 1] = 100 }, // SPS profile_idc.
             config().also { it[20 + 3] = 42 }, // SPS exceeds negotiated level.
             config().also { it[15] = 1 },
@@ -90,6 +90,17 @@ class WiFiH264Test {
             put(hiddenSps).put(pps)
         }.array()
         assertThrows(IOException::class.java) { WiFiH264.decodeConfig(smuggled, limits()) }
+    }
+
+    @Test
+    fun negotiatedFpsIsAMacroblockBudgetAtTheMaximumSize() {
+        // 30 fps at 1280x720 (3600 MBs) allows 117 fps at 640x360 (920 coded MBs).
+        assertEquals(60, WiFiH264.decodeConfig(config(640, 360, 60), limits()).fps)
+        assertEquals(117, WiFiH264.decodeConfig(config(640, 360, 117), limits()).fps)
+        assertThrows(IOException::class.java) { WiFiH264.decodeConfig(config(640, 360, 118), limits()) }
+        assertThrows(IOException::class.java) {
+            WiFiH264.decodeConfig(config(1280, 720, 31, spsFor(31, 5, 80, 45)), limits())
+        }
     }
 
     private fun slice(header: Int, firstMb: Int, sliceType: Int, frameNum: Int, idrId: Int = 0): ByteArray {

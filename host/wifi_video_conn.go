@@ -32,8 +32,10 @@ type wifiVideoConn struct {
 	buffer  []byte
 	pending []byte
 
-	// maxFPS is the negotiated Hello frame-rate ceiling (0 = none known).
-	maxFPS int
+	// maxFPS is the negotiated Hello frame rate at maxWidth x maxHeight
+	// (0 = none known); smaller sizes may run faster within the same
+	// macroblock-per-second budget.
+	maxFPS, maxWidth, maxHeight int
 }
 
 func newWiFiVideoConn(conn net.Conn, out io.Writer) *wifiVideoConn {

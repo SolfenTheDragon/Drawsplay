@@ -28,19 +28,28 @@ func newWiFiSessionConns(control, video net.Conn, epoch uint64, limits wifilan.S
 	} else {
 		out = newWiFiVideoConn(video, bridge)
 	}
-	out.maxFPS = int(limits.MaxFPS)
+	out.maxFPS, out.maxWidth, out.maxHeight = int(limits.MaxFPS), int(limits.MaxWidth), int(limits.MaxHeight)
 	return in, out, nil
 }
 
 // capWiFiSessionFPS clamps a session frame rate to the paired tablet's
-// negotiated Hello MaxFPS, which the tablet derives from its decoder's rated
-// throughput at its maximum size. Other conns are returned unchanged.
-func capWiFiSessionFPS(fps int, conn net.Conn) int {
+// decoder budget: the negotiated Hello MaxFPS holds at MaxWidth x MaxHeight
+// and scales with the session's macroblock count. Other conns are unchanged.
+func capWiFiSessionFPS(fps, width, height int, conn net.Conn) int {
 	if wrapped, ok := conn.(*closeNotifyConn); ok {
 		conn = wrapped.Conn
 	}
-	if c, ok := conn.(*wifiVideoConn); ok && c.maxFPS > 0 && fps > c.maxFPS {
-		return c.maxFPS
+	c, ok := conn.(*wifiVideoConn)
+	if !ok || c.maxFPS <= 0 {
+		return fps
 	}
-	return fps
+	limit := c.maxFPS
+	if sessionMBs := h264Macroblocks(width, height); sessionMBs > 0 {
+		limit = c.maxFPS * h264Macroblocks(c.maxWidth, c.maxHeight) / sessionMBs
+	}
+	return min(fps, max(limit, c.maxFPS))
+}
+
+func h264Macroblocks(width, height int) int {
+	return ((width + 15) / 16) * ((height + 15) / 16)
 }

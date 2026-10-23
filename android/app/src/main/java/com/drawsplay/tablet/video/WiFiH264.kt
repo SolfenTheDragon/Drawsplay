@@ -118,6 +118,19 @@ class WiFiH264(private val config: Config) {
     }
 
     companion object {
+        /**
+         * The negotiated Hello maxFps holds at maxWidth x maxHeight; smaller
+         * sizes may run faster within the same macroblock-per-second budget
+         * (never below maxFps, never above the Hello's 120 fps bound).
+         */
+        fun maxFpsAt(width: Int, height: Int, limits: WiFiSessionProtocol.Hello): Int {
+            fun blocks(w: Int, h: Int) = ((w + 15) / 16) * ((h + 15) / 16)
+            val session = blocks(width, height)
+            if (session <= 0) return limits.maxFps
+            val scaled = limits.maxFps.toLong() * blocks(limits.maxWidth, limits.maxHeight) / session
+            return scaled.coerceIn(limits.maxFps.toLong(), 120L).toInt()
+        }
+
         fun decodeConfig(raw: ByteArray, limits: WiFiSessionProtocol.Hello): Config {
             if (raw.size !in 16..65536) invalid()
             val data = ByteBuffer.wrap(raw)
@@ -129,7 +142,7 @@ class WiFiH264(private val config: Config) {
             val spsLength = u16()
             val ppsLength = u16()
             if (data.int != 0 || width !in 320..limits.maxWidth || height !in 320..limits.maxHeight ||
-                fps !in 1..limits.maxFps || spsLength !in 8..4096 || ppsLength !in 6..4096 ||
+                fps !in 1..maxFpsAt(width, height, limits) || spsLength !in 8..4096 || ppsLength !in 6..4096 ||
                 raw.size != 16 + spsLength + ppsLength
             ) invalid()
             val sps = raw.copyOfRange(16, 16 + spsLength)
