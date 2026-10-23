@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -41,5 +42,22 @@ func TestPairedWifiSettingForcedOffWithoutFeatureFlag(t *testing.T) {
 	t.Setenv(wifiFeatureFlagEnv, "")
 	if got := applyFeatureFlags(settings{PairedWifiEnabled: true, AOAEnabled: true}); got.PairedWifiEnabled {
 		t.Fatal("paired Wi-Fi stayed on with the feature flag off")
+	}
+}
+
+func TestStatusReportsActiveTransport(t *testing.T) {
+	srv := httptest.NewServer(newWebUIHandler(newTestStore(t), func() {}))
+	defer srv.Close()
+	res, err := http.Get(srv.URL + "/api/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var status map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&status); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := status["activeTransport"]; !ok {
+		t.Fatal("status lacks activeTransport, which the web UI needs to hide USB details on Wi-Fi")
 	}
 }

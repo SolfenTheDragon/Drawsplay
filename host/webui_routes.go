@@ -166,6 +166,7 @@ func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"hostOS":                  runtime.GOOS,
 		"version":                 hostVersion(),
 		"featureFlags":            map[string]bool{"wifi": wifiFeatureEnabled()},
+		"activeTransport":         hostSessionOwnership.currentTransport(),
 		"activeClient":            activeClientIdentity(),
 		"activeInputDevice":       activeInputDevice(),
 		"inputLocked":             sessionInputLocked(),

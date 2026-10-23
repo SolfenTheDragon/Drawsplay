@@ -506,7 +506,7 @@ async function refreshStatus() {
     const modeLabel = displayMode ? `, ${displayMode}` : "";
     $("dot").className = "dot" + (v.streaming ? " on" : "");
     $("status").textContent = v.streaming
-      ? `Streaming (${v.encoder} @ ${v.bitrate}${modeLabel})${activeClientLabel ? ` — ${activeClientLabel}` : ""}`
+      ? `Streaming (${v.encoder} @ ${v.bitrate}${modeLabel})`
       : "Idle — waiting for client";
     const warnings = Array.isArray(st.warnings) ? st.warnings : [];
     const setupPrompt = linuxSetupPrompt(warnings, st.hostOS);
@@ -514,6 +514,9 @@ async function refreshStatus() {
     if (setupPrompt) lines.push(setupPrompt);
     $("warnings").hidden = warnings.length === 0;
     $("warnings").textContent = lines.join("\n");
+    const targetInfo = $("target-info");
+    targetInfo.hidden = !activeClientLabel;
+    targetInfo.textContent = activeClientLabel ? `Target Information: ${activeClientLabel}` : "";
     renderConnectionInfo(st);
     renderMetrics(st.metrics || {}, v, st.clientVideoStats || null);
     renderSetupChecklist(st.setup || {});
@@ -582,6 +585,13 @@ const AOA_STATE_LABELS = {
 
 // Shows only the connection details for transports that are turned on.
 function renderConnectionInfo(st) {
+  if (st.activeTransport === "wifi-paired") {
+    // A live Wi-Fi session makes the USB details irrelevant.
+    $("switch-aoa-btn").hidden = true;
+    const name = (wifiView && wifiView.pairedName) || "tablet";
+    $("connection-info").textContent = `Wi-Fi: connected to ${name}`;
+    return;
+  }
   const lines = [];
   if (st.aoaEnabled) {
     const aoa = st.aoa || {};
