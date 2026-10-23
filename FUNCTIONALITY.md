@@ -424,6 +424,10 @@ the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wra
   `GET /api/wifi/pairing`, `POST /api/wifi/pairing/{start,approve,deny,cancel}`
   (CSRF protected, 404 when the feature flag is off). The `wifi-pair` CLI
   remains for development.
+- While a `wifi-paired` session is active, `/api/status` reports
+  `activeTransport` and the Host overview shows "Wi-Fi: connected to <name>"
+  instead of the USB/ADB lines and hides the accessory-mode button. The tablet's
+  native info is shown on its own line as "Target Information: …".
 - Paired sessions use transport `wifi-paired` and an opt-in H.264 baseline
   encoder shape (ffmpeg only, level 5.0, no native media, no temporal
   layering). USB encoder arguments are unchanged.
