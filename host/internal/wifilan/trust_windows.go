@@ -30,7 +30,7 @@ func secureStorePath(path string, directory bool) error {
 	if err != nil {
 		return err
 	}
-	if owner == nil || !owner.Equals(user.User.Sid) {
+	if owner == nil || !ownedByCurrentProcess(owner, user.User.Sid) {
 		return errors.New("Wi-Fi trust must be owned by the current Windows user; run the host without elevation")
 	}
 	flags := ""
@@ -48,6 +48,33 @@ func secureStorePath(path string, directory bool) error {
 	}
 	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
 		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
+}
+
+// ownedByCurrentProcess accepts the user's own SID or the token's default
+// owner: files an elevated administrator creates are owned by the
+// Administrators group, not the user, while a non-elevated token's default
+// owner is the user itself.
+func ownedByCurrentProcess(owner, user *windows.SID) bool {
+	if owner.Equals(user) {
+		return true
+	}
+	defaultOwner, err := tokenDefaultOwner(windows.GetCurrentProcessToken())
+	return err == nil && owner.Equals(defaultOwner)
+}
+
+func tokenDefaultOwner(token windows.Token) (*windows.SID, error) {
+	size := uint32(64)
+	for {
+		buffer := make([]byte, size)
+		err := windows.GetTokenInformation(token, windows.TokenOwner, &buffer[0], size, &size)
+		if err == nil {
+			// TOKEN_OWNER is a single PSID pointing into buffer.
+			return (*struct{ Owner *windows.SID })(unsafe.Pointer(&buffer[0])).Owner.Copy()
+		}
+		if err != windows.ERROR_INSUFFICIENT_BUFFER {
+			return nil, err
+		}
+	}
 }
 
 func lockTrustFile(file *os.File) error {

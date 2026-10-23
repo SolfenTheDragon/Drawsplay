@@ -72,8 +72,9 @@ func TestWiFiCongestionGateKeepsAWatchableFloor(t *testing.T) {
 	if low := rc.ladder[rc.idx]; low < 26666/8 || low > 26666/4 {
 		t.Fatalf("Wi-Fi ladder floor is %dk, want between top/8 and top/4", low)
 	}
-	if usb := sessionCongestionGate(captureTarget{}, false); usb.floorDivisor != 0 {
-		t.Fatalf("USB gate gained a floor: %d", usb.floorDivisor)
+	usb := sessionCongestionGate(captureTarget{}, false)
+	if want := newSessionCongestionGate(captureTarget{}).floorDivisor; usb.floorDivisor != want {
+		t.Fatalf("USB gate floor divisor = %d, want the platform default %d", usb.floorDivisor, want)
 	}
 }
 
