@@ -380,6 +380,14 @@ unit is one AUD-delimited picture: all its slices must share PPS, IDR flag,
 0) `pic_order_cnt_lsb`, with strictly increasing `first_mb_in_slice`;
 otherwise the stream is rejected. On end-of-stream the decoder drains only
 after any held post-flush recovery IDR has been submitted.
+
+Host side, `internal/wifilan.AUPacketizer` converts the encoder's per-NAL
+stream into this AU format (not yet connected to the product capture
+pipeline): it prepends an AUD (`primary_pic_type` 0 for IDR, 1 otherwise),
+strips in-band SPS/PPS/SEI/filler (SPS/PPS are kept for the decoder config
+and a changed pair is reported), and requires one slice per picture so a
+picture NAL ends its AU with no added frame of latency. Multi-slice,
+partitioned or start-code-less input is rejected.
 ## 4. Target MVP Functionality
 
 1. Extend desktop onto a virtual display represented by the Android tablet. **(done — M2)**
