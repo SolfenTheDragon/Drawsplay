@@ -418,9 +418,27 @@ the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wra
   `WiFiVideoPlayer` (receive plus decode, sends decoder-ready `[7,0,0,1]`
   after the decoder exists) and an additive paired-socket input candidate that
   is always last, so USB and accessory ordering are unchanged.
-- Not yet built: the tablet-side foreground service and pairing UI, the
-  tablet dropping Wi-Fi when USB appears, and an API 26 discovery fallback.
-  Until then a paired session is only exercisable through the isolated probe.
+- The tablet app hosts the paired session itself while `MainActivity` is
+  started (`WiFiPairedSessionHost`): with a saved paired host it advertises
+  `_drawsplay-tablet._tcp` (v=2, videoPort, streaming=1), accepts the host's
+  control and video sockets only from a directly connected IPv4 peer, offers
+  the control link to `InputChannel`, and plays video on the existing surface.
+  Without saved trust it does nothing.
+- USB always wins. The tablet does not offer or keep Wi-Fi while a USB
+  accessory is attached or the tablet is USB-powered with adb enabled; it
+  closes any Wi-Fi session, stops advertising, and the host releases the
+  display so USB connects. The host refuses USB while a Wi-Fi session is
+  active, so this tablet-side rule is what hands over.
+- Pairing uses a separate launcher entry, "DrawSplay Wi-Fi pairing"
+  (`WiFiPairingActivity`): run the `wifi-pair` CLI on the host, enter its
+  eight-digit code on the tablet. Trust is stored in the Android Keystore
+  backed store.
+- Limits advertised by the tablet: 1920x1200, 60 fps, level 4.2, 512 KiB
+  access units, 3 queue slots. Level 4.2 and 60 fps are the host's maximum.
+- Not yet verified: the integrated product path on real hardware (only the
+  isolated probe and synthetic streams were run on a tablet). No API 26
+  discovery fallback beyond skipping network-scoped NSD; Android 16+ local
+  network permission is not requested.
 
 ## 4. Target MVP Functionality
 
