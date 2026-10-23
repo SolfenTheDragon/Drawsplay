@@ -401,7 +401,7 @@ before parameter sets and mid-session SPS/PPS changes fail the bridge closed
 (the first implementation reconnects). `wifiInputConn` presents the control
 socket as a byte stream: tablet-to-host and host-to-tablet bytes travel in
 `FrameInput` payloads of at most 4096 bytes, each direction authenticated by
-the session epoch with strictly increasing sequence numbers.
+the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wraps the bridge as the `net.Conn` the video session writes to; its read side blocks until close because the first Wi-Fi release has no upstream decode-stats path, so adaptive-bitrate feedback stays idle on Wi-Fi.
 ## 4. Target MVP Functionality
 
 1. Extend desktop onto a virtual display represented by the Android tablet. **(done — M2)**
