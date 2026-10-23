@@ -9,4 +9,5 @@
     <string name="wifi_pair">Pair this computer</string>
     <string name="wifi_back">Back</string>
     <string name="status_waiting_for_host">Waiting for host…</string>
+    <string name="status_connecting_wifi">Connecting over Wi-Fi…</string>
 </resources>

@@ -78,7 +78,7 @@ func startPairedWiFiRuntime(parent context.Context, store *settingsStore) *paire
 		enabled: true, retryDelay: 3 * time.Second, inputs: inputs, videos: videos,
 		owner: hostSessionOwnership.currentTransport,
 		browse: func(ctx context.Context, found func(wifilan.Candidate)) error {
-			return wifilan.Browse(ctx, iface, found, func(err error) { throttledLog("wifi-reject", "Wi-Fi discovery ignored an advertisement: %v", err) })
+			return wifilan.Browse(ctx, iface, skipPairingCandidates(found), func(err error) { throttledLog("wifi-reject", "Wi-Fi discovery ignored an advertisement: %v", err) })
 		},
 		establish: func(ctx context.Context, c wifilan.Candidate) (net.Conn, net.Conn, error) {
 			return establishPairedWiFi(ctx, iface, trust, c)
@@ -139,4 +139,14 @@ func (c *pairedWiFiController) paired() (string, bool) {
 		return "", false
 	}
 	return c.runtime.Label, true
+}
+
+// skipPairingCandidates drops tablets whose Wi-Fi connect panel is open: their
+// control port is waiting for enrollment, not a paired session.
+func skipPairingCandidates(found func(wifilan.Candidate)) func(wifilan.Candidate) {
+	return func(c wifilan.Candidate) {
+		if !c.Pairing {
+			found(c)
+		}
+	}
 }

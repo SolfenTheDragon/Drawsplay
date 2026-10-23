@@ -115,6 +115,7 @@ class MainActivity : AppCompatActivity() {
         wifiPairSubmit = findViewById(R.id.wifiPairSubmit)
         findViewById<View>(R.id.wifiConnectButton).setOnClickListener { openWifiPairing() }
         findViewById<View>(R.id.wifiPairClose).setOnClickListener { closeWifiPairing() }
+        wifiPairCode.setOnEditorActionListener { _, _, _ -> wifiPairSubmit.performClick(); true }
         wifiPairSubmit.setOnClickListener {
             if (pairing?.submitCode(wifiPairCode.text.toString()) == true) {
                 wifiPairCode.text.clear()
@@ -402,7 +403,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyVideoLayout() {
         val root = videoFrame.parent as View
-        val size = videoScaling.frameSize(videoWidth, videoHeight, root.width, root.height)
+        // Fill would stretch the landscape host picture in portrait; letterbox instead.
+        val mode = if (root.height > root.width && videoScaling == VideoScaling.FILL) VideoScaling.FIT else videoScaling
+        val size = mode.frameSize(videoWidth, videoHeight, root.width, root.height)
         val width = size?.first ?: FrameLayout.LayoutParams.MATCH_PARENT
         val height = size?.second ?: FrameLayout.LayoutParams.MATCH_PARENT
         val lp = videoFrame.layoutParams as FrameLayout.LayoutParams
@@ -455,17 +458,30 @@ class MainActivity : AppCompatActivity() {
         wifiPairPanel.visibility = View.VISIBLE
         wifiPairStatus.setText(R.string.wifi_hint)
         wifiPairSubmit.isEnabled = true
-        pairing = WiFiPairingSession(this, { wifiPairStatus.text = it }) { _ ->
-            wifiPairSubmit.isEnabled = false
+        pairing = WiFiPairingSession(this, { wifiPairStatus.text = it }) { paired ->
             pairing = null
+            if (paired) {
+                // Hand straight over to the display instead of waiting for Back.
+                hideWifiPanel()
+                statusText.setText(R.string.status_connecting_wifi)
+                pairedWifiHost.start()
+            } else {
+                wifiPairSubmit.isEnabled = false
+            }
         }.also { it.start() }
+    }
+
+    private fun hideWifiPanel() {
+        (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+            .hideSoftInputFromWindow(wifiPairCode.windowToken, 0)
+        wifiPairPanel.visibility = View.GONE
+        waitingGroup.visibility = View.VISIBLE
     }
 
     private fun closeWifiPairing() {
         pairing?.cancel()
         pairing = null
-        wifiPairPanel.visibility = View.GONE
-        waitingGroup.visibility = View.VISIBLE
+        hideWifiPanel()
         pairedWifiHost.start()
     }
 

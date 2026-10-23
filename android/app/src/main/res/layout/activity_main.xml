@@ -84,11 +84,17 @@
         </LinearLayout>
 
         <!-- Shown only after "Wi-Fi connect" is tapped. -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:fillViewport="false"
+            android:scrollbars="none">
         <LinearLayout
             android:id="@+id/wifiPairPanel"
             android:layout_width="420dp"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
+            android:layout_gravity="center_horizontal"
             android:background="@drawable/ds_panel"
             android:orientation="vertical"
             android:padding="24dp"
@@ -129,6 +135,7 @@
                 android:background="@drawable/ds_input"
                 android:hint="@string/wifi_code_hint"
                 android:importantForAutofill="no"
+                android:imeOptions="actionDone"
                 android:inputType="number"
                 android:maxLength="8"
                 android:padding="12dp"
@@ -160,6 +167,7 @@
                 android:textColor="@color/ds_muted"
                 android:textStyle="bold" />
         </LinearLayout>
+        </ScrollView>
     </FrameLayout>
 
 </FrameLayout>

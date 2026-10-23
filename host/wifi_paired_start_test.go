@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"drawsplay/host/internal/wifilan"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,5 +29,15 @@ func TestPairedWiFiStartIsInertWithoutFlagInterfaceOrTrust(t *testing.T) {
 	entries, _ := os.ReadDir(filepath.Join(cfg, "DrawSplay", wifiTrustDirName))
 	if len(entries) != 0 {
 		t.Fatal("inert start created trust material")
+	}
+}
+
+func TestPairedRuntimeIgnoresTabletsInPairingMode(t *testing.T) {
+	var got []string
+	found := skipPairingCandidates(func(c wifilan.Candidate) { got = append(got, c.Name) })
+	found(wifilan.Candidate{Name: "pairing", Pairing: true})
+	found(wifilan.Candidate{Name: "ready"})
+	if len(got) != 1 || got[0] != "ready" {
+		t.Fatalf("forwarded %v, want only the tablet not in pairing mode", got)
 	}
 }
