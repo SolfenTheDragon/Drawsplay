@@ -9,7 +9,6 @@ import android.net.nsd.NsdServiceInfo
 import android.os.Build
 import android.util.Log
 import android.view.Surface
-import com.drawsplay.tablet.video.WiFiDecoderBudget
 import com.drawsplay.tablet.video.WiFiVideoPlayer
 import java.io.IOException
 import java.net.Inet4Address
@@ -176,14 +175,12 @@ class WiFiPairedSessionHost(
         private const val HANDSHAKE_MS = 5000
         private const val SURFACE_WAIT_POLLS = 50
 
-        private val CAPABILITIES by lazy { WiFiSessionProtocol.Hello(
+        private val CAPABILITIES = WiFiSessionProtocol.Hello(
             minMajor = 2, maxMajor = 2, role = WiFiSessionProtocol.TABLET, codecMask = 1,
-            maxWidth = 1920, maxHeight = 1200, maxFps = WiFiDecoderBudget.forDevice(1920, 1200).also {
-                Log.i(TAG, "Wi-Fi decoder budget: $it fps at 1920x1200")
-            }, h264Level = 50,
+            maxWidth = 1920, maxHeight = 1200, maxFps = 60, h264Level = 50,
             maxAccessUnit = 512 * 1024, queueBytes = 1536 * 1024, queueSlots = 3,
             statsVersion = 1,
             features = WiFiSessionProtocol.FEATURE_LOW_LATENCY or WiFiSessionProtocol.FEATURE_VIDEO_STATS, spki = ByteArray(32), nonce = ByteArray(32)
-        ) }
+        )
     }
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"net"
 	"testing"
 	"time"
@@ -96,57 +95,5 @@ func TestWiFiSessionConnsReadTabletStatsOnlyWhenNegotiated(t *testing.T) {
 func TestPairedHostOffersVideoStats(t *testing.T) {
 	if wifiHostHello([32]byte{1}).Features&wifilan.FeatureVideoStats == 0 {
 		t.Fatal("host hello does not offer upstream video stats")
-	}
-}
-
-func TestWiFiSessionVideoConnCapsFPSToNegotiatedDecoderBudget(t *testing.T) {
-	for _, stats := range []uint32{0, wifilan.FeatureVideoStats} {
-		hostCtl, tabCtl := net.Pipe()
-		hostVid, tabVid := net.Pipe()
-		limits := wifilan.SessionHello{MaxWidth: 1920, MaxHeight: 1200, MaxFPS: 54, MaxAccessUnit: 1 << 16, Features: stats}
-		input, video, err := newWiFiSessionConns(hostCtl, hostVid, 5, limits, time.Second)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := capWiFiSessionFPS(60, 1920, 1200, video); got != 54 {
-			t.Fatalf("features=%d: 60 fps at 1920x1200 capped to %d, want 54", stats, got)
-		}
-		if got := capWiFiSessionFPS(60, 1920, 1200, &closeNotifyConn{Conn: video, notify: func() {}}); got != 54 {
-			t.Fatalf("features=%d: session-manager wrapped conn capped to %d, want 54", stats, got)
-		}
-		if got := capWiFiSessionFPS(30, 1920, 1200, video); got != 30 {
-			t.Fatalf("features=%d: 30 fps became %d", stats, got)
-		}
-		input.Close()
-		video.Close()
-		tabCtl.Close()
-		tabVid.Close()
-	}
-}
-
-func TestWiFiSessionFPSCapScalesWithSessionSize(t *testing.T) {
-	a, b := net.Pipe()
-	defer a.Close()
-	defer b.Close()
-	conn := newWiFiVideoConn(a, io.Discard)
-	conn.maxFPS, conn.maxWidth, conn.maxHeight = 54, 1920, 1200
-	// 1280x800 is 4000 macroblocks against 9000 at 1920x1200: well inside the budget.
-	if got := capWiFiSessionFPS(60, 1280, 800, conn); got != 60 {
-		t.Fatalf("60 fps at 1280x800 capped to %d, want 60", got)
-	}
-	if got := capWiFiSessionFPS(120, 1280, 800, conn); got != 120 {
-		t.Fatalf("120 fps at 1280x800 capped to %d, want 120 (budget allows 121)", got)
-	}
-	if got := capWiFiSessionFPS(60, 1600, 1200, conn); got != 60 {
-		t.Fatalf("60 fps at 1600x1200 capped to %d, want 60 (budget allows 64)", got)
-	}
-}
-
-func TestCapWiFiSessionFPSLeavesOtherConnsAlone(t *testing.T) {
-	a, b := net.Pipe()
-	defer a.Close()
-	defer b.Close()
-	if got := capWiFiSessionFPS(60, 1920, 1200, a); got != 60 {
-		t.Fatalf("plain conn fps changed to %d", got)
 	}
 }

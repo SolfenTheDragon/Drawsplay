@@ -439,7 +439,7 @@ Any other record type, epoch or a replayed sequence ends the video session. A ke
   encoder shape (ffmpeg only, level 5.0, no native media, no temporal
   layering). USB encoder arguments are unchanged.
 - Adaptive bitrate on Wi-Fi uses the upstream stats above with two Wi-Fi-only rules: tablet frame drops count as congestion only when they reach 10% of the frames received in the report (isolated jitter drops would otherwise walk the ladder to ~0.7 Mbps without helping), and the ladder never steps below an eighth of its top. USB thresholds are unchanged.
-- Session fps is capped by the tablet's decoder budget: the negotiated Hello `maxFps` is the rate allowed at `maxWidth`x`maxHeight`, and smaller sessions may run proportionally faster by macroblock count (never below `maxFps`, never above 120). The tablet sets `maxFps` from its hardware AVC decoder's rated frame rate at 1920x1200 (`WiFiDecoderBudget`, clamped 24..60) and rejects a config above the scaled budget, so a 1280x800 session on the SM-X200 still runs at 60 fps. A non-divisor rate such as 54 fps on a 60 Hz desktop repeats a frame every ~9, which shows as stutter on motion, so the cap only applies where the decoder genuinely cannot keep up. Measured on the SM-X200 (`OMX.sprd.h264.decoder`, rated 54 fps at 1920x1200): at 60 fps the decoder had no slack, its queue overflowed with 10–15 keyframe restarts per 40 s and the ladder fell to 9.6–16 Mbps; capped at 54 there were none, the stream held 26.7 Mbps and the longest presentation gap fell from up to 550 ms to 67 ms. SurfaceFlinger still presents about 40–48 fps, because bursty Wi-Fi arrival lands two frames in one refresh.
+- Wi-Fi session fps is resolution agnostic: it follows the display refresh like USB (60 on this X11 host) at every resolution, with no decoder-derived cap. A cap tried at 54 fps for the SM-X200 decoder (`OMX.sprd.h264.decoder`, rated 491,520 MB/s; 1920x1200@60 needs 540,000) removed its queue overflows at native size, but a non-divisor rate on a 60 Hz desktop repeats a frame about every 9 and showed as stutter on motion. At native 1920x1200@60 that decoder therefore still overflows occasionally; the tablet requests a keyframe and recovers in about 300 ms.
 - Android has `WiFiControlLink` (control socket as a byte stream),
   `WiFiVideoPlayer` (receive plus decode, sends decoder-ready `[7,0,0,1]`
   after the decoder exists, then the stats and keyframe-request records
@@ -463,8 +463,7 @@ Any other record type, epoch or a replayed sequence ends the video session. A ke
   host web UI Host overview. The paired session is paused while the panel is
   open and the panel closes when the app leaves the foreground. Trust is
   stored in the Android Keystore backed store.
-- Limits advertised by the tablet: 1920x1200, fps from the decoder budget (at
-  most 60), level 5.0, 512 KiB access units, 3 queue slots. Queued access
+- Limits advertised by the tablet: 1920x1200, 60 fps, level 5.0, 512 KiB access units, 3 queue slots. Queued access
   units older than `max(100 ms, 4 frames)` are discarded (then the tablet waits
   for an IDR and requests one). The decoder output loop drains every ready
   output and renders only the newest; superseded outputs are dropped and
