@@ -7,6 +7,7 @@ Use your Android tablet as a touch- and pen-enabled extension of your computer's
 - Extended desktop on the tablet (mirroring when a virtual display isn't available)
 - Touch, multi-touch and pen input, including pressure, tilt and buttons
 - Connects automatically over USB; no IP addresses or pairing codes
+- Wi-Fi connection (**beta**, opt-in) for cable-free use; USB remains the preferred connection
 - Tablet's native resolution and highest refresh rate by default (60 fps on Linux), remembered per computer
 - Local settings page for bitrate, input toggles and diagnostics
 - Windows and Linux hosts
@@ -78,6 +79,8 @@ The tablet connects on its own, shows the extended desktop and sends touch and p
 
 DrawSplay connects to the tablet over USB. The first time, accept the prompt on the tablet.
 
+**USB is the preferred connection**: it has the lowest latency and the most consistent frame rate. Wi-Fi works but is in beta (see [Wi-Fi (beta)](#wi-fi-beta)). When both are available, USB always takes priority.
+
 ### Developer USB measurements
 
 The external [USB resource collector](tools/usb_baseline/README.md) records
@@ -140,34 +143,28 @@ On Linux the frame rate is limited to 60, except on X11 hosts with VA-API (Intel
 
 **Tablet shows no prompt / doesn't open when plugged in.** Turn on **Auto-launch Android app on USB connect** on the settings page, or open the app manually.
 
-## Wi-Fi development diagnostics
+## Wi-Fi (beta)
 
-The new host-discovers-tablet Wi-Fi path is **not ready for normal use**.
-Wi-Fi (opt-in, start the host with `DRAWSPLAY_FEATURE_WIFI=1`): turn on
-**Wi-Fi** in the web UI configuration, choose your network interface and save;
-the pairing code appears in Host overview. On the tablet tap **Wi-Fi connect**,
-enter the code, then approve in the web UI. USB always takes priority.
+Wi-Fi streaming works end to end, display plus touch and pen input, but it is still **in beta**. Expect more latency than USB and occasional hitches on busy or weak networks. **Use USB whenever you can**; Wi-Fi is for when a cable isn't practical.
 
-Developers can run bounded, LAN-only [tablet discovery](docs/wifi-discovery.md)
-and reproduce [Wi-Fi TLS tests](docs/wifi-testing.md).
-An [isolated Android advertisement probe](tools/android_wifi_probe/README.md)
-tests real tablet discovery without replacing the installed display app.
-These tools do not pair devices, stream a display or authorize input.
-Numeric pairing, mutual TLS and durable trust
-[components and tests](docs/wifi-pairing.md) now include an opt-in Linux
-host pairing command and an automated real-LAN Tab A8 enrollment check.
-The separate `wifiTest` APK verifies Keystore-backed pairing and persistence
-without replacing the display application. Its optional
-[`--verify-session` check](tools/wifi_enrollment/README.md) additionally
-authenticates fresh saved-trust control/video channels and negotiates
-bounded capabilities; it sends no screen content or input commands.
-Normal-app enrollment,
-automatic reconnect and streaming-session integration remain unfinished;
-these tools cannot yet turn the tablet into a wireless display.
+To use it:
+
+1. Start the host with Wi-Fi enabled (`DRAWSPLAY_FEATURE_WIFI=1`).
+2. On the settings page (`http://127.0.0.1:27180`), turn on **Wi-Fi** in the configuration, choose your network interface and save. A pairing code appears in **Host overview**.
+3. On the tablet, tap **Wi-Fi connect**, enter the code, then approve the tablet on the settings page. The tablet switches to the display as soon as it connects, and reconnects to the paired computer automatically afterwards.
+
+Notes:
+
+- The computer and tablet must be on the same local network. Connections are encrypted (mutual TLS) and only paired devices are accepted.
+- USB always takes priority. Plugging in the cable stops the Wi-Fi session, and Wi-Fi resumes when it's unplugged.
+- **Host overview** shows a live signal-strength indicator for the tablet's Wi-Fi link. For the best results use a 5 GHz network with a strong signal ("Good" or better). If the image lags or hitches, move closer to the router or switch to USB.
+- The stream adapts its bitrate to the link, so quality may drop on a congested network.
+
+Developer tools for Wi-Fi testing are in [`tools/wifi_enrollment`](tools/wifi_enrollment/README.md) and [`tools/android_wifi_probe`](tools/android_wifi_probe/README.md).
 
 ## Privacy
 
-The host listens only on your computer (localhost) and the settings page is local-only. See [PRIVACY.md](PRIVACY.md) for the full privacy policy.
+The host listens only on your computer (localhost) and the settings page is local-only. In Wi-Fi mode (beta) the host connects out to the paired tablet on your local network over encrypted, mutually authenticated TLS. See [PRIVACY.md](PRIVACY.md) for the full privacy policy.
 
 ## License
 
