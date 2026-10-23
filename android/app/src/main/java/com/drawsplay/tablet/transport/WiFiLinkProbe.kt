@@ -11,7 +11,9 @@ class WiFiLinkProbe(context: Context) {
     @Suppress("DEPRECATION") // connectionInfo still reports RSSI/link speed without location permission.
     fun sample(): WiFiVideoStats.Link? {
         val info = wifi?.connectionInfo ?: return null
-        if (info.networkId == -1 || info.rssi !in -126..-1) return null
+        // networkId is redacted to -1 without location permission (API 29+);
+        // an unassociated radio reports RSSI -127 instead.
+        if (info.rssi !in -126..-1) return null
         return WiFiVideoStats.Link(info.rssi, info.linkSpeed.coerceAtLeast(0), info.frequency.coerceAtLeast(0))
     }
 }
