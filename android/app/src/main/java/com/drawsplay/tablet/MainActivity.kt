@@ -1,6 +1,8 @@
 ﻿package com.drawsplay.tablet
 
 import com.drawsplay.tablet.video.TileView
+import com.drawsplay.tablet.transport.UsbPriorityPolicy
+import com.drawsplay.tablet.transport.WiFiPairedSessionHost
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
@@ -16,6 +18,8 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.WindowManager
+import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.media.ImageReader
@@ -66,6 +70,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var videoChannel: VideoChannel
     private val endpointSelector = HostEndpointSelector()
     private lateinit var wifiDiscoveryManager: WiFiDiscoveryManager
+    private lateinit var pairedWifiHost: WiFiPairedSessionHost
+    private lateinit var waitingGroup: View
+    private lateinit var wifiPairPanel: View
+    private lateinit var wifiPairStatus: TextView
+    private lateinit var wifiPairCode: EditText
+    private lateinit var wifiPairSubmit: Button
+    private var pairing: WiFiPairingSession? = null
     private var backgroundSink: ImageReader? = null
     @Volatile
     private var pendingForegroundSurface: Surface? = null
@@ -97,6 +108,20 @@ class MainActivity : AppCompatActivity() {
         videoSurface = findViewById(R.id.videoSurface)
         tileView = findViewById(R.id.tileView)
         statusOverlay = findViewById(R.id.statusOverlay)
+        waitingGroup = findViewById(R.id.waitingGroup)
+        wifiPairPanel = findViewById(R.id.wifiPairPanel)
+        wifiPairStatus = findViewById(R.id.wifiPairStatus)
+        wifiPairCode = findViewById(R.id.wifiPairCode)
+        wifiPairSubmit = findViewById(R.id.wifiPairSubmit)
+        findViewById<View>(R.id.wifiConnectButton).setOnClickListener { openWifiPairing() }
+        findViewById<View>(R.id.wifiPairClose).setOnClickListener { closeWifiPairing() }
+        wifiPairCode.setOnEditorActionListener { _, _, _ -> wifiPairSubmit.performClick(); true }
+        wifiPairSubmit.setOnClickListener {
+            if (pairing?.submitCode(wifiPairCode.text.toString()) == true) {
+                wifiPairCode.text.clear()
+                wifiPairSubmit.isEnabled = false
+            }
+        }
         statusText = findViewById(R.id.statusText)
         inputPad = findViewById(R.id.inputPad)
 
@@ -199,6 +224,11 @@ class MainActivity : AppCompatActivity() {
             { wifiPolicyTlsFingerprint }
         )
 
+        pairedWifiHost = WiFiPairedSessionHost(this, endpointSelector, { pendingForegroundSurface }, { up ->
+            wifiStreamUp = up
+            runOnUiThread { updateStatus() }
+        }) { wifiAllowedNow() }
+
         videoChannel.tileSink = tileView
         inputPad.onInputBatch = { events -> inputChannel.send(events) }
 
@@ -233,6 +263,7 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         appForeground = true
         updateWiFiDiscoveryState()
+        pairedWifiHost.start()
         AccessoryTransport.refresh()
         AccessoryTransport.setPolling(true)
         inputChannel.start()
@@ -251,7 +282,17 @@ class MainActivity : AppCompatActivity() {
             inputChannel.stop()
         }
         wifiDiscoveryManager.stop()
+        pairedWifiHost.stop()
+        pairing?.cancel()
+        pairing = null
+        wifiPairPanel.visibility = View.GONE
+        waitingGroup.visibility = View.VISIBLE
         super.onStop()
+    }
+
+    @Deprecated("Back closes the Wi-Fi pairing panel before leaving the app")
+    override fun onBackPressed() {
+        if (wifiPairPanel.visibility == View.VISIBLE) closeWifiPairing() else super.onBackPressed()
     }
 
     override fun onDestroy() {
@@ -264,6 +305,7 @@ class MainActivity : AppCompatActivity() {
 
     @Volatile
     private var streamUp = false
+    @Volatile private var wifiStreamUp = false
 
     // --- Host display mode (resolution matching) ---
     //
@@ -361,7 +403,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyVideoLayout() {
         val root = videoFrame.parent as View
-        val size = videoScaling.frameSize(videoWidth, videoHeight, root.width, root.height)
+        // Fill would stretch the landscape host picture in portrait; letterbox instead.
+        val mode = if (root.height > root.width && videoScaling == VideoScaling.FILL) VideoScaling.FIT else videoScaling
+        val size = mode.frameSize(videoWidth, videoHeight, root.width, root.height)
         val width = size?.first ?: FrameLayout.LayoutParams.MATCH_PARENT
         val height = size?.second ?: FrameLayout.LayoutParams.MATCH_PARENT
         val lp = videoFrame.layoutParams as FrameLayout.LayoutParams
@@ -381,6 +425,7 @@ class MainActivity : AppCompatActivity() {
     // to them; device-local keys (back, volume, power) stay local.
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (wifiPairPanel.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
         if (isLocalKey(event.keyCode)) return super.dispatchKeyEvent(event)
         val action = when (event.action) {
             KeyEvent.ACTION_DOWN -> "down"
@@ -404,13 +449,49 @@ class MainActivity : AppCompatActivity() {
         else -> false
     }
 
+    /** Shows the pairing panel; only reachable from the waiting screen's "Wi-Fi connect" button. */
+    private fun openWifiPairing() {
+        if (pairing != null) return
+        // The paired session advertises the same service type, so it pauses while pairing.
+        pairedWifiHost.stop()
+        waitingGroup.visibility = View.GONE
+        wifiPairPanel.visibility = View.VISIBLE
+        wifiPairStatus.setText(R.string.wifi_hint)
+        wifiPairSubmit.isEnabled = true
+        pairing = WiFiPairingSession(this, { wifiPairStatus.text = it }) { paired ->
+            pairing = null
+            if (paired) {
+                // Hand straight over to the display instead of waiting for Back.
+                hideWifiPanel()
+                statusText.setText(R.string.status_connecting_wifi)
+                pairedWifiHost.start()
+            } else {
+                wifiPairSubmit.isEnabled = false
+            }
+        }.also { it.start() }
+    }
+
+    private fun hideWifiPanel() {
+        (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+            .hideSoftInputFromWindow(wifiPairCode.windowToken, 0)
+        wifiPairPanel.visibility = View.GONE
+        waitingGroup.visibility = View.VISIBLE
+    }
+
+    private fun closeWifiPairing() {
+        pairing?.cancel()
+        pairing = null
+        hideWifiPanel()
+        pairedWifiHost.start()
+    }
+
     /**
      * Shows the opaque waiting overlay until video is flowing; hides it
      * after. Opaque so a stale last frame never lingers when the host
      * disconnects.
      */
     private fun updateStatus() {
-        if (streamUp) {
+        if (streamUp || wifiStreamUp) {
             statusOverlay.visibility = FrameLayout.GONE
         } else {
             statusOverlay.visibility = FrameLayout.VISIBLE
@@ -522,6 +603,14 @@ class MainActivity : AppCompatActivity() {
         if (wifiPolicyAuthToken.isBlank()) return false
         if (wifiPolicyTlsRequired && wifiPolicyTlsFingerprint.isBlank()) return false
         return true
+    }
+
+    /** USB (accessory, or USB power with adb on) has priority over a paired Wi-Fi session. */
+    private fun wifiAllowedNow(): Boolean {
+        val battery = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val usbPowered = battery?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) == android.os.BatteryManager.BATTERY_PLUGGED_USB
+        val adbEnabled = android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.ADB_ENABLED, 0) == 1
+        return UsbPriorityPolicy.allowWifi(endpointSelector.isAccessoryAttached(), usbPowered, adbEnabled)
     }
 
     private fun updateWiFiDiscoveryState() {

@@ -76,6 +76,11 @@ func (api webUIAPI) register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/tablet/switch-aoa", securePost(api.csrfToken, api.handleSwitchAOA))
 	mux.HandleFunc("/api/session/input-lock", securePost(api.csrfToken, api.handleSessionInputLock))
 	mux.HandleFunc("/api/session/disconnect", securePost(api.csrfToken, api.handleSessionDisconnect))
+	mux.HandleFunc("/api/wifi/pairing", getOnly(api.handleWifiPairing))
+	mux.HandleFunc("/api/wifi/pairing/start", securePost(api.csrfToken, api.handleWifiPairStart))
+	mux.HandleFunc("/api/wifi/pairing/approve", securePost(api.csrfToken, api.handleWifiPairApprove))
+	mux.HandleFunc("/api/wifi/pairing/deny", securePost(api.csrfToken, api.handleWifiPairDeny))
+	mux.HandleFunc("/api/wifi/pairing/cancel", securePost(api.csrfToken, api.handleWifiPairCancel))
 	mux.HandleFunc("/api/session/reconnect-video", securePost(api.csrfToken, api.handleSessionReconnectVideo))
 }
 
@@ -103,6 +108,7 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 			httpError(w, http.StatusUnprocessableEntity, "%v", err)
 			return
 		}
+		applyPairedWifiSettings(api.store, old, api.store.get())
 		fps := 0
 		if old.FPS != s.FPS {
 			fps = s.FPS
@@ -160,6 +166,7 @@ func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"hostOS":                  runtime.GOOS,
 		"version":                 hostVersion(),
 		"featureFlags":            map[string]bool{"wifi": wifiFeatureEnabled()},
+		"activeTransport":         hostSessionOwnership.currentTransport(),
 		"activeClient":            activeClientIdentity(),
 		"activeInputDevice":       activeInputDevice(),
 		"inputLocked":             sessionInputLocked(),

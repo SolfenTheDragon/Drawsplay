@@ -337,6 +337,11 @@ type clientStatsMsg struct {
 	// AppForeground is omitted by legacy clients; Windows uses it to adjust
 	// the capture process scheduling priority for background keep-alive.
 	AppForeground *bool `json:"appForeground,omitempty"`
+	// Paired Wi-Fi tablets sample their own association (RSSI dBm, link
+	// rate, channel frequency) for the web UI's live signal indicator.
+	WiFiRssiDbm      int `json:"wifiRssiDbm,omitempty"`
+	WiFiLinkMbps     int `json:"wifiLinkMbps,omitempty"`
+	WiFiFrequencyMHz int `json:"wifiFrequencyMhz,omitempty"`
 }
 
 // videoAuthMsg is an optional first upstream line on Wi-Fi video sessions.

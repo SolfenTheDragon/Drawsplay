@@ -1,0 +1,37 @@
+{
+  "device": "SM-X200",
+  "androidApi": 34,
+  "hostPlatform": "Linux X11",
+  "mode": "isolated API-33+ test APK, selected on-link IPv4 LAN",
+  "successfulCompleteRuns": 2,
+  "hostDiscoveredTablet": true,
+  "hostInitiatedAllTcpConnections": true,
+  "numericPairingOverLan": true,
+  "mutualTlsWithKeystoreIdentity": true,
+  "hostTrustPersisted": true,
+  "tabletTrustReloaded": true,
+  "tabletIdentityRetained": true,
+  "freshSavedTrustControlAndVideoVerified": true,
+  "negotiatedCaps": {
+    "maxWidth": 1280,
+    "maxHeight": 720,
+    "maxFps": 30,
+    "maxAccessUnitBytes": 262144,
+    "compressedQueueBytes": 524288,
+    "compressedQueueSlots": 2
+  },
+  "capsAreMeasuredMediaPerformance": false,
+  "networkAndMulticastCleanupConfirmed": true,
+  "isolatedApkRemovalVerified": true,
+  "approval": "automated local test input on both devices; disposable identities",
+  "usbImplementationTested": false,
+  "screenCaptureOrInputStarted": false,
+  "decoderStarted": false,
+  "issuesObservedBeforePassing": [
+    "One initial LAN TCP dial timed out before enrollment.",
+    "The old probe rejected fresh paired channels because it had no session accept path.",
+    "After association succeeded on both endpoints, a redundant host close incorrectly returned an error; connection ownership was fixed."
+  ],
+  "reproduce": "tools/wifi_enrollment/run_tablet_test.py --verify-session; see its README",
+  "limitations": "No normal-app streaming, automatic reconnect, packet capture, general tablet VPN/route-change enforcement, power, soak, Android 8 or Windows runtime evidence."
+}

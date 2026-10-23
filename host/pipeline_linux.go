@@ -596,6 +596,10 @@ func withVAAPICandidate(specs []pipelineSpec, opts videoOptions, captureArgs []s
 }
 
 func vaapiX11Spec(opts videoOptions, captureArgs []string) (pipelineSpec, bool) {
+	// VA-API output is High profile; the paired Wi-Fi stream must be constrained baseline.
+	if opts.WiFiBaseline {
+		return pipelineSpec{}, false
+	}
 	if strings.EqualFold(opts.Codec, "hevc") || strings.EqualFold(opts.Codec, "h265") {
 		return pipelineSpec{}, false
 	}

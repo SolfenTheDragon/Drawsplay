@@ -1,0 +1,29 @@
+{
+  "device": "Samsung SM-X200",
+  "androidApi": 34,
+  "host": "Linux X11",
+  "transport": "selected on-link IPv4 Wi-Fi, host-initiated TCP, pinned host TLS server",
+  "implementations": {
+    "host": "production Go wifilan FrameReader/FrameWriter",
+    "tablet": "production Kotlin WiFiFrameCodec and TlsSocketFactory in isolated shell process"
+  },
+  "tabletSelfTest": true,
+  "verifiedFrames": 9,
+  "payloadSizes": [4096, 65536, 1048576],
+  "repetitionsPerSize": 3,
+  "verifiedPayloadBytesEachDirection": 3354624,
+  "payloadBuffersPerEndpoint": 1,
+  "payloadBufferBytesPerEndpoint": 1048576,
+  "appInstalledOrReplaced": false,
+  "temporaryRemoteDexRemoved": true,
+  "codecOnlyAllocationChecks": {
+    "goAllocsPerCombinedReadWrite": 0,
+    "goRepetitions": 1000,
+    "kotlinJvmAdditionalAllocatedBytes": 0,
+    "kotlinJvmRepetitions": 1000,
+    "kotlinJvmWarmupIterations": 20000,
+    "limitation": "JDK reflection measurement overhead calibrated; not Android ART/TLS/decoder profiling"
+  },
+  "envelopeFuzzCases": 362115,
+  "interpretation": "Synthetic framed data integrity and Go/Kotlin interoperability only; no video decode, pairing or input injection."
+}

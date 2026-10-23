@@ -1,0 +1,38 @@
+{
+  "device": "Samsung SM-X200",
+  "androidApi": 34,
+  "host": "Linux X11",
+  "scope": "isolated Android NSD probe; separate com.drawsplay.wifiprobe APK",
+  "finalReceiver": "bounded selected-interface IPv4 mDNS",
+  "discoverySeconds": 10,
+  "uniqueCandidates": 1,
+  "rejectedPackets": 0,
+  "candidate": {
+    "name": "DrawSplay\\ Wi-Fi\\ test",
+    "addresses": ["10.144.110.113"],
+    "inputPort": 41469,
+    "videoPort": 39055
+  },
+  "tabletLog": [
+    "13:43:01.635 REGISTERED DrawSplay Wi-Fi test input=41469 video=39055",
+    "13:43:40.673 UNREGISTERED",
+    "13:43:40.673 STOPPED sockets closed and multicast lock released"
+  ],
+  "cleanup": "temporary probe APK uninstalled successfully",
+  "postReviewRepeat": {
+    "scope": "current numeric-address probe and interface-generation-checking browser",
+    "discoverySeconds": 10,
+    "uniqueCandidates": 1,
+    "rejectedPackets": 0,
+    "tabletInputPort": 46035,
+    "tabletVideoPort": 40573,
+    "tabletRegisteredTime": "14:21:54.934",
+    "tabletStoppedTime": "14:22:34.455",
+    "automaticCleanupLogged": true,
+    "probeUninstalled": true,
+    "limitation": "Actual roaming/subnet-change not induced; snapshot-change logic covered by deterministic unit tests."
+  },
+  "trustChanges": false,
+  "screenOrInputPayload": false,
+  "interpretation": "Real tablet advertisement discovered by host; not pairing or integrated Wi-Fi display validation."
+}

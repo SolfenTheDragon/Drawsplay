@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">DrawSplay</string>
+    <string name="wifi_connect">Wi-Fi connect</string>
+    <string name="wifi_eyebrow">WI-FI</string>
+    <string name="wifi_title">Pair with a computer</string>
+    <string name="wifi_hint">Turn on Wi-Fi in the DrawSplay web UI on the computer, then enter the eight-digit code shown in Host overview.</string>
+    <string name="wifi_code_hint">Eight-digit code</string>
+    <string name="wifi_pair">Pair this computer</string>
+    <string name="wifi_back">Back</string>
     <string name="status_waiting_for_host">Waiting for host…</string>
+    <string name="status_connecting_wifi">Connecting over Wi-Fi…</string>
 </resources>

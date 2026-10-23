@@ -158,6 +158,7 @@ class InputChannel(
         try {
             val endpoints = endpointSelector.inputCandidates()
             val dialed = dialEndpointHappyEyeballs(endpoints, FALLBACK_RACE_DELAY_MS) { endpoint ->
+                endpoint.pairedSocket?.let { return@dialEndpointHappyEyeballs it }
                 if (endpoint.accessory) {
                     return@dialEndpointHappyEyeballs AccessoryTransport.connect(
                         AccessoryFraming.KIND_INPUT,

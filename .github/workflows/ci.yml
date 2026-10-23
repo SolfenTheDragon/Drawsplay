@@ -20,9 +20,12 @@ jobs:
       - name: Check shell script syntax
         run: |
           shopt -s nullglob
-          for script in scripts/*.sh release/*.sh; do
+          for script in scripts/*.sh release/*.sh tools/android_wifi_probe/*.sh; do
             bash -n "$script"
           done
+
+      - name: Test external USB measurement tooling
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/usb_baseline -p 'test_*.py' -v
 
   host:
     runs-on: ubuntu-latest
@@ -82,8 +85,24 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Setup Go for Wi-Fi pairing interoperability
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: host/go.mod
+
+      - name: Build offline Wi-Fi pairing test peer
+        run: |
+          (cd ../host && go build -o "$RUNNER_TEMP/wifi-pairing-test-peer" ./cmd/wifi-pairing-test-peer)
+          echo "DRAWSPLAY_PAIRING_TEST_PEER=$RUNNER_TEMP/wifi-pairing-test-peer" >> "$GITHUB_ENV"
+
       - name: Compile Android release Kotlin
         run: ./gradlew :app:compileReleaseKotlin
+
+      - name: Test isolated Android crypto probe
+        run: |
+          mkdir -p "$RUNNER_TEMP/drawsplay-crypto-probe"
+          javac --release 8 -d "$RUNNER_TEMP/drawsplay-crypto-probe" ../tools/android_crypto_probe/*.java
+          java -cp "$RUNNER_TEMP/drawsplay-crypto-probe" com.drawsplay.benchmark.CryptoProbeTest
 
       - name: Run Android unit tests
         run: ./gradlew :app:testReleaseUnitTest

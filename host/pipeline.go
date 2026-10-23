@@ -147,8 +147,14 @@ func ffmpegSpecs(opts videoOptions, captureArgs []string) ([]pipelineSpec, error
 	if len(encoders) == 0 {
 		return nil, fmt.Errorf("no usable %s encoder found in ffmpeg", opts.Codec)
 	}
+	if opts.WiFiBaseline && opts.Codec != "h264" {
+		return nil, fmt.Errorf("the paired Wi-Fi path requires h264, not %s", opts.Codec)
+	}
 	specs := make([]pipelineSpec, 0, len(encoders))
 	for _, enc := range encoders {
+		if opts.WiFiBaseline && wifiProfileArgs(enc, wifiH264Level) == nil {
+			continue // the paired Wi-Fi path needs a constrained-baseline H.264 encoder
+		}
 		specs = append(specs, buildFFmpegSpec(opts, captureArgs, enc, encoderArgs(enc, opts.FPS)))
 	}
 	return specs, nil
@@ -159,6 +165,9 @@ func buildFFmpegSpec(opts videoOptions, captureArgs []string, encoder string, en
 	args = append(args, captureArgs...)
 	args = append(args, "-c:v", encoder)
 	args = append(args, encArgs...)
+	if opts.WiFiBaseline {
+		args = append(args, wifiProfileArgs(encoder, wifiH264Level)...)
+	}
 	args = append(args, rateControlArgs(opts)...)
 	return pipelineSpec{Name: encoder, BaseEncoder: encoder, Cmd: opts.FFmpeg, Args: args}
 }

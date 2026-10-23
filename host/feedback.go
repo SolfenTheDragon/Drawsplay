@@ -48,6 +48,30 @@ type sessionMonitor struct {
 	clientGone  atomic.Bool
 	lastStats   atomic.Pointer[clientStatsMsg]
 	staleFrames atomic.Int64 // client stale-frame skips not yet logged
+	// minDropPercent: client frame drops count as congestion only when they
+	// reach this share of the frames received in the report; 0 (USB) means
+	// any drop does.
+	minDropPercent int64
+	// excludeStaleDrops: a Wi-Fi tablet's catch-up skips after an airtime
+	// stall are not congestion (see dropsCongested).
+	excludeStaleDrops bool
+	// keyframeWanted: the client discarded pictures and waits for an IDR.
+	keyframeWanted atomic.Bool
+	// lastKeyframeRestart is owned by the session goroutine.
+	lastKeyframeRestart time.Time
+}
+
+// keyframeRequestCooldown spaces encoder restarts for client keyframe
+// requests; a request inside it is held, not dropped.
+const keyframeRequestCooldown = time.Second
+
+// wifiMinDropPercent: a paired Wi-Fi tablet drops the odd frame to arrival
+// and presentation jitter that a lower bitrate cannot prevent, so only a
+// substantial share of dropped frames is evidence of congestion.
+const wifiMinDropPercent = 10
+
+func newWiFiSessionMonitor() *sessionMonitor {
+	return &sessionMonitor{minDropPercent: wifiMinDropPercent, excludeStaleDrops: true}
 }
 
 var latestClientVideoStats = struct {
@@ -62,7 +86,14 @@ func (m *sessionMonitor) runStatsReader(conn net.Conn) {
 	scanner.Buffer(make([]byte, 0, 512), maxStatsLineBytes)
 	for scanner.Scan() {
 		var stats clientStatsMsg
-		if err := json.Unmarshal(scanner.Bytes(), &stats); err != nil || stats.Type != "stats" {
+		if err := json.Unmarshal(scanner.Bytes(), &stats); err != nil {
+			continue // tolerate unknown upstream traffic
+		}
+		if stats.Type == "keyframe" {
+			m.keyframeWanted.Store(true)
+			continue
+		}
+		if stats.Type != "stats" {
 			continue // tolerate unknown upstream traffic
 		}
 		m.lastStats.Store(&stats)
@@ -70,7 +101,7 @@ func (m *sessionMonitor) runStatsReader(conn net.Conn) {
 		if stats.StaleFrames > 0 {
 			m.staleFrames.Add(stats.StaleFrames)
 		}
-		if decodeQueueCongested(&stats) || stats.FrameDrops > 0 {
+		if decodeQueueCongested(&stats) || m.dropsCongested(&stats) {
 			m.congested.Store(true)
 		}
 	}
@@ -85,6 +116,32 @@ func (m *sessionMonitor) runStatsReader(conn net.Conn) {
 // only add a second freeze.
 func decodeQueueCongested(stats *clientStatsMsg) bool {
 	return stats.QueuedFrames >= congestQueueDepth && stats.StaleFrames == 0
+}
+
+// dropsCongested reports whether the client dropped enough frames for a lower
+// bitrate to help. On Wi-Fi the stale catch-up skips that follow an airtime
+// stall are excluded: the stall already ended, and the encoder restart a
+// step-down costs would only add a second freeze.
+func (m *sessionMonitor) dropsCongested(stats *clientStatsMsg) bool {
+	drops := stats.FrameDrops
+	if m.excludeStaleDrops {
+		drops -= min(stats.StaleFrames, drops)
+	}
+	if drops <= 0 {
+		return false
+	}
+	return drops*100 >= m.minDropPercent*max(stats.FramesReceived, 1)
+}
+
+// consumeKeyframeRequest reports a pending client keyframe request once the
+// cooldown since the last honoured one has passed.
+func (m *sessionMonitor) consumeKeyframeRequest(now time.Time) bool {
+	if !m.keyframeWanted.Load() || now.Sub(m.lastKeyframeRestart) < keyframeRequestCooldown {
+		return false
+	}
+	m.keyframeWanted.Store(false)
+	m.lastKeyframeRestart = now
+	return true
 }
 
 // takeStaleFrames returns the client's stale-frame skips since the last call.

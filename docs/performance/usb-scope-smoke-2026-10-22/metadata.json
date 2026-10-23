@@ -1,0 +1,31 @@
+{
+  "source_revision": "c5ba5f4e01a2c17d4b0a6465a5ce4d16172533cd",
+  "host_sha256": "841de7e05058346697034da41981d0ad2ffcc30db15893ae8f64f231ca0ddb19",
+  "host_build_vcs": [
+    "vcs=git",
+    "vcs.revision=76837e1eead65c823b34e97198c4eedf49112048",
+    "vcs.time=2026-10-20T21:18:37Z",
+    "vcs.modified=true"
+  ],
+  "tablet_properties": {
+    "ro.product.model": "SM-X200",
+    "ro.build.version.sdk": "34",
+    "ro.board.platform": "ums512"
+  },
+  "installed_apk_sha256": [
+    "783b9b65025904e986a10b6f755ef1cee47f8211e90824651b4f9d3e8bc22cf1"
+  ],
+  "host_logical_cpus": 8,
+  "host_clk_tck": 100,
+  "schema_version": 2,
+  "started_utc": "2026-10-22T16:36:32.468040+00:00",
+  "duration_seconds": 8.0,
+  "warmup_seconds": 0.0,
+  "interval_seconds": 2,
+  "detail_interval_seconds": 30,
+  "tablet_clk_tck": 100,
+  "cpu_units": "percent of one logical core; 100 means one core",
+  "power_units": "raw vendor battery proxy; not calibrated watts",
+  "status_counters": "snapshots only, not summed FPS or unique-frame drops",
+  "workload": "uncontrolled desktop; not acceptance"
+}

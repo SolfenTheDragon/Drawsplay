@@ -154,3 +154,16 @@ func adaptToLinkFeedback(monitor *sessionMonitor, rc *rateController, temporal *
 	}
 	return congestionActionNone
 }
+
+// wifiLadderFloorDivisor keeps paired Wi-Fi sessions at or above 1/8 of the
+// top rate: drops on a working LAN come from jitter, and a stream below that
+// floor is too soft to use at the tablet's native resolution.
+const wifiLadderFloorDivisor = 8
+
+func sessionCongestionGate(target captureTarget, wifi bool) *congestionGate {
+	gate := newSessionCongestionGate(target)
+	if wifi {
+		gate = gate.withFloorDivisor(wifiLadderFloorDivisor)
+	}
+	return gate
+}

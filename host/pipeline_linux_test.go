@@ -403,6 +403,23 @@ func TestX11GrabInsertsVAAPIBeforeSoftwareEncoder(t *testing.T) {
 	}
 }
 
+func TestX11GrabOmitsVAAPIForPairedWiFiBaseline(t *testing.T) {
+	ffmpeg := withFakeFFmpegEncoders(t, "ffmpeg-x11-vaapi-wifi",
+		" V..... h264_nvenc \n V..... h264_vaapi \n V..... libx264 \n")
+	withFakeVAAPIProbe(t, "/dev/dri/renderD128", true)
+
+	opts := videoOptions{FPS: 60, Bitrate: "24M", Codec: "h264", FFmpeg: ffmpeg, WiFiBaseline: true}
+	specs, err := buildCapturePipelines(x11TestTarget(), opts)
+	if err != nil {
+		t.Fatalf("buildCapturePipelines: %v", err)
+	}
+	for _, name := range specNames(specs) {
+		if name == "h264_vaapi" {
+			t.Fatalf("paired Wi-Fi must not use VAAPI, which cannot be forced to baseline: %v", specNames(specs))
+		}
+	}
+}
+
 func TestX11GrabVAAPISpecUsesGPUColourConversion(t *testing.T) {
 	// Uploading BGRx straight to a VA surface and converting with the GPU's
 	// VPP avoids the software format conversion that otherwise dominates the

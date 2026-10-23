@@ -1,0 +1,97 @@
+{
+  "acceptance": "BLOCKED",
+  "measurement_scope": "software_only",
+  "resource_window_valid": true,
+  "resource_window_issues": [],
+  "optional_unmeasured_physical_metrics": [
+    "end_to_end_latency",
+    "unique_optically_presented_fps_and_drop_rate",
+    "physical_input_to_photon_and_pen_fidelity"
+  ],
+  "missing_acceptance_evidence": [
+    "software_frame_delivery_and_decode_proxies",
+    "automated_input_timing_and_reconnect_checks",
+    "validated_software_power_proxy",
+    "controlled_workload_and_matched_thermal_conditions",
+    "exact_baseline_source_provenance",
+    "replicated_matched_trials",
+    "approved_statistical_sensitivity",
+    "profiler_off_controls",
+    "all_platform_baselines"
+  ],
+  "resources": {
+    "cpu_units": "percent of one logical core; intervals are correlated, not independent trials",
+    "host_process_cpu": {
+      "10157:5426": {
+        "samples": 149,
+        "mean": 4.416108553383597,
+        "median": 4.499970306945831,
+        "min": 3.49997968261794,
+        "max": 6.000028473135504,
+        "first": 4.000177579882606,
+        "last": 4.999986850034953
+      },
+      "16629:30337": {
+        "samples": 149,
+        "mean": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "first": 0.0,
+        "last": 0.0
+      },
+      "79450:726312": {
+        "samples": 149,
+        "mean": 10.902687616184627,
+        "median": 10.999836910919534,
+        "min": 9.499944852820123,
+        "max": 12.999980812030245,
+        "first": 10.000443949706515,
+        "last": 11.499969755080391
+      }
+    },
+    "tablet_cpu": {
+      "samples": 149,
+      "mean": 48.305588471404775,
+      "median": 48.25870646778747,
+      "min": 43.0,
+      "max": 52.0,
+      "first": 51.25628140690024,
+      "last": 48.5
+    },
+    "tablet_memory": {
+      "pss_kib": {
+        "samples": 10,
+        "mean": 53947.2,
+        "median": 53765.0,
+        "min": 53687,
+        "max": 55652,
+        "first": 55652,
+        "last": 53811
+      },
+      "rss_kib": {
+        "samples": 10,
+        "mean": 101484,
+        "median": 101302.0,
+        "min": 101224,
+        "max": 103188,
+        "first": 103188,
+        "last": 101348
+      },
+      "swap_pss_kib": {
+        "samples": 10,
+        "mean": 22843,
+        "median": 22843.0,
+        "min": 22843,
+        "max": 22843,
+        "first": 22843,
+        "last": 22843
+      }
+    },
+    "interpretation": "Descriptive resource values only, not a non-regression verdict."
+  },
+  "sample_count": 150,
+  "error_count": 0,
+  "elapsed_seconds": 300.0039351179994,
+  "interpretation": "Uncontrolled passive resource observation, not acceptance."
+}
