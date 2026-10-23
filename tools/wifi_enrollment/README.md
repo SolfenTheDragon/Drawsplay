@@ -49,3 +49,13 @@ Both endpoints confirm association before cleanup. This starts no capture,
 decoder or input injector and does not establish automatic reconnect.
 The JSON field `freshSavedTrustControlAndVideoVerified` records whether
 this additional check ran.
+
+Add `--test-video FIXTURE.dsvt` (implies `--verify-session`) to stream a
+synthetic H.264 fixture to the isolated probe, which decodes it to a
+Surface. Generate the fixture with `make_video_fixture.py --frames N
+--output PATH` (FFmpeg `testsrc2`, constrained baseline 640x360 at 30 FPS;
+no desktop or camera capture). The result JSON gains `syntheticVideoDecoded`
+and a `syntheticMedia` object (received/decoded/released counts, drops,
+overflow/age events, decoder name). The tablet rejects streams whose SPS or
+slices violate the baseline rules in `FUNCTIONALITY.md` section 3.8.
+Release-to-Surface is not physical scanout, latency, power or soak evidence.
