@@ -84,6 +84,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var wifiPairCode: EditText
     private lateinit var wifiPairSubmit: Button
     private lateinit var wifiPairRetry: View
+    private lateinit var wifiPairProgress: View
+    private lateinit var wifiPairInputGroup: View
     private lateinit var wifiPairScroll: View
     private lateinit var connectionBack: OnBackPressedCallback
     private var connectionDialog: AlertDialog? = null
@@ -133,6 +135,8 @@ class MainActivity : AppCompatActivity() {
         wifiPairCode = findViewById(R.id.wifiPairCode)
         wifiPairSubmit = findViewById(R.id.wifiPairSubmit)
         wifiPairRetry = findViewById(R.id.wifiPairRetry)
+        wifiPairProgress = findViewById(R.id.wifiPairProgress)
+        wifiPairInputGroup = findViewById(R.id.wifiPairInputGroup)
         wifiPairScroll = findViewById(R.id.wifiPairScroll)
         wifiPairRetry.setOnClickListener { startWifiPairingAttempt() }
         wifiConnectButton = findViewById(R.id.wifiConnectButton)
@@ -566,7 +570,7 @@ class MainActivity : AppCompatActivity() {
         wifiPairCode.isEnabled = true
         wifiPairSubmit.isEnabled = true
         wifiPairRetry.visibility = View.GONE
-        renderPairingStatus(PairingStatus.ENTER_CODE)
+        renderPairingStatus(PairingStatus.SEARCHING)
         pairing = WiFiPairingSession(this, { state ->
             if (isDestroyed || !appForeground || !pairingAttempt.update(attempt, state)) return@WiFiPairingSession
             renderPairingStatus(state)
@@ -589,11 +593,16 @@ class MainActivity : AppCompatActivity() {
                 wifiPairRetry.requestFocus()
             }
         }.also { it.start() }
-        wifiPairCode.requestFocus()
     }
 
     private fun renderPairingStatus(state: PairingStatus) {
+        val showInput = state == PairingStatus.ENTER_CODE || state == PairingStatus.INVALID_CODE
+        wifiPairInputGroup.visibility = if (showInput) View.VISIBLE else View.GONE
+        wifiPairProgress.visibility = if (showInput || state.canRetry || state == PairingStatus.PAIRED) View.GONE else View.VISIBLE
+        if (showInput && !wifiPairCode.hasFocus()) wifiPairCode.requestFocus()
         wifiPairStatus.setText(when (state) {
+            PairingStatus.SEARCHING -> R.string.wifi_connecting
+            PairingStatus.COMPUTER_NOT_FOUND -> R.string.wifi_computer_not_found
             PairingStatus.ENTER_CODE -> R.string.wifi_ready_code
             PairingStatus.INVALID_CODE -> R.string.wifi_invalid_code
             PairingStatus.CHECKING -> R.string.wifi_checking

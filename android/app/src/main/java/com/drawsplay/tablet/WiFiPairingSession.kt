@@ -99,7 +99,7 @@ class WiFiPairingSession(
                     setAttribute("streaming", "0")
                 }, NsdManager.PROTOCOL_DNS_SD, callback)
             }
-            failure = PairingStatus.EXPIRED
+            failure = PairingStatus.COMPUTER_NOT_FOUND
             val store = WiFiTrustStore(app)
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120)
             var raw: Socket? = null
@@ -110,6 +110,8 @@ class WiFiPairingSession(
                 } else candidate.close()
             }
             if (raw == null) throw TimeoutException("Pairing listener expired")
+            failure = PairingStatus.EXPIRED
+            postStatus(PairingStatus.ENTER_CODE)
             val remaining = deadline - System.nanoTime()
             if (remaining <= 0) throw TimeoutException("Pairing code expired")
             val entered = code.get(minOf(TimeUnit.SECONDS.toNanos(110), remaining), TimeUnit.NANOSECONDS)
@@ -139,7 +141,7 @@ class WiFiPairingSession(
                 Log.e(TAG, "Wi-Fi pairing failed at $failure", error)
                 val status = when (error) {
                     is WiFiTrustException -> if (error.failure == WiFiTrustFailure.IDENTITY) PairingStatus.IDENTITY_REPAIR else PairingStatus.TRUST_REPAIR
-                    is TimeoutException -> PairingStatus.EXPIRED
+                    is TimeoutException -> if (failure == PairingStatus.COMPUTER_NOT_FOUND) failure else PairingStatus.EXPIRED
                     else -> failure
                 }
                 fail(status)

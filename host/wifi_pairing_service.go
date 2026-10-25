@@ -213,18 +213,26 @@ func (s *wifiPairingService) findTablet(ctx context.Context, iface string) (wifi
 	browseCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	found := make(chan wifilan.Candidate, 1)
-	go s.deps.browse(browseCtx, iface, func(c wifilan.Candidate) {
-		if !c.Pairing || len(c.Addresses) == 0 {
-			return
+	browseFailed := make(chan error, 1)
+	go func() {
+		err := s.deps.browse(browseCtx, iface, func(c wifilan.Candidate) {
+			if !c.Pairing || len(c.Addresses) == 0 {
+				return
+			}
+			select {
+			case found <- c:
+			default:
+			}
+		})
+		if err != nil && browseCtx.Err() == nil {
+			browseFailed <- err
 		}
-		select {
-		case found <- c:
-		default:
-		}
-	})
+	}()
 	select {
 	case c := <-found:
 		return c, nil
+	case err := <-browseFailed:
+		return wifilan.Candidate{}, fmt.Errorf("could not search for the tablet on %q: %w", iface, err)
 	case <-ctx.Done():
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return wifilan.Candidate{}, errors.New("no tablet found: open Wi-Fi connect on the tablet and check both are on the same network")

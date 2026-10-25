@@ -33,21 +33,21 @@ object ConnectionPresentation {
 }
 
 enum class PairingStatus(val canRetry: Boolean = false) {
-    ENTER_CODE, CHECKING, APPROVAL, SAVING, PAIRED, INVALID_CODE,
+    SEARCHING, ENTER_CODE, CHECKING, APPROVAL, SAVING, PAIRED, INVALID_CODE,
     EXPIRED(true), NOT_APPROVED(true), VERIFICATION_FAILED(true), NETWORK_UNAVAILABLE(true),
-    DISCOVERY_FAILED(true), TRUST_REPAIR(true), IDENTITY_REPAIR(true), FAILED(true)
+    DISCOVERY_FAILED(true), TRUST_REPAIR(true), IDENTITY_REPAIR(true), FAILED(true), COMPUTER_NOT_FOUND(true)
 }
 
 /** UI-owned generation prevents cancelled attempts updating a replacement panel. */
 class PairingAttemptState {
     private var generation = 0L
     private var active = false
-    var status = PairingStatus.ENTER_CODE
+    var status = PairingStatus.SEARCHING
         private set
 
     fun start(): Long {
         active = true
-        status = PairingStatus.ENTER_CODE
+        status = PairingStatus.SEARCHING
         return ++generation
     }
 

@@ -179,9 +179,25 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
                 android:accessibilityLiveRegion="polite"
-                android:text="@string/wifi_ready_code"
+                android:text="@string/wifi_connecting"
                 android:textColor="@color/ds_text"
                 android:textSize="16sp" />
+
+            <ProgressBar
+                android:id="@+id/wifiPairProgress"
+                style="?android:attr/progressBarStyleLarge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="16dp"
+                android:indeterminate="true" />
+
+            <LinearLayout
+                android:id="@+id/wifiPairInputGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
 
             <TextView
                 android:layout_width="match_parent"
@@ -221,6 +237,7 @@
                 android:textAllCaps="false"
                 android:textColor="@color/ds_primary_text"
                 android:textStyle="bold" />
+            </LinearLayout>
 
             <Button
                 android:id="@+id/wifiPairRetry"

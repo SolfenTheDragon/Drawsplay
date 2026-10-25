@@ -16,6 +16,8 @@
     <string name="status_connecting_wifi">Connecting over Wi-Fi…</string>
     <string name="wifi_code_label">Pairing code from the computer</string>
     <string name="wifi_ready_code">Ready for the eight-digit code. Pairing times out after two minutes.</string>
+    <string name="wifi_connecting">Connecting\u2026 Looking for the computer on this Wi-Fi network. Keep the pairing card open on the computer.</string>
+    <string name="wifi_computer_not_found">Could not connect to the computer. No computer contacted this tablet within two minutes. Make sure DrawSplay Wi-Fi is on, both devices are on the same non-guest network, and Show pairing code is open on the computer, then tap Try again.</string>
     <string name="wifi_invalid_code">Enter all eight digits from the computer.</string>
     <string name="wifi_checking">Checking the code and computer identity… Keep the host pairing card open.</string>
     <string name="wifi_approval">Code verified. On the computer, click Approve in the pairing card. Waiting up to one minute…</string>

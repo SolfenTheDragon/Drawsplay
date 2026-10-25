@@ -42,7 +42,7 @@ class ConnectionPresentationTest {
         assertTrue(state.status.canRetry)
         val replacement = state.start()
         assertFalse(state.update(old, PairingStatus.PAIRED))
-        assertEquals(PairingStatus.ENTER_CODE, state.status)
+        assertEquals(PairingStatus.SEARCHING, state.status)
         assertTrue(state.update(replacement, PairingStatus.APPROVAL))
         assertFalse(state.status.canRetry)
         state.cancel()
@@ -58,7 +58,7 @@ class ConnectionPresentationTest {
             state.update(attempt, error)
             assertTrue(error.canRetry)
             state.start()
-            assertEquals(PairingStatus.ENTER_CODE, state.status)
+            assertEquals(PairingStatus.SEARCHING, state.status)
         }
 
     }

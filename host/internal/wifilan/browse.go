@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"runtime"
 	"slices"
 	"time"
 
@@ -71,8 +72,14 @@ func Browse(ctx context.Context, interfaceName string, found func(Candidate), re
 	if err := packets.SetMulticastTTL(255); err != nil {
 		return fmt.Errorf("set link-local mDNS query TTL: %w", err)
 	}
+	// Windows cannot report the receiving interface or TTL; there the source
+	// address must be an on-link peer of the selected interface instead.
+	linkChecks := true
 	if err := packets.SetControlMessage(ipv4.FlagInterface|ipv4.FlagTTL, true); err != nil {
-		return fmt.Errorf("enable mDNS receiving-interface/TTL checks: %w", err)
+		if runtime.GOOS != "windows" {
+			return fmt.Errorf("enable mDNS receiving-interface/TTL checks: %w", err)
+		}
+		linkChecks = false
 	}
 	query := new(dns.Msg)
 	query.Question = []dns.Question{{Name: TabletService + ".local.", Qtype: dns.TypePTR, Qclass: dns.ClassINET}}
@@ -122,7 +129,8 @@ func Browse(ctx context.Context, interfaceName string, found func(Candidate), re
 			return fmt.Errorf("receive tablet mDNS response: %w", err)
 		}
 		peer, ok := source.(*net.UDPAddr)
-		if !ok || peer.Port != 5353 || control == nil || control.IfIndex != iface.Index || control.TTL != 255 {
+		if !ok || peer.Port != 5353 ||
+			(linkChecks && (control == nil || control.IfIndex != iface.Index || control.TTL != 255)) {
 			rejected(fmt.Errorf("mDNS response did not originate on the selected link"))
 			continue
 		}
