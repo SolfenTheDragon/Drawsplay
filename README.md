@@ -34,17 +34,25 @@ No source build is required.
 ### Windows
 
 1. Install the app on the tablet: copy `DrawSplay.APK` to it, open it and allow installs from that source if asked.
-2. Extract `DrawSplay-windows-vX.Y.Z.zip` and run `drawsplay_installer_vX.Y.Z.exe`. It asks whether to add a desktop shortcut and whether to start DrawSplay automatically when you sign in, then Windows asks for administrator approval **once**; setup then:
+2. Extract `DrawSplay-windows-vX.Y.Z.zip` and run `drawsplay_installer_vX.Y.Z.exe`. It asks about a desktop shortcut, sign-in startup, and installing the virtual display (including local certificate trust), then Windows asks for administrator approval **once**; setup then:
    - installs DrawSplay to `C:\Program Files\DrawSplay\` (with `DrawSplay-Uninstall.exe`),
    - installs DrawSplay's bundled virtual display driver and `ffmpeg`,
    - installs a WinUSB driver for the tablet (signed on your PC, so Zadig is not needed) and a helper so newly attached tablets get it without another UAC prompt,
    - stores settings, logs and install state in `%APPDATA%\DrawSplay\`, adds Start Menu shortcuts (and a desktop shortcut if you choose it) and, if you choose it, starts DrawSplay at sign-in (changeable later on the settings page).
 
-   For an unattended install run `drawsplay_installer_vX.Y.Z.exe -install -quiet`, adding `-desktop-shortcut` and/or `-no-autostart` (or `-autostart`) as wanted; a quiet reinstall keeps the existing shortcut and sign-in setting.
+   If the virtual-display catalog is unsigned, setup signs it on your PC with a unique certificate, trusts its public certificate in the machine's Trusted Root and Trusted Publishers stores, and deletes the private signing key immediately. An already trusted catalog is preserved. Secure Boot and signature enforcement are not changed; managed security policies may still block installation.
+
+   Driver signing and fallback downloads use temporary, administrator-only
+   workspaces under Program Files, never your writable temporary folder.
+   Setup refuses signing if those permissions cannot be verified.
+
+   **Parsec is a fallback, not a second required driver.** If DrawSplay's driver works, setup does not download or install Parsec. Only if DrawSplay's driver fails to become available does setup reuse an existing Parsec VDD or download and install the verified Parsec VDD 0.41 fallback. Disabling automatic tool installation prevents that download. If neither driver works, DrawSplay mirrors your screen. The fallback offers only the modes already supported by Parsec; your tablet's exact native size/refresh is not guaranteed.
+
+   For an unattended install run `drawsplay_installer_vX.Y.Z.exe -install -quiet`, adding `-desktop-shortcut` and/or `-no-autostart` (or `-autostart`) as wanted; a quiet reinstall keeps the existing shortcut and sign-in setting. Quiet installation also authorizes local virtual-display signing/trust; add `-no-driver-install` to skip it and use mirror mode.
 3. DrawSplay runs in the **system tray** (no console window). Right-click the tray icon to open settings, start/stop, or exit.
 4. If the tablet isn't detected, unplug and reconnect it; DrawSplay binds its WinUSB driver to the tablet automatically (normal mode first, then accessory mode). If it still isn't detected, rerun the installer. This replaces the tablet's file-transfer/ADB USB driver while DrawSplay's driver is bound; uninstalling DrawSplay restores it.
 
-To uninstall, use **Apps & Features**, the **Uninstall DrawSplay** Start Menu shortcut, or `C:\Program Files\DrawSplay\DrawSplay-Uninstall.exe` (add `-quiet` for no dialogs, `-keep-settings` to keep `%APPDATA%\DrawSplay`). The uninstaller also removes DrawSplay's dependencies: the bundled ffmpeg, WinUSB drivers DrawSplay installed (and their signing certificate), and DrawSplay's own virtual display driver. Components that other software may also use (a legacy Parsec driver when the Parsec app is installed, Zadig WinUSB bindings) are removed only if you confirm (`-remove-shared` with `-quiet`).
+To uninstall, use **Apps & Features**, the **Uninstall DrawSplay** Start Menu shortcut, or `C:\Program Files\DrawSplay\DrawSplay-Uninstall.exe` (add `-quiet` for no dialogs, `-keep-settings` to keep `%APPDATA%\DrawSplay`). The uninstaller also removes DrawSplay's dependencies: the bundled ffmpeg, WinUSB drivers DrawSplay installed (and their signing certificate), and DrawSplay's own virtual display driver and local signing certificates. If a virtual-display package cannot be removed, its certificates are retained with a warning until driver removal succeeds. A newly installed Parsec fallback is removed automatically only when the Parsec app is absent. Pre-existing Parsec drivers, legacy drivers with ambiguous ownership, drivers shared with the Parsec app, and Zadig WinUSB bindings are removed only if you confirm (`-remove-shared` with `-quiet`).
 
 To run DrawSplay without installing (portable), rename the downloaded file to `DrawSplay.exe`, run it and choose **No** when it offers to install; it then asks for administrator approval only when a driver is first needed, and never twice for the same USB device. For a console with live logs, run `DrawSplay.exe -background=false` from a terminal.
 
@@ -74,6 +82,11 @@ More per-desktop detail (X11/vkms, GNOME, KDE, sway, Hyprland) is in the project
 3. Open DrawSplay on the tablet.
 
 The tablet connects on its own, shows the extended desktop and sends touch and pen input back. It reconnects after drops and unplugging.
+
+While a display is connected, swipe from a screen edge to reveal Android
+navigation and use **Back** to open **Connection options**. You can return to
+the display or manage wireless pairing without a permanent drawing toolbar.
+The setup screens keep Android navigation visible.
 
 ## Connection mode
 
@@ -129,7 +142,7 @@ On Linux the frame rate is limited to 60, except on X11 hosts with VA-API (Intel
 
 **Black screen or no video.** Check `ffmpeg -version` (or `"C:\Program Files\DrawSplay\runtime\ffmpeg\ffmpeg.exe" -version`), keep the host and tablet app open, and try a lower bitrate or resolution on the settings page.
 
-**Windows: no extended display.** Run the installer (or `"C:\Program Files\DrawSplay\DrawSplay.exe" -install`) again to repair the driver setup (one UAC prompt); reboot if Windows asks. If custom resolutions are missing, run **Enable custom-resolution registry access (Admin)** once on the settings page, then reconnect.
+**Windows: no extended display.** Run the installer (or `"C:\Program Files\DrawSplay\DrawSplay.exe" -install`) again to repair the driver setup (one UAC prompt); reboot if Windows asks. DrawSplay tries its own driver first, then an available Parsec VDD, then mirroring. Setup downloads Parsec only if the preferred driver fails and Parsec is missing. If an existing Parsec driver is broken, repair it rather than overwriting a shared installation. The Parsec fallback does not add custom resolutions or restart its shared adapter.
 
 **Video lags, freezes for a few seconds or catches up in bursts (older or low-memory tablets).** The tablet may not be able to decode the video at its full panel resolution. Open the settings page: when the tablet is connected, a **Recommended maximum for this tablet** resolution (for example `1280x800`) is shown above the resolution controls, with the reason. It is based on the tablet's RAM and hardware video decoder and is only a suggestion; DrawSplay never applies it by itself. To use it:
 - Linux: set the tablet's display to that resolution in the desktop's display settings (GNOME: Settings > Displays; X11 such as Cinnamon: the "Virtual-1-1" display). DrawSplay remembers the choice for that tablet.
@@ -151,7 +164,12 @@ To use it:
 
 1. Start the host normally. The Wi-Fi section is visible by default but toggled off (set `DRAWSPLAY_FEATURE_WIFI=0` to hide and disable it).
 2. On the settings page (`http://127.0.0.1:27180`), turn on **Wi-Fi** in the configuration, choose your network interface and save. A pairing code appears in **Host overview**.
-3. On the tablet, tap **Wi-Fi connect**, enter the code, then approve the tablet on the settings page. The tablet switches to the display as soon as it connects, and reconnects to the paired computer automatically afterwards.
+3. On the tablet, tap **Wi-Fi connect**, enter all eight digits, then click
+   **Approve** in the computer's pairing card when the tablet says the code is
+   verified. Keep both apps open. If pairing fails or expires, request a fresh
+   code on the computer and tap **Try again** on the tablet. The tablet switches
+   to the display after the first picture arrives and reconnects to the paired
+   computer automatically afterwards.
 
 Notes:
 
@@ -159,6 +177,24 @@ Notes:
 - USB always takes priority. Plugging in the cable stops the Wi-Fi session, and Wi-Fi resumes when it's unplugged.
 - **Host overview** shows a live signal-strength indicator for the tablet's Wi-Fi link. For the best results use a 5 GHz network with a strong signal ("Good" or better). If the image lags or hitches, move closer to the router or switch to USB.
 - The stream adapts its bitrate to the link, so quality may drop on a congested network.
+
+**Switch to a different computer:** on the tablet's **Waiting for host** screen,
+tap **Forget wireless host** (shown when a Wi-Fi pairing is saved) and confirm.
+If the display is already connected, use **Back → Connection options** first.
+This stops
+reconnecting to that computer and clears the tablet's saved pairing. Then tap
+**Wi-Fi connect** and pair with the new computer using its code. USB connections
+and saved display settings are unchanged. This forgets the pairing on the tablet
+only; it does not remove the tablet from the old computer's saved devices.
+
+**Wireless stays on the waiting screen:** unplug USB to test Wi-Fi; USB
+accessory mode, and USB power with USB debugging enabled, take priority over
+wireless. Check the computer is running DrawSplay with Wi-Fi enabled and the
+correct network interface saved, and both devices are on the same non-guest
+network. The tablet distinguishes missing Wi-Fi from unreadable saved trust
+or an unavailable Android secure identity. A trust error offers local
+forget-and-repair; an identity error may need an Android restart or Keystore
+repair and is never silently reset. USB remains available.
 
 Developer tools for Wi-Fi testing are in [`tools/wifi_enrollment`](tools/wifi_enrollment/README.md) and [`tools/android_wifi_probe`](tools/android_wifi_probe/README.md).
 

@@ -58,13 +58,74 @@ Output binary: `host\host.exe`. This is a console build (handy for development; 
 
 #### Bundled virtual display driver
 
-The Windows host embeds DrawSplay's own IddCx virtual display driver (`host/driver/idd/DrawSplayIdd.dll`/`.inf`/`.cat`) via `go:embed`, replacing the former third-party Parsec VDD dependency. Prebuilt artifacts are committed, so a plain `go build` works. To rebuild them from source (`drivers/windows/idd`), generate and sign the catalog, and stage them into `host/driver/idd`, run:
+The Windows host embeds DrawSplay's own IddCx virtual display driver (`host/driver/idd/DrawSplayIdd.dll`/`.inf`/`.cat`) via `go:embed` as the preferred backend. Parsec VDD is an on-demand fallback, not bundled or downloaded when the preferred driver works. Prebuilt artifacts are committed, so a plain `go build` works. To rebuild them from source (`drivers/windows/idd`), generate and sign the catalog, and stage them into `host/driver/idd`, run:
 
 ```powershell
 .\scripts\build-idd-driver.ps1        # add -WdkRoot <folder> to skip the WDK NuGet restore
 ```
 
-It needs Visual Studio 2022 (C++ toolset) and the Windows SDK; the WDK comes from the `Microsoft.Windows.WDK.x64` NuGet package automatically. Catalog signing uses the same `DRAWSPLAY_WINDOWS_SIGNING_PFX_PATH`/`_PASSWORD` as the host (required for the driver to install under Secure Boot). `scripts/build-release.ps1` runs this step automatically before the host build. A build without the embedded files runs in mirror-only mode (no extend-mode virtual display).
+It needs Visual Studio 2022 (C++ toolset) and the Windows SDK; the WDK comes from the `Microsoft.Windows.WDK.x64` NuGet package automatically. Optional build-time catalog signing uses the same `DRAWSPLAY_WINDOWS_SIGNING_PFX_PATH`/`_PASSWORD` as the host. `scripts/build-release.ps1` runs this step automatically before the host build. The elevated installer signs an unsigned embedded catalog locally using in-box Windows PowerShell, adds a per-PC certificate to LocalMachine Root/TrustedPublisher, and deletes its private key immediately. No SDK, certificate purchase, or Microsoft submission is needed on the user's PC for that path. An already trusted catalog is preserved; invalid signed catalogs are rejected rather than re-signed. Windows security policies can still reject a locally signed driver.
+
+Local PFX catalog signing is not the Microsoft driver-submission process and
+does not by itself prove the driver will install/load under the target PC's
+security policy. See the
+[step-by-step virtual-display driver signing guide](docs/windows-driver-signing.md)
+for Microsoft signing and the manual packaging path. Do not run the normal
+release script over a returned Microsoft-signed package: it can regenerate
+and replace the signed driver artifacts.
+
+The opt-in Windows certificate-lifecycle integration test creates temporary
+machine trust, verifies signing/key deletion and preservation of a trusted
+catalog, then removes its certificate. Run only in an administrator PowerShell:
+
+```powershell
+cd host
+$env:DRAWSPLAY_TEST_DRIVER_SIGNING = "1"
+go test -run '^TestIDDLocalSigningIntegration$' .
+Remove-Item Env:\DRAWSPLAY_TEST_DRIVER_SIGNING
+```
+
+Normal `go test` skips that machine-modifying test. It never creates a display
+device; driver installation and monitor creation require separate runtime checks.
+
+The driver staging hardening check also requires an administrator PowerShell:
+
+```powershell
+$env:DRAWSPLAY_TEST_DRIVER_STAGING = "1"
+go test -run '^TestDriverStagingIntegration$' .
+Remove-Item Env:\DRAWSPLAY_TEST_DRIVER_STAGING
+```
+
+It creates an admin-only workspace with its final owner/DACL set atomically,
+checks a privilege-disabled token (Administrators deny-only) cannot modify
+files or directory permissions, generates/signs the WinUSB catalog, then
+removes the temporary trust and workspace. It does not install a package or
+change tablet bindings. Normal unit tests reject unsafe ACLs, substituted INF
+bytes and user-writable signing paths without creating machine trust.
+
+After installation, the following opt-in test briefly creates/removes a real
+desktop output. Run from `host/` without an active tablet session and save work first:
+
+```powershell
+$env:DRAWSPLAY_TEST_INSTALLED_IDD = "1"
+go test -run '^TestIDDInstalledMonitorIntegration$' .
+Remove-Item Env:\DRAWSPLAY_TEST_INSTALLED_IDD
+```
+
+For an already installed Parsec VDD, the corresponding non-elevated check
+creates/removes a real fallback monitor and exercises its keepalive. It never
+downloads, installs, disables or restarts a driver. Run with no active session:
+
+```powershell
+$env:DRAWSPLAY_TEST_INSTALLED_PARSEC = "1"
+go test -run '^TestParsecInstalledMonitorIntegration$' .
+Remove-Item Env:\DRAWSPLAY_TEST_INSTALLED_PARSEC
+```
+
+Fallback setup pins Parsec VDD 0.41.0.0 in `host/parsec_install_windows.go`
+(URL, SHA-256 and Authenticode publisher); updating it requires validating all
+three and Windows compatibility. It is downloaded only after DrawSplay driver
+failure, when Parsec is absent and automatic installation is allowed.
 
 ### Linux
 
