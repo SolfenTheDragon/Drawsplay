@@ -149,7 +149,7 @@ Wi-Fi streaming works end to end, display plus touch and pen input, but it is st
 
 To use it:
 
-1. Start the host with Wi-Fi enabled (`DRAWSPLAY_FEATURE_WIFI=1`).
+1. Start the host normally. The Wi-Fi section is visible by default but toggled off (set `DRAWSPLAY_FEATURE_WIFI=0` to hide and disable it).
 2. On the settings page (`http://127.0.0.1:27180`), turn on **Wi-Fi** in the configuration, choose your network interface and save. A pairing code appears in **Host overview**.
 3. On the tablet, tap **Wi-Fi connect**, enter the code, then approve the tablet on the settings page. The tablet switches to the display as soon as it connects, and reconnects to the paired computer automatically afterwards.
 

@@ -414,7 +414,7 @@ Any other record type, epoch or a replayed sequence ends the video session. A ke
 #### 3.8.1 Host product startup and Android client pieces (development preview)
 
 - The host starts the paired Wi-Fi path only when `DRAWSPLAY_FEATURE_WIFI` is
-  on, the **Wi-Fi** toggle in the web UI configuration (above Advanced
+  not `0`/`false`/`no`/`off` (available by default), the **Wi-Fi** toggle in the web UI configuration (above Advanced
   settings, setting `pairedWifiEnabled`) is on, a network interface is chosen
   (`pairedWifiInterface`, falling back to `DRAWSPLAY_WIFI_INTERFACE`) and a
   paired peer is saved. Otherwise nothing changes. Saving the toggle or

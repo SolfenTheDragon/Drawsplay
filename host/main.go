@@ -126,7 +126,7 @@ func main() {
 	installDebugLogCapture()
 	log.Println("Starting Drawsplay host")
 	if !wifiFeatureEnabled() {
-		log.Printf("Wi-Fi feature is disabled (set %s=1 to enable)", wifiFeatureFlagEnv)
+		log.Printf("Wi-Fi feature is disabled (%s turned it off)", wifiFeatureFlagEnv)
 	}
 
 	// Settings precedence: explicit CLI flags > config file (web UI) >

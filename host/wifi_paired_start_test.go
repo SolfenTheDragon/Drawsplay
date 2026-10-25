@@ -12,7 +12,7 @@ func TestPairedWiFiStartIsInertWithoutFlagInterfaceOrTrust(t *testing.T) {
 	cfg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", cfg)
 	t.Setenv("APPDATA", cfg)
-	t.Setenv(wifiFeatureFlagEnv, "")
+	t.Setenv(wifiFeatureFlagEnv, "0")
 	t.Setenv(wifiPairedInterfaceEnv, "lo")
 	if started := startPairedWiFiRuntime(context.Background(), nil); started != nil {
 		t.Fatal("started with the feature flag off")

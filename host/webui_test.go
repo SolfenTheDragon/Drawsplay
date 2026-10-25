@@ -101,7 +101,7 @@ func TestSettingsAPIRoundTrip(t *testing.T) {
 }
 
 func TestSettingsAPIPreservesWiFiFieldsWhenFeatureDisabled(t *testing.T) {
-	t.Setenv(wifiFeatureFlagEnv, "")
+	t.Setenv(wifiFeatureFlagEnv, "0")
 	store := newTestStore(t)
 	initial := defaultSettings()
 	initial.WifiEnabled = true

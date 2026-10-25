@@ -7,13 +7,15 @@ import (
 
 const wifiFeatureFlagEnv = "DRAWSPLAY_FEATURE_WIFI"
 
+// Wi-Fi is available by default (the user toggle stays off); set the
+// variable to 0/false/no/off to hide and disable it.
 func wifiFeatureEnabled() bool {
 	raw := strings.TrimSpace(strings.ToLower(os.Getenv(wifiFeatureFlagEnv)))
 	switch raw {
-	case "1", "true", "yes", "on":
-		return true
-	default:
+	case "0", "false", "no", "off":
 		return false
+	default:
+		return true
 	}
 }
 
