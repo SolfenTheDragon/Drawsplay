@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.os.Build
 import android.util.AttributeSet
 import android.view.View
 
@@ -16,11 +17,12 @@ import android.view.View
 class TileView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
-) : View(context, attrs), TileDecoder.Sink {
+) : View(context, attrs), TilePicturePublisher {
     private class Grid(val width: Int, val height: Int, val tileSize: Int) {
         val cols = (width + tileSize - 1) / tileSize
         val rows = (height + tileSize - 1) / tileSize
         val tiles = arrayOfNulls<Bitmap>(cols * rows)
+        @Volatile var onPictureReady: (() -> Unit)? = null
     }
 
     @Volatile
@@ -47,6 +49,11 @@ class TileView @JvmOverloads constructor(
         postInvalidateOnAnimation()
     }
 
+    override fun onFullEnd(onPictureReady: () -> Unit) {
+        grid?.onPictureReady = onPictureReady
+        onFullEnd()
+    }
+
     override fun onPacketDone() {
         postInvalidateOnAnimation()
     }
@@ -57,14 +64,32 @@ class TileView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         val g = grid ?: return
+        if (g.width <= 0 || g.height <= 0 || width <= 0 || height <= 0) return
         canvas.save()
         canvas.scale(width.toFloat() / g.width, height.toFloat() / g.height)
+        var complete = true
         for (ty in 0 until g.rows) {
             for (tx in 0 until g.cols) {
-                val bmp = g.tiles[ty * g.cols + tx] ?: continue
+                val bmp = g.tiles[ty * g.cols + tx]
+                if (bmp == null) {
+                    complete = false
+                    continue
+                }
                 canvas.drawBitmap(bmp, (tx * g.tileSize).toFloat(), (ty * g.tileSize).toFloat(), paint)
             }
         }
         canvas.restore()
+        if (complete) {
+            val onPictureReady = g.onPictureReady ?: return
+            g.onPictureReady = null
+            if (Build.VERSION.SDK_INT >= 29 && isHardwareAccelerated) {
+                viewTreeObserver.registerFrameCommitCallback {
+                    if (grid === g && isAttachedToWindow) onPictureReady()
+                }
+            } else {
+                // Older/software View rendering exposes draw completion, not compositor commit.
+                onPictureReady()
+            }
+        }
     }
 }

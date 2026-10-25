@@ -5,6 +5,8 @@ import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Display
 import android.view.Surface
@@ -48,8 +50,10 @@ import java.util.concurrent.atomic.AtomicLong
  */
 class VideoDecoder(
     private val surface: Surface,
+    onPictureReady: () -> Unit = {},
     private val onVideoSize: (width: Int, height: Int) -> Unit = { _, _ -> }
 ) {
+    private val pictureReady = FirstPictureSignal(onPictureReady = onPictureReady)
     private val initialRefreshHz: Float = try {
         @Suppress("DEPRECATION")
         val display = if (AndroidCompat.supportsWindowMetrics) {
@@ -206,6 +210,7 @@ class VideoDecoder(
 
     /** Releases the codec. The decoder is unusable afterwards. */
     fun release() {
+        pictureReady.close()
         try {
             codec?.stop()
         } catch (_: Exception) {
@@ -281,6 +286,10 @@ class VideoDecoder(
             try {
                 created.setCallback(RenderPacedCallback())
                 created.configure(format, surface, null, 0)
+                created.setOnFrameRenderedListener({ renderedCodec, _, _ ->
+                    pictureReady.signal()
+                    runCatching { renderedCodec.setOnFrameRenderedListener(null, null) }
+                }, Handler(Looper.getMainLooper()))
                 created.start()
             } catch (e: Exception) {
                 lastError = e
@@ -480,6 +489,11 @@ class VideoDecoder(
             index: Int,
             info: MediaCodec.BufferInfo
         ) {
+            if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0 ||
+                (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0 && info.size == 0)) {
+                codec.releaseOutputBuffer(index, false)
+                return
+            }
             // presentationTimeUs carries the queue-time clock (see
             // drainPendingLocked), so now - pts = in-codec decode latency.
             val nowNs = System.nanoTime()

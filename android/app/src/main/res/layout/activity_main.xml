@@ -43,11 +43,19 @@
         android:layout_height="match_parent"
         android:background="@color/ds_bg">
 
-        <LinearLayout
+        <ScrollView
             android:id="@+id/waitingGroup"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:clipToPadding="false"
+            android:padding="24dp"
+            android:scrollbars="vertical">
+        <LinearLayout
+            android:id="@+id/waitingCard"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
+            android:layout_gravity="center_horizontal"
             android:gravity="center"
             android:orientation="vertical">
 
@@ -62,10 +70,30 @@
                 android:id="@+id/statusText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:gravity="center"
+                android:accessibilityLiveRegion="polite"
                 android:text="@string/status_waiting_for_host"
                 android:textColor="@color/ds_text"
                 android:textSize="18sp"
                 android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:gravity="center"
+                android:text="@string/usb_setup_help"
+                android:textColor="@color/ds_text"
+                android:textSize="16sp" />
+
+            <Button
+                android:id="@+id/usbRetryButton"
+                style="@style/DrawSplay.SecondaryButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/usb_retry"
+                android:visibility="gone" />
 
             <Button
                 android:id="@+id/wifiConnectButton"
@@ -73,31 +101,49 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="24dp"
                 android:background="@drawable/ds_button_secondary"
-                android:minHeight="0dp"
+                android:minHeight="48dp"
                 android:paddingHorizontal="20dp"
                 android:paddingVertical="10dp"
                 android:stateListAnimator="@null"
                 android:text="@string/wifi_connect"
                 android:textAllCaps="false"
-                android:textColor="@color/ds_accent"
+                android:textColor="@color/ds_button_text"
                 android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/wifiForgetButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/ds_button_secondary"
+                android:minHeight="48dp"
+                android:paddingHorizontal="20dp"
+                android:paddingVertical="10dp"
+                android:stateListAnimator="@null"
+                android:text="@string/wifi_forget_host"
+                android:textAllCaps="false"
+                android:textColor="@color/ds_button_text"
+                android:visibility="gone" />
         </LinearLayout>
+        </ScrollView>
 
         <!-- Shown only after "Wi-Fi connect" is tapped. -->
         <ScrollView
+            android:id="@+id/wifiPairScroll"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:fillViewport="false"
-            android:scrollbars="none">
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:clipToPadding="false"
+            android:padding="24dp"
+            android:visibility="gone">
         <LinearLayout
             android:id="@+id/wifiPairPanel"
-            android:layout_width="420dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="center_horizontal"
             android:background="@drawable/ds_panel"
             android:orientation="vertical"
-            android:padding="24dp"
+            android:padding="20dp"
             android:visibility="gone">
 
             <TextView
@@ -110,6 +156,7 @@
                 android:textStyle="bold" />
 
             <TextView
+                android:id="@+id/wifiPairTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
@@ -119,19 +166,38 @@
                 android:textStyle="bold" />
 
             <TextView
-                android:id="@+id/wifiPairStatus"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:text="@string/wifi_hint"
                 android:textColor="@color/ds_muted"
-                android:textSize="14sp" />
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/wifiPairStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:accessibilityLiveRegion="polite"
+                android:text="@string/wifi_ready_code"
+                android:textColor="@color/ds_text"
+                android:textSize="16sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:labelFor="@id/wifiPairCode"
+                android:text="@string/wifi_code_label"
+                android:textColor="@color/ds_text"
+                android:textSize="16sp" />
 
             <EditText
                 android:id="@+id/wifiPairCode"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="8dp"
+                android:minHeight="48dp"
                 android:background="@drawable/ds_input"
                 android:hint="@string/wifi_code_hint"
                 android:importantForAutofill="no"
@@ -148,23 +214,34 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
+                android:minHeight="48dp"
                 android:background="@drawable/ds_button"
                 android:stateListAnimator="@null"
                 android:text="@string/wifi_pair"
                 android:textAllCaps="false"
-                android:textColor="@android:color/white"
+                android:textColor="@color/ds_primary_text"
                 android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/wifiPairRetry"
+                style="@style/DrawSplay.SecondaryButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/wifi_try_again"
+                android:visibility="gone" />
 
             <Button
                 android:id="@+id/wifiPairClose"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
+                android:minHeight="48dp"
                 android:background="@drawable/ds_button_secondary"
                 android:stateListAnimator="@null"
                 android:text="@string/wifi_back"
                 android:textAllCaps="false"
-                android:textColor="@color/ds_muted"
+                android:textColor="@color/ds_button_text"
                 android:textStyle="bold" />
         </LinearLayout>
         </ScrollView>

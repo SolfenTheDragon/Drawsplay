@@ -28,13 +28,17 @@ import javax.net.ssl.X509KeyManager
 import javax.security.auth.x500.X500Principal
 
 /** Wi-Fi opt-in only. Single-owner; never falls back to plaintext preferences. */
+enum class WiFiTrustFailure { SAVED_HOST, IDENTITY }
+class WiFiTrustException(val failure: WiFiTrustFailure, cause: Exception) :
+    IOException("Wi-Fi ${if (failure == WiFiTrustFailure.IDENTITY) "identity" else "saved pairing"} is unavailable", cause)
+
 class WiFiTrustStore(context: Context) {
-    private val directory = File(context.applicationContext.noBackupFilesDir, "wifi-v2")
-    private val file = File(directory, "trust.bin")
+    private val file = trustFile(context)
+    private val directory = file.parentFile!!
     private val atomic = AtomicFile(file)
-    private val keys = keystoreOperation {
+    private val keys by lazy { keystoreOperation {
         KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-    }
+    } }
     private val identity by lazy { loadIdentity() }
 
     fun identitySpkiSha256(): ByteArray =
@@ -60,6 +64,18 @@ class WiFiTrustStore(context: Context) {
     }
 
     fun readPairedHost(): WiFiPairedHost? {
+        return try {
+            readStoredHost()
+        } catch (error: WiFiTrustException) {
+            throw error
+        } catch (error: IOException) {
+            throw WiFiTrustException(WiFiTrustFailure.SAVED_HOST, error)
+        } catch (error: GeneralSecurityException) {
+            throw WiFiTrustException(WiFiTrustFailure.SAVED_HOST, error)
+        }
+    }
+
+    private fun readStoredHost(): WiFiPairedHost? {
         val input = try {
             atomic.openRead()
         } catch (e: FileNotFoundException) {
@@ -105,10 +121,7 @@ class WiFiTrustStore(context: Context) {
 
     /** Callers must also close sessions and cancel reconnect before forgetting. */
     fun revoke() {
-        atomic.delete()
-        if (hasStoredTrust() || File(file.path + ".new").exists()) {
-            throw IOException("Cannot remove Wi-Fi trust; stop Wi-Fi and retry")
-        }
+        WiFiTrustFiles(file).revoke()
     }
 
     private fun loadIdentity(): KeyStore.PrivateKeyEntry = keystoreOperation {
@@ -144,7 +157,7 @@ class WiFiTrustStore(context: Context) {
         entry
     }
 
-    private fun trustKey(create: Boolean): SecretKey = keystoreOperation {
+    private fun trustKey(create: Boolean): SecretKey = keystoreOperation(WiFiTrustFailure.SAVED_HOST) {
         if (!keys.containsAlias(TRUST_ALIAS)) {
             if (!create) throw IOException("Wi-Fi trust encryption key is missing; repair and re-pair locally")
             KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
@@ -168,15 +181,30 @@ class WiFiTrustStore(context: Context) {
 
     private fun hasStoredTrust(): Boolean = file.exists() || File(file.path + ".bak").exists()
 
-    private inline fun <T> keystoreOperation(action: () -> T): T =
+    private inline fun <T> keystoreOperation(failure: WiFiTrustFailure = WiFiTrustFailure.IDENTITY, action: () -> T): T =
         try {
             action()
+        } catch (e: WiFiTrustException) {
+            throw e
+        } catch (e: IOException) {
+            throw WiFiTrustException(failure, e)
         } catch (e: GeneralSecurityException) {
-            throw IOException("Android Keystore cannot protect Wi-Fi identity; no plaintext fallback", e)
+            throw WiFiTrustException(failure, e)
         }
 
     companion object {
         private const val IDENTITY_ALIAS = "DrawSplayWiFiIdentityV1"
         private const val TRUST_ALIAS = "DrawSplayWiFiTrustV1"
+
+        /** Includes broken/incomplete records so the user can forget unreadable trust. */
+        fun hasSavedHost(context: Context): Boolean {
+            return WiFiTrustFiles(trustFile(context)).hasSavedHost()
+        }
+
+        /** Session cancellation is required first. Does not need a working Keystore. */
+        fun forgetSavedHost(context: Context) = WiFiTrustFiles(trustFile(context)).revoke()
+
+        private fun trustFile(context: Context) =
+            File(File(context.applicationContext.noBackupFilesDir, "wifi-v2"), "trust.bin")
     }
 }

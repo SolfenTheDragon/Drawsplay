@@ -3,6 +3,8 @@ package com.drawsplay.tablet.video
 import android.media.MediaCodec
 import android.media.MediaFormat
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Surface
 import java.io.Closeable
@@ -27,6 +29,8 @@ class WiFiVideoDecoder(
     private var picturesSinceFlush = false
     private var csdIndex = 2
     private var closed = false
+    @Volatile private var onPictureReady: () -> Unit = {}
+    private val pictureReady = FirstPictureSignal(onPictureReady = { onPictureReady() })
     var pendingFrames = 0
         private set
     @Volatile var submitted = 0L
@@ -73,10 +77,20 @@ class WiFiVideoDecoder(
             for (buffer in inputBuffers) if (buffer.capacity() < maxAccessUnit) {
                 throw IOException("Wi-Fi decoder input buffer is smaller than negotiated AU; lower maximum AU and reconnect")
             }
+            codec.setOnFrameRenderedListener({ renderedCodec, _, _ ->
+                pictureReady.signal()
+                // Only the first Surface presentation is needed; do not keep posting frame events.
+                runCatching { renderedCodec.setOnFrameRenderedListener(null, null) }
+            }, Handler(Looper.getMainLooper()))
         } catch (error: Exception) {
             codec.release()
             throw error
         }
+    }
+
+    /** Called before stepping; readiness means MediaCodec reported a rendered Surface frame. */
+    fun setOnPictureReadyListener(listener: () -> Unit) {
+        onPictureReady = listener
     }
 
     /** Nonblocking except for a bounded codec-flush recovery. No app-owned per-frame allocations. */
@@ -97,6 +111,11 @@ class WiFiVideoDecoder(
                 continue
             }
             if (index < 0) continue
+            if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0 ||
+                (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0 && info.size == 0)) {
+                codec.releaseOutputBuffer(index, false)
+                continue
+            }
             val superseded = outputs.offer(index)
             if (superseded >= 0) {
                 codec.releaseOutputBuffer(superseded, false)
@@ -162,6 +181,7 @@ class WiFiVideoDecoder(
     }
 
     override fun close() {
+        pictureReady.close()
         if (closed) return
         closed = true
         pendingSlot?.let { queue.release(it) }

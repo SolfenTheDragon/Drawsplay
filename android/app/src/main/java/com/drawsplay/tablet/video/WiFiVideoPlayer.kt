@@ -19,6 +19,8 @@ interface PlayerDecoder : Closeable {
     val lastOutputUs: Long
     val renderReleased: Long get() = 0L
     val decodeDrops: Long get() = 0L
+    /** Reports rendered Surface output, not configuration, input submission or release counts. */
+    fun setOnPictureReadyListener(listener: () -> Unit) {}
     fun step(nowUs: Long): Boolean
 }
 
@@ -28,6 +30,7 @@ private class MediaCodecPlayerDecoder(private val decoder: WiFiVideoDecoder) : P
     override val lastOutputUs get() = decoder.lastOutputUs
     override val renderReleased get() = decoder.renderReleased
     override val decodeDrops get() = decoder.decodeDrops
+    override fun setOnPictureReadyListener(listener: () -> Unit) = decoder.setOnPictureReadyListener(listener)
     override fun step(nowUs: Long) = decoder.step(nowUs)
     override fun close() = decoder.close()
 }
@@ -49,10 +52,11 @@ object WiFiVideoPlayer {
         surface: Surface,
         statsLink: WiFiControlLink?,
         linkSample: () -> WiFiVideoStats.Link?,
+        onPictureReady: () -> Unit = {},
         cancelled: () -> Boolean
     ) = run(media, closeMedia, link, limits, epoch, { config, queue ->
         MediaCodecPlayerDecoder(WiFiVideoDecoder(surface, config, queue, limits.maxAccessUnit))
-    }, statsLink, STATS_INTERVAL_MS, linkSample, cancelled)
+    }, statsLink, STATS_INTERVAL_MS, linkSample, onPictureReady, cancelled)
 
     fun run(
         media: InputStream,
@@ -64,6 +68,7 @@ object WiFiVideoPlayer {
         statsLink: WiFiControlLink? = null,
         statsIntervalMs: Long = STATS_INTERVAL_MS,
         linkSample: () -> WiFiVideoStats.Link? = { null },
+        onPictureReady: () -> Unit = {},
         cancelled: () -> Boolean
     ) {
         val receiver = WiFiVideoReceiver(media, limits, epoch)
@@ -71,10 +76,12 @@ object WiFiVideoPlayer {
         val ended = AtomicBoolean(false)
         val failure = AtomicReference<Throwable>()
         val active = AtomicReference<PlayerDecoder>()
+        val pictureReady = FirstPictureSignal({ !cancelled() }, onPictureReady = onPictureReady)
         val thread = Thread({
             try {
                 decoderFactory(receiver.config, receiver.queue).use { decoder ->
                     active.set(decoder)
+                    decoder.setOnPictureReadyListener(pictureReady::signal)
                     ready.complete(Unit)
                     var progressUs = System.nanoTime() / 1000
                     var seenPending = decoder.pendingFrames
@@ -119,6 +126,7 @@ object WiFiVideoPlayer {
             try { closeMedia() } catch (closeError: IOException) { error.addSuppressed(closeError) }
             throw error
         } finally {
+            pictureReady.close()
             reporter?.interrupt()
             ended.set(true)
             if (thread.isAlive) {

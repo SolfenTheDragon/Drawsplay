@@ -1,6 +1,8 @@
 ﻿package com.drawsplay.tablet.video
 
 import android.util.Log
+import android.os.Handler
+import android.os.Looper
 import android.view.Surface
 import com.drawsplay.tablet.transport.AccessoryFraming
 import com.drawsplay.tablet.transport.AccessoryTransport
@@ -45,10 +47,13 @@ class VideoChannel(
     private val isAppForeground: () -> Boolean = { true }
 ) {
 
-    /** Owner-facing status callbacks. Invoked on the reader thread. */
+    /** Owner-facing status callbacks. UI thread is not guaranteed. */
     interface VideoChannelListener {
         /** Stream is up; config describes the incoming encode. */
         fun onStreamStarted(encoder: String, fps: Int)
+
+        /** First picture rendered for this connection, not merely a received config. */
+        fun onPictureReady() {}
 
         /** Stream down or not yet up; the channel keeps retrying on its own. */
         fun onWaitingForHost(reason: String?)
@@ -65,6 +70,7 @@ class VideoChannel(
     var tileSink: TileDecoder.Sink? = null
 
     private val generation = AtomicLong(0L)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile
     private var surface: Surface? = null
@@ -113,7 +119,7 @@ class VideoChannel(
 
     /** Reconnect loop: one connection per iteration, retry after any failure. */
     private fun runReaderLoop(gen: Long) {
-        listener.onWaitingForHost(null)
+        dispatchWaiting(gen, null)
         while (gen == generation.get() && !Thread.currentThread().isInterrupted) {
             try {
                 streamOneConnection(gen)
@@ -122,13 +128,19 @@ class VideoChannel(
             } catch (e: Exception) {
                 if (gen != generation.get()) return
                 Log.d(TAG, "Video connection ended: ${e.message}")
-                listener.onWaitingForHost(e.message)
+                dispatchWaiting(gen, e.message)
             }
             try {
                 Thread.sleep(RECONNECT_DELAY_MS)
             } catch (_: InterruptedException) {
                 return
             }
+        }
+    }
+
+    private fun dispatchWaiting(gen: Long, reason: String?) {
+        mainHandler.post {
+            if (gen == generation.get() && activeSocket == null) listener.onWaitingForHost(reason)
         }
     }
 
@@ -171,9 +183,18 @@ class VideoChannel(
             socket.getOutputStream().flush()
 
             val input = DataInputStream(socket.getInputStream().buffered(256 * 1024))
-            val decoder = VideoDecoder(renderSurface) { w, h -> listener.onVideoSize(w, h) }
+            val connectionCurrent = {
+                gen == generation.get() && activeSocket === socket &&
+                    surface === renderSurface && renderSurface.isValid
+            }
+            val pictureReady = FirstPictureSignal(
+                isCurrent = connectionCurrent,
+                dispatch = { callback -> mainHandler.post { callback() } },
+                onPictureReady = listener::onPictureReady
+            )
+            val decoder = VideoDecoder(renderSurface, onPictureReady = pictureReady::signal) { w, h -> listener.onVideoSize(w, h) }
             val statsThread = startStatsReporter(socket, decoder)
-            val tiles = tileSink?.let { TileDecoder(it) }
+            val tiles = tileSink?.let { TileDecoder(PictureReadyTileSink(it, pictureReady)) }
             var tileModeActive = false
             try {
                 while (gen == generation.get() && !Thread.currentThread().isInterrupted) {
@@ -186,7 +207,11 @@ class VideoChannel(
                     input.readFully(payload)
 
                     when (type) {
-                        PACKET_CONFIG -> handleConfig(payload, decoder)
+                        PACKET_CONFIG -> handleConfig(payload, decoder) { encoder, fps ->
+                            mainHandler.post {
+                                if (connectionCurrent()) listener.onStreamStarted(encoder, fps)
+                            }
+                        }
                         PACKET_NAL -> decoder.feedNal(payload)
                         PACKET_TILE -> if (tiles != null) {
                             tiles.decode(payload)
@@ -209,6 +234,7 @@ class VideoChannel(
             } catch (e: EOFException) {
                 throw IllegalStateException("host closed the stream")
             } finally {
+                pictureReady.close()
                 activeSocket = null
                 statsThread.interrupt()
                 tiles?.release()
@@ -284,7 +310,11 @@ class VideoChannel(
         thread.start()
     }
 
-    private fun handleConfig(payload: ByteArray, decoder: VideoDecoder) {
+    private fun handleConfig(
+        payload: ByteArray,
+        decoder: VideoDecoder,
+        onStreamStarted: (String, Int) -> Unit
+    ) {
         val obj = JSONObject(String(payload, Charsets.UTF_8))
         val codec = obj.optString("codec", "h264").lowercase().let {
             if (it == "h265") "hevc" else it
@@ -303,7 +333,7 @@ class VideoChannel(
         decoder.renderMode = selectedPacing
         decoder.pacingGuardrailApplied = pacingGuardrail
         decoder.streamFps = fps
-        listener.onStreamStarted(encoder, fps)
+        onStreamStarted(encoder, fps)
     }
 
     private fun dialEndpointHappyEyeballs(

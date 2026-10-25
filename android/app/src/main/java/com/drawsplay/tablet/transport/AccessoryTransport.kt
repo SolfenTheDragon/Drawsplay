@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.drawsplay.tablet.UsbConnectionStatus
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
@@ -37,12 +38,14 @@ object AccessoryTransport {
     private var usbManager: UsbManager? = null
     private var receiver: BroadcastReceiver? = null
     private var availability: ((Boolean) -> Unit)? = null
+    private var status: ((UsbConnectionStatus) -> Unit)? = null
+    private var permissionDenied = false
     private var link: AccessoryLink? = null
     private var fd: ParcelFileDescriptor? = null
     private var permissionRequested = false
     private var poller: java.util.concurrent.ScheduledExecutorService? = null
 
-    fun start(context: Context, onAvailabilityChanged: (Boolean) -> Unit) {
+    fun start(context: Context, onStatus: (UsbConnectionStatus) -> Unit = {}, onAvailabilityChanged: (Boolean) -> Unit) {
         synchronized(lock) {
             if (receiver != null) return
             val ctx = context.applicationContext
@@ -50,13 +53,20 @@ object AccessoryTransport {
             appContext = ctx
             usbManager = manager
             availability = onAvailabilityChanged
+            status = onStatus
             val r = object : BroadcastReceiver() {
                 override fun onReceive(c: Context, intent: Intent) {
                     when (intent.action) {
-                        UsbManager.ACTION_USB_ACCESSORY_DETACHED -> closeLink()
+                        UsbManager.ACTION_USB_ACCESSORY_DETACHED -> {
+                            synchronized(lock) { permissionDenied = false; permissionRequested = false }
+                            closeLink()
+                            notifyStatus(UsbConnectionStatus.WAITING)
+                        }
                         ACTION_PERMISSION -> {
                             synchronized(lock) { permissionRequested = false }
-                            if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) refresh()
+                            val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+                            synchronized(lock) { permissionDenied = !granted }
+                            if (granted) refresh() else notifyStatus(UsbConnectionStatus.PERMISSION_DENIED)
                         }
                     }
                 }
@@ -79,6 +89,9 @@ object AccessoryTransport {
             r = receiver
             receiver = null
             availability = null
+            status = null
+            permissionRequested = false
+            permissionDenied = false
             poller?.shutdownNow()
             poller = null
         }
@@ -110,6 +123,11 @@ object AccessoryTransport {
         executor.execute { openIfAttached() }
     }
 
+    fun retryPermission() {
+        synchronized(lock) { permissionDenied = false }
+        refresh()
+    }
+
     fun isAttached(): Boolean = synchronized(lock) { link != null }
 
     /** Opens a virtual connection; blocks, so call from a background thread only. */
@@ -126,8 +144,17 @@ object AccessoryTransport {
             manager = usbManager ?: return
             ctx = appContext ?: return
         }
-        val accessory = manager.accessoryList?.firstOrNull { it.manufacturer == MANUFACTURER && (it.model == MODEL || it.model == MODEL_MANUAL) } ?: return
+        val accessory = manager.accessoryList?.firstOrNull { it.manufacturer == MANUFACTURER && (it.model == MODEL || it.model == MODEL_MANUAL) } ?: run {
+            synchronized(lock) { permissionDenied = false; permissionRequested = false }
+            notifyStatus(UsbConnectionStatus.WAITING)
+            return
+        }
         if (!manager.hasPermission(accessory)) {
+            if (synchronized(lock) { permissionDenied }) {
+                notifyStatus(UsbConnectionStatus.PERMISSION_DENIED)
+                return
+            }
+            notifyStatus(UsbConnectionStatus.PERMISSION_NEEDED)
             requestPermission(ctx, manager, accessory)
             return
         }
@@ -136,7 +163,7 @@ object AccessoryTransport {
         } catch (e: Exception) {
             Log.w(TAG, "openAccessory failed: ${e.message}")
             null
-        } ?: return
+        } ?: run { notifyStatus(UsbConnectionStatus.OPEN_FAILED); return }
         val newLink = AccessoryLink(FileInputStream(pfd.fileDescriptor), FileOutputStream(pfd.fileDescriptor)) { closed ->
             synchronized(lock) {
                 if (link === closed) {
@@ -146,6 +173,7 @@ object AccessoryTransport {
                 }
             }
             notifyAvailability(false)
+            notifyStatus(UsbConnectionStatus.WAITING)
         }
         synchronized(lock) {
             fd = pfd
@@ -154,6 +182,7 @@ object AccessoryTransport {
         newLink.start()
         Log.i(TAG, "USB accessory opened")
         notifyAvailability(true)
+        notifyStatus(UsbConnectionStatus.CONNECTED)
     }
 
     private fun requestPermission(ctx: Context, manager: UsbManager, accessory: UsbAccessory) {
@@ -174,5 +203,10 @@ object AccessoryTransport {
     private fun notifyAvailability(available: Boolean) {
         val callback = synchronized(lock) { availability }
         callback?.invoke(available)
+    }
+
+    private fun notifyStatus(value: UsbConnectionStatus) {
+        val callback = synchronized(lock) { status }
+        callback?.invoke(value)
     }
 }

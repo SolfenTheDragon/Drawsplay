@@ -7,6 +7,9 @@
     <color name="ds_text">#EDF3FA</color>
     <color name="ds_muted">#8B9AAB</color>
     <color name="ds_accent">#56A6FF</color>
-    <color name="ds_accent_strong">#2F81F7</color>
+    <color name="ds_accent_strong">#165FBF</color>
+    <color name="ds_accent_pressed">#104B99</color>
+    <color name="ds_disabled">#273242</color>
+    <color name="ds_disabled_text">#AAB7C6</color>
     <color name="ds_border">#273242</color>
 </resources>

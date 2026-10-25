@@ -3,6 +3,10 @@
 import com.drawsplay.tablet.video.TileView
 import com.drawsplay.tablet.transport.UsbPriorityPolicy
 import com.drawsplay.tablet.transport.WiFiPairedSessionHost
+import com.drawsplay.tablet.transport.WiFiTrustStore
+import com.drawsplay.tablet.transport.WiFiHostResetState
+import java.io.IOException
+import java.util.concurrent.Executors
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
@@ -24,6 +28,9 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import android.media.ImageReader
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
+import androidx.activity.OnBackPressedCallback
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -76,6 +83,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var wifiPairStatus: TextView
     private lateinit var wifiPairCode: EditText
     private lateinit var wifiPairSubmit: Button
+    private lateinit var wifiPairRetry: View
+    private lateinit var wifiPairScroll: View
+    private lateinit var connectionBack: OnBackPressedCallback
+    private var connectionDialog: AlertDialog? = null
+    private val pairingAttempt = PairingAttemptState()
+    private var usbStatus = UsbConnectionStatus.WAITING
+    private var pairedStatus = PairedConnectionStatus.IDLE
+    private var streamConfigured = false
+    private lateinit var wifiConnectButton: View
+    private lateinit var wifiForgetButton: View
+    private var hasSavedWifiHost = false
+    private var wifiWaitingMessage: String? = null
     private var pairing: WiFiPairingSession? = null
     private var backgroundSink: ImageReader? = null
     @Volatile
@@ -113,17 +132,36 @@ class MainActivity : AppCompatActivity() {
         wifiPairStatus = findViewById(R.id.wifiPairStatus)
         wifiPairCode = findViewById(R.id.wifiPairCode)
         wifiPairSubmit = findViewById(R.id.wifiPairSubmit)
-        findViewById<View>(R.id.wifiConnectButton).setOnClickListener { openWifiPairing() }
+        wifiPairRetry = findViewById(R.id.wifiPairRetry)
+        wifiPairScroll = findViewById(R.id.wifiPairScroll)
+        wifiPairRetry.setOnClickListener { startWifiPairingAttempt() }
+        wifiConnectButton = findViewById(R.id.wifiConnectButton)
+        wifiConnectButton.setOnClickListener { openWifiPairing() }
+        wifiForgetButton = findViewById(R.id.wifiForgetButton)
+        wifiForgetButton.setOnClickListener { confirmForgetWifiHost() }
+        findViewById<View>(R.id.usbRetryButton).setOnClickListener { AccessoryTransport.retryPermission() }
         findViewById<View>(R.id.wifiPairClose).setOnClickListener { closeWifiPairing() }
         wifiPairCode.setOnEditorActionListener { _, _, _ -> wifiPairSubmit.performClick(); true }
         wifiPairSubmit.setOnClickListener {
             if (pairing?.submitCode(wifiPairCode.text.toString()) == true) {
                 wifiPairCode.text.clear()
+                wifiPairCode.isEnabled = false
                 wifiPairSubmit.isEnabled = false
+                hidePairingKeyboard()
             }
         }
         statusText = findViewById(R.id.statusText)
+        ViewCompat.setAccessibilityHeading(statusText, true)
+        ViewCompat.setAccessibilityHeading(findViewById(R.id.wifiPairTitle), true)
         inputPad = findViewById(R.id.inputPad)
+        connectionBack = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                if (wifiPairPanel.visibility == View.VISIBLE) closeWifiPairing()
+                else showConnectionOptions()
+            }
+        }
+        onBackPressedDispatcher.addCallback(this, connectionBack)
+        configureLocalInsets()
 
         Log.i(TAG, "Android runtime profile: sdk=${AndroidCompat.sdkInt}, " +
             "windowMetrics=${AndroidCompat.supportsWindowMetrics}, " +
@@ -192,13 +230,27 @@ class MainActivity : AppCompatActivity() {
 
         videoChannel = VideoChannel(object : VideoChannel.VideoChannelListener {
             override fun onStreamStarted(encoder: String, fps: Int) {
-                streamUp = true
-                runOnUiThread { updateStatus() }
+                runOnUiThread {
+                    streamConfigured = true
+                    wifiWaitingMessage = null
+                    updateStatus()
+                }
+            }
+
+            override fun onPictureReady() {
+                runOnUiThread {
+                    if (isDestroyed || !appForeground) return@runOnUiThread
+                    streamUp = true
+                    updateStatus()
+                }
             }
 
             override fun onWaitingForHost(reason: String?) {
-                streamUp = false
-                runOnUiThread { updateStatus() }
+                runOnUiThread {
+                    streamUp = false
+                    streamConfigured = false
+                    updateStatus()
+                }
             }
 
             override fun onTileLayerVisible(visible: Boolean) {
@@ -224,15 +276,45 @@ class MainActivity : AppCompatActivity() {
             { wifiPolicyTlsFingerprint }
         )
 
-        pairedWifiHost = WiFiPairedSessionHost(this, endpointSelector, { pendingForegroundSurface }, { up ->
-            wifiStreamUp = up
-            runOnUiThread { updateStatus() }
-        }) { wifiAllowedNow() }
+        pairedWifiHost = WiFiPairedSessionHost(this, endpointSelector, { pendingForegroundSurface },
+            onStreaming = { up ->
+                runOnUiThread {
+                    if (!up) {
+                        wifiStreamUp = false
+                        pairedStatus = PairedConnectionStatus.IDLE
+                    }
+                    updateStatus()
+                }
+            },
+            onStatus = { state ->
+                runOnUiThread {
+                    if (isDestroyed) return@runOnUiThread
+                    if (state == pairedStatus) return@runOnUiThread
+                    pairedStatus = state
+                    if (state == PairedConnectionStatus.CONNECTING && !wifiHostReset.reconnectBlocked) wifiWaitingMessage = null
+                    updateStatus()
+                }
+            },
+            onPictureReady = {
+                runOnUiThread {
+                    if (isDestroyed || !appForeground) return@runOnUiThread
+                    wifiStreamUp = true
+                    updateStatus()
+                }
+            }
+        ) { wifiAllowedNow() }
 
         videoChannel.tileSink = tileView
         inputPad.onInputBatch = { events -> inputChannel.send(events) }
 
-        AccessoryTransport.start(this) { attached -> endpointSelector.updateAccessoryAttached(attached) }
+        AccessoryTransport.start(this, onStatus = { state ->
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                if (usbStatus == state) return@runOnUiThread
+                usbStatus = state
+                updateStatus()
+            }
+        }) { attached -> endpointSelector.updateAccessoryAttached(attached) }
 
         videoSurface.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
@@ -263,7 +345,8 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         appForeground = true
         updateWiFiDiscoveryState()
-        pairedWifiHost.start()
+        if (!wifiHostReset.reconnectBlocked) pairedWifiHost.start()
+        refreshSavedWifiHost()
         AccessoryTransport.refresh()
         AccessoryTransport.setPolling(true)
         inputChannel.start()
@@ -277,6 +360,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         appForeground = false
+        connectionDialog?.dismiss()
+        pairingAttempt.cancel()
         AccessoryTransport.setPolling(false)
         if (!keepAliveOnBackground || isFinishing) {
             inputChannel.stop()
@@ -285,14 +370,8 @@ class MainActivity : AppCompatActivity() {
         pairedWifiHost.stop()
         pairing?.cancel()
         pairing = null
-        wifiPairPanel.visibility = View.GONE
-        waitingGroup.visibility = View.VISIBLE
+        hideWifiPanel()
         super.onStop()
-    }
-
-    @Deprecated("Back closes the Wi-Fi pairing panel before leaving the app")
-    override fun onBackPressed() {
-        if (wifiPairPanel.visibility == View.VISIBLE) closeWifiPairing() else super.onBackPressed()
     }
 
     override fun onDestroy() {
@@ -451,38 +530,173 @@ class MainActivity : AppCompatActivity() {
 
     /** Shows the pairing panel; only reachable from the waiting screen's "Wi-Fi connect" button. */
     private fun openWifiPairing() {
-        if (pairing != null) return
+        if (pairing != null || wifiHostReset.inProgress || isDestroyed) return
+        if (hasSavedWifiHost) {
+            showLocalDialog(AlertDialog.Builder(this)
+                .setTitle(R.string.wifi_switch_title)
+                .setMessage(R.string.wifi_switch_message)
+                .setNegativeButton(R.string.action_cancel, null)
+                .setPositiveButton(R.string.wifi_forget_host) { _, _ -> forgetWifiHost() }
+            )
+            return
+        }
+        wifiWaitingMessage = null
         // The paired session advertises the same service type, so it pauses while pairing.
         pairedWifiHost.stop()
         waitingGroup.visibility = View.GONE
         wifiPairPanel.visibility = View.VISIBLE
-        wifiPairStatus.setText(R.string.wifi_hint)
+        wifiPairScroll.visibility = View.VISIBLE
+        startWifiPairingAttempt()
+        updateStatus()
+    }
+
+    private fun startWifiPairingAttempt() {
+        if (wifiHostReset.inProgress || !appForeground || isDestroyed) return
+        if (hasSavedWifiHost) {
+            closeWifiPairing()
+            openWifiPairing()
+            return
+        }
+        val resetEpoch = wifiHostReset.pairingEpoch() ?: return
+        pairingAttempt.cancel()
+        pairing?.cancel()
+        val attempt = pairingAttempt.start()
+        wifiPairCode.text.clear()
+        wifiPairCode.error = null
+        wifiPairCode.isEnabled = true
         wifiPairSubmit.isEnabled = true
-        pairing = WiFiPairingSession(this, { wifiPairStatus.text = it }) { paired ->
+        wifiPairRetry.visibility = View.GONE
+        renderPairingStatus(PairingStatus.ENTER_CODE)
+        pairing = WiFiPairingSession(this, { state ->
+            if (isDestroyed || !appForeground || !pairingAttempt.update(attempt, state)) return@WiFiPairingSession
+            renderPairingStatus(state)
+        }, onPaired = { wifiHostReset.paired(resetEpoch) }) { paired ->
+            if (isDestroyed || !pairingAttempt.update(attempt, pairingAttempt.status)) return@WiFiPairingSession
             pairing = null
-            if (paired) {
+            if (isDestroyed || !appForeground) return@WiFiPairingSession
+            if (paired && !wifiHostReset.reconnectBlocked) {
+                refreshSavedWifiHost()
                 // Hand straight over to the display instead of waiting for Back.
                 hideWifiPanel()
-                statusText.setText(R.string.status_connecting_wifi)
+                pairedStatus = PairedConnectionStatus.CONNECTING
                 pairedWifiHost.start()
+                updateStatus()
             } else {
+                refreshSavedWifiHost()
                 wifiPairSubmit.isEnabled = false
+                wifiPairCode.isEnabled = false
+                wifiPairRetry.visibility = View.VISIBLE
+                wifiPairRetry.requestFocus()
             }
         }.also { it.start() }
+        wifiPairCode.requestFocus()
+    }
+
+    private fun renderPairingStatus(state: PairingStatus) {
+        wifiPairStatus.setText(when (state) {
+            PairingStatus.ENTER_CODE -> R.string.wifi_ready_code
+            PairingStatus.INVALID_CODE -> R.string.wifi_invalid_code
+            PairingStatus.CHECKING -> R.string.wifi_checking
+            PairingStatus.APPROVAL -> R.string.wifi_approval
+            PairingStatus.SAVING -> R.string.wifi_saving
+            PairingStatus.PAIRED -> R.string.wifi_paired
+            PairingStatus.EXPIRED -> R.string.wifi_expired
+            PairingStatus.NOT_APPROVED -> R.string.wifi_not_approved
+            PairingStatus.VERIFICATION_FAILED -> R.string.wifi_verification_failed
+            PairingStatus.NETWORK_UNAVAILABLE -> R.string.wifi_network_unavailable
+            PairingStatus.DISCOVERY_FAILED -> R.string.wifi_discovery_failed
+            PairingStatus.TRUST_REPAIR -> R.string.wifi_trust_repair
+            PairingStatus.IDENTITY_REPAIR -> R.string.wifi_identity_repair
+            PairingStatus.FAILED -> R.string.wifi_pair_failed
+        })
+        if (state == PairingStatus.INVALID_CODE) wifiPairCode.error = getString(R.string.wifi_invalid_code)
+        if (state.canRetry) hidePairingKeyboard()
+    }
+
+    private fun hidePairingKeyboard() {
+        (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+            .hideSoftInputFromWindow(wifiPairCode.windowToken, 0)
     }
 
     private fun hideWifiPanel() {
-        (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
-            .hideSoftInputFromWindow(wifiPairCode.windowToken, 0)
+        hidePairingKeyboard()
         wifiPairPanel.visibility = View.GONE
+        wifiPairScroll.visibility = View.GONE
         waitingGroup.visibility = View.VISIBLE
     }
 
     private fun closeWifiPairing() {
+        pairingAttempt.cancel()
         pairing?.cancel()
         pairing = null
         hideWifiPanel()
-        pairedWifiHost.start()
+        refreshSavedWifiHost()
+        if (!wifiHostReset.reconnectBlocked && appForeground) pairedWifiHost.start()
+        updateStatus()
+    }
+
+    private fun refreshSavedWifiHost() {
+        if (isDestroyed) return
+        wifiTrustWorker.execute {
+            val saved = WiFiTrustStore.hasSavedHost(applicationContext)
+            runOnUiThread {
+                if (isDestroyed || wifiHostReset.inProgress) return@runOnUiThread
+                hasSavedWifiHost = saved
+                updateWifiForgetButton()
+                updateStatus()
+                if (saved && !wifiHostReset.reconnectBlocked && appForeground &&
+                    pairing == null && wifiPairPanel.visibility != View.VISIBLE) {
+                    pairedWifiHost.start()
+                }
+            }
+        }
+    }
+
+    private fun updateWifiForgetButton() {
+        wifiForgetButton.visibility = if (hasSavedWifiHost) View.VISIBLE else View.GONE
+        wifiForgetButton.isEnabled = !wifiHostReset.inProgress
+        wifiConnectButton.isEnabled = !wifiHostReset.inProgress
+    }
+
+    private fun confirmForgetWifiHost() {
+        if (wifiHostReset.inProgress) return
+        showLocalDialog(AlertDialog.Builder(this)
+            .setTitle(R.string.wifi_forget_host)
+            .setMessage(R.string.wifi_forget_confirmation)
+            .setNegativeButton(R.string.action_cancel, null)
+            .setPositiveButton(R.string.wifi_forget_host) { _, _ -> forgetWifiHost() }
+        )
+    }
+
+    private fun forgetWifiHost() {
+        if (pairing != null || !wifiHostReset.begin()) return
+        wifiWaitingMessage = getString(R.string.wifi_forgetting_host)
+        updateWifiForgetButton()
+        updateStatus()
+        wifiTrustWorker.execute {
+            pairedWifiHost.stop()
+            val error = try {
+                WiFiTrustStore.forgetSavedHost(applicationContext)
+                null
+            } catch (error: IOException) {
+                Log.e(TAG, "Cannot forget saved wireless host", error)
+                error
+            }
+            val saved = WiFiTrustStore.hasSavedHost(applicationContext)
+            wifiHostReset.finish()
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                hasSavedWifiHost = saved
+                wifiStreamUp = false
+                wifiWaitingMessage = if (error == null) {
+                    getString(R.string.wifi_host_forgotten)
+                } else {
+                    getString(R.string.wifi_forget_failed)
+                }
+                updateWifiForgetButton()
+                updateStatus()
+            }
+        }
     }
 
     /**
@@ -491,11 +705,89 @@ class MainActivity : AppCompatActivity() {
      * disconnects.
      */
     private fun updateStatus() {
-        if (streamUp || wifiStreamUp) {
+        if (isDestroyed) return
+        val localPanel = wifiPairPanel.visibility == View.VISIBLE
+        val picture = streamUp || wifiStreamUp
+        if (picture && !localPanel) {
             statusOverlay.visibility = FrameLayout.GONE
         } else {
             statusOverlay.visibility = FrameLayout.VISIBLE
-            statusText.text = getString(R.string.status_waiting_for_host)
+            val state = ConnectionPresentation.status(
+                configured = streamConfigured, picture = picture, savedWifi = hasSavedWifiHost,
+                usb = usbStatus, wifi = pairedStatus, usbBlocksWifi = !wifiAllowedNow()
+            )
+            val message = wifiWaitingMessage ?: getString(when (state) {
+                ConnectionStatus.STREAMING -> R.string.status_streaming
+                ConnectionStatus.WAITING -> R.string.status_waiting_for_host
+                ConnectionStatus.WAITING_PICTURE -> R.string.status_waiting_picture
+                ConnectionStatus.USB_PERMISSION -> R.string.status_usb_permission
+                ConnectionStatus.USB_DENIED -> R.string.status_usb_denied
+                ConnectionStatus.CONNECTING_USB -> R.string.status_connecting_usb
+                ConnectionStatus.USB_ERROR -> R.string.status_usb_error
+                ConnectionStatus.USB_PRIORITY -> R.string.status_usb_priority
+                ConnectionStatus.RECONNECTING_WIFI -> R.string.status_reconnecting_wifi
+                ConnectionStatus.WIFI_NETWORK -> R.string.wifi_network_unavailable
+                ConnectionStatus.CONNECTING_WIFI -> R.string.status_connecting_wifi
+                ConnectionStatus.TRUST_REPAIR -> R.string.wifi_trust_repair
+                ConnectionStatus.IDENTITY_REPAIR -> R.string.wifi_identity_repair
+            })
+            if (statusText.text.toString() != message) statusText.text = message
+            findViewById<View>(R.id.usbRetryButton).visibility =
+                if (usbStatus == UsbConnectionStatus.PERMISSION_DENIED || usbStatus == UsbConnectionStatus.OPEN_FAILED) View.VISIBLE else View.GONE
+        }
+        connectionBack.isEnabled = localPanel || picture
+        enterImmersiveMode()
+    }
+
+    private fun showConnectionOptions() {
+        if (connectionDialog != null) return
+        val items = mutableListOf(getString(R.string.action_resume), getString(R.string.wifi_connect))
+        if (hasSavedWifiHost) items.add(getString(R.string.wifi_forget_host))
+        showLocalDialog(AlertDialog.Builder(this)
+            .setTitle(R.string.connection_options)
+            .setMessage(null)
+            .setItems(items.toTypedArray()) { _, index ->
+                when (index) {
+                    1 -> openWifiPairing()
+                    2 -> confirmForgetWifiHost()
+                }
+            }
+        )
+    }
+
+    private fun showLocalDialog(builder: AlertDialog.Builder) {
+        val dialog = builder.create()
+        connectionDialog = dialog
+        dialog.setOnDismissListener {
+            if (connectionDialog === dialog) connectionDialog = null
+            enterImmersiveMode()
+        }
+        dialog.show()
+        enterImmersiveMode()
+    }
+
+    private fun configureLocalInsets() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        ViewCompat.setOnApplyWindowInsetsListener(statusOverlay) { view, insets ->
+            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime())
+            view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+            updateLocalPanelWidths()
+            insets
+        }
+        statusOverlay.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            updateLocalPanelWidths()
+        }
+        ViewCompat.requestApplyInsets(statusOverlay)
+    }
+
+    private fun updateLocalPanelWidths() {
+        val maxWidth = (560 * resources.displayMetrics.density).toInt()
+        val available = statusOverlay.width - statusOverlay.paddingLeft - statusOverlay.paddingRight -
+            (48 * resources.displayMetrics.density).toInt()
+        if (available <= 0) return
+        for (card in listOf(findViewById<View>(R.id.waitingCard), wifiPairPanel)) {
+            val width = minOf(available, maxWidth)
+            if (card.layoutParams.width != width) card.layoutParams = card.layoutParams.apply { this.width = width }
         }
     }
 
@@ -607,6 +899,7 @@ class MainActivity : AppCompatActivity() {
 
     /** USB (accessory, or USB power with adb on) has priority over a paired Wi-Fi session. */
     private fun wifiAllowedNow(): Boolean {
+        if (wifiHostReset.reconnectBlocked) return false
         val battery = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val usbPowered = battery?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) == android.os.BatteryManager.BATTERY_PLUGGED_USB
         val adbEnabled = android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.ADB_ENABLED, 0) == 1
@@ -660,12 +953,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
         val controller = WindowInsetsControllerCompat(window, window.decorView)
-        controller.hide(WindowInsetsCompat.Type.systemBars())
+        val localUi = statusOverlay.visibility == View.VISIBLE || connectionDialog != null
+        if (localUi) controller.show(WindowInsetsCompat.Type.systemBars())
+        else controller.hide(WindowInsetsCompat.Type.systemBars())
         controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
 
     companion object {
+        private val wifiHostReset = WiFiHostResetState()
+        private val wifiTrustWorker = Executors.newSingleThreadExecutor()
         private const val TAG = "MainActivity"
         private const val KEY_VIDEO_SCALING = "videoScaling"
         private const val KEY_WIFI_ENABLED = "wifiEnabled"

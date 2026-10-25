@@ -89,13 +89,20 @@ class WiFiVideoPlayerTest {
     }
 
     private class DelayedOutputDecoder(private val queue: WiFiAccessUnitQueue) : PlayerDecoder {
+        private var onPictureReady: () -> Unit = {}
+        override fun setOnPictureReadyListener(listener: () -> Unit) { onPictureReady = listener }
         var consumed = 0
         var outputs = 0
         override var pendingFrames = 0
         override val holdingRecoverySlot = false
         override val lastOutputUs = System.nanoTime() / 1000 - 10_000_000L
         override fun step(nowUs: Long): Boolean {
-            if (pendingFrames > 0) { pendingFrames = 0; outputs++; return true }
+            if (pendingFrames > 0) {
+                pendingFrames = 0
+                outputs++
+                onPictureReady()
+                return true
+            }
             val slot = queue.poll(nowUs) ?: return false
             queue.release(slot)
             pendingFrames = 1
@@ -114,6 +121,84 @@ class WiFiVideoPlayerTest {
         WiFiVideoPlayer.run(ByteArrayInputStream(wire), {}, link, limits(), 42, { _, q -> DelayedOutputDecoder(q).also { decoder = it } }) { false }
         assertEquals(1, decoder!!.consumed)
         assertEquals("decoder must keep running after the first late frame", 1, decoder!!.outputs)
+    }
+
+    @Test
+    fun pictureReadyIsNotSignalledByConfigurationOrConsumedInputWithoutOutput() {
+        val idr = hex("000001091000000165b860")
+        for (pictures in listOf(ByteArray(0), frame(6, 3, idr))) {
+            val endSequence = if (pictures.isEmpty()) 3L else 4L
+            val wire = frame(5, 2, config()) + pictures +
+                frame(WiFiFrameCodec.CONTROL, endSequence, byteArrayOf(5, 0, 0, 1))
+            var readyCount = 0
+            val link = WiFiControlLink(ByteArrayInputStream(ByteArray(0)), ByteArrayOutputStream(), 42)
+            WiFiVideoPlayer.run(ByteArrayInputStream(wire), {}, link, limits(), 42,
+                { _, queue -> FakeDecoder(queue, mutableListOf()) },
+                onPictureReady = { readyCount++ }) { false }
+            assertEquals(0, readyCount)
+        }
+    }
+
+    @Test
+    fun pictureReadyIsSignalledOnceAfterPresentationAndResetsForNextRun() {
+        val idr = hex("000001091000000165b860")
+        val wire = frame(5, 2, config()) + frame(6, 3, idr) + frame(6, 4, idr) +
+            frame(WiFiFrameCodec.CONTROL, 5, byteArrayOf(5, 0, 0, 1))
+        var readyCount = 0
+        repeat(2) {
+            var decoder: DelayedOutputDecoder? = null
+            val link = WiFiControlLink(ByteArrayInputStream(ByteArray(0)), ByteArrayOutputStream(), 42)
+            WiFiVideoPlayer.run(ByteArrayInputStream(wire), {}, link, limits(), 42,
+                { _, queue -> DelayedOutputDecoder(queue).also { decoder = it } },
+                onPictureReady = {
+                    assertTrue(decoder!!.outputs > 0)
+                    readyCount++
+                }) { false }
+            assertEquals(it + 1, readyCount)
+        }
+    }
+
+    @Test
+    fun decoderCallbackAfterPlayerEndsCannotSignalPictureReady() {
+        val wire = frame(5, 2, config()) + frame(WiFiFrameCodec.CONTROL, 3, byteArrayOf(5, 0, 0, 1))
+        var callback: () -> Unit = {}
+        var readyCount = 0
+        val link = WiFiControlLink(ByteArrayInputStream(ByteArray(0)), ByteArrayOutputStream(), 42)
+        WiFiVideoPlayer.run(ByteArrayInputStream(wire), {}, link, limits(), 42, { _, _ ->
+            object : PlayerDecoder {
+                override val pendingFrames = 0
+                override val holdingRecoverySlot = false
+                override val lastOutputUs = 0L
+                override fun step(nowUs: Long) = false
+                override fun setOnPictureReadyListener(listener: () -> Unit) { callback = listener }
+                override fun close() = Unit
+            }
+        }, onPictureReady = { readyCount++ }) { false }
+        callback()
+        assertEquals(0, readyCount)
+    }
+
+    @Test
+    fun decoderCallbackDuringCancellationCannotSignalPictureReady() {
+        val wire = frame(5, 2, config()) + frame(WiFiFrameCodec.CONTROL, 3, byteArrayOf(5, 0, 0, 1))
+        var cancelled = false
+        var readyCount = 0
+        val link = WiFiControlLink(ByteArrayInputStream(ByteArray(0)), ByteArrayOutputStream(), 42)
+        WiFiVideoPlayer.run(ByteArrayInputStream(wire), {}, link, limits(), 42, { _, _ ->
+            object : PlayerDecoder {
+                private var callback: () -> Unit = {}
+                override val pendingFrames = 0
+                override val holdingRecoverySlot = false
+                override val lastOutputUs = 0L
+                override fun step(nowUs: Long) = false
+                override fun setOnPictureReadyListener(listener: () -> Unit) { callback = listener }
+                override fun close() {
+                    cancelled = true
+                    callback()
+                }
+            }
+        }, onPictureReady = { readyCount++ }) { cancelled }
+        assertEquals(0, readyCount)
     }
 
     @Test
