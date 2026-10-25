@@ -19,6 +19,7 @@ package main
 // uninstaller deletes the package and the certificate.
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log"
@@ -46,22 +47,32 @@ func installSignedWinUSBPackage(extra [][2]uint16) error {
 	}
 	previous, _ := scanAOAWinUSBInfs()
 
-	dir, err := os.MkdirTemp("", "drawsplay-winusb-")
+	dir, err := driverStageDir()
 	if err != nil {
 		return fmt.Errorf("create package dir: %w", err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			log.Printf("WinUSB: remove protected driver staging: %v", err)
+		}
+	}()
 	inf := filepath.Join(dir, winusbPackageINFName)
-	if err := os.WriteFile(inf, []byte(aoaWinUSBPackageInf(aoaWinUSBHardwareIDs(extra), time.Now())), 0o600); err != nil {
+	expectedINF := []byte(aoaWinUSBPackageInf(aoaWinUSBHardwareIDs(extra), time.Now()))
+	if err := os.WriteFile(inf, expectedINF, 0o600); err != nil {
 		return fmt.Errorf("write INF: %w", err)
+	}
+	if err := verifyWinUSBPackageINF(dir, expectedINF); err != nil {
+		return err
 	}
 	thumbprint, err := signWinUSBPackage(dir)
 	if err != nil {
 		return err
 	}
+	if err := verifyWinUSBPackageINF(dir, expectedINF); err != nil {
+		return errors.Join(err, removeWinUSBSigningCerts(thumbprint))
+	}
 	if err := runPnputilHidden(system32Path("pnputil.exe"), `/add-driver "`+inf+`" /install`); err != nil && !pnputilNoMatchingDevice(err) {
-		_ = removeWinUSBSigningCerts(thumbprint)
-		return fmt.Errorf("pnputil /add-driver: %w", err)
+		return errors.Join(fmt.Errorf("pnputil /add-driver: %w", err), removeWinUSBSigningCerts(thumbprint))
 	}
 	// The new package outranks the old ones (newer DriverVer); drop them and
 	// their certificates.
@@ -93,54 +104,91 @@ func pnputilNoMatchingDevice(err error) bool {
 // signWinUSBPackage creates and signs the catalog for the INF in dir and
 // returns the (now key-less, trusted) signing certificate's thumbprint.
 func signWinUSBPackage(dir string) (string, error) {
+	return signLocalDriverCatalog(dir, winusbPackageINFName, aoaWinUSBCatalogName,
+		winusbSignerSubject, "DrawSplay USB driver (this PC only)")
+}
+
+func verifyWinUSBPackageINF(dir string, expected []byte) error {
+	got, err := os.ReadFile(filepath.Join(dir, winusbPackageINFName))
+	if err != nil {
+		return fmt.Errorf("read staged WinUSB INF: %w", err)
+	}
+	if !bytes.Equal(got, expected) {
+		return errors.New("staged WinUSB INF differs from the generated in-box binding; refusing installation")
+	}
+	return nil
+}
+
+// A nonempty infName generates a catalog for the in-box WinUSB binding.
+// IddCx uses its embedded Inf2Cat catalog covering both the INF and DLL.
+func signLocalDriverCatalog(dir, infName, catName, subject, friendlyName string) (string, error) {
+	if err := verifyDriverStageDir(dir); err != nil {
+		return "", err
+	}
+	prepare := "$existing=Get-AuthenticodeSignature -FilePath $cat\n" +
+		"if($existing.Status -eq 'Valid'){ 'PRESERVED_SIGNATURE'; exit 0 }\n" +
+		"if($existing.Status -ne 'NotSigned'){ throw ('existing driver catalog signature is invalid: '+$existing.StatusMessage) }"
+	if infName != "" {
+		prepare = "$inf=Join-Path $dir '" + infName + "'\n" +
+			"New-FileCatalog -Path $inf -CatalogFilePath $cat -CatalogVersion 2 | Out-Null\n" +
+			"if((Test-FileCatalog -Path $inf -CatalogFilePath $cat) -ne 'Valid'){ throw 'WinUSB catalog does not match generated INF' }"
+	}
 	script := strings.Join([]string{
 		"$ErrorActionPreference='Stop'",
-		"$dir=$env:DRAWSPLAY_WINUSB_DIR",
-		"$inf=Join-Path $dir '" + winusbPackageINFName + "'",
-		"$cat=Join-Path $dir '" + aoaWinUSBCatalogName + "'",
-		"New-FileCatalog -Path $inf -CatalogFilePath $cat -CatalogVersion 2 | Out-Null",
-		"$cert=New-SelfSignedCertificate -Type CodeSigningCert -Subject ('" + winusbSignerSubject + " ('+$env:COMPUTERNAME+')') " +
-			"-FriendlyName 'DrawSplay USB driver (this PC only)' -CertStoreLocation Cert:\\LocalMachine\\My " +
-			"-KeyExportPolicy NonExportable -NotAfter (Get-Date).AddYears(30) -HashAlgorithm SHA256",
+		"$dir=$env:DRAWSPLAY_DRIVER_SIGN_DIR",
+		"$cat=Join-Path $dir '" + catName + "'",
+		prepare,
+		"$cert=$null",
 		"try {",
-		"  $sig=Set-AuthenticodeSignature -FilePath $cat -Certificate $cert -HashAlgorithm SHA256",
-		"  if(-not $sig.SignerCertificate){ throw ('signing failed: '+$sig.StatusMessage) }",
+		"  $cert=New-SelfSignedCertificate -Type CodeSigningCert -Subject ('" + subject + " ('+$env:COMPUTERNAME+')') " +
+			"-FriendlyName '" + friendlyName + "' -CertStoreLocation Cert:\\LocalMachine\\My " +
+			"-KeyExportPolicy NonExportable -NotAfter (Get-Date).AddYears(30) -HashAlgorithm SHA256",
+		"  try {",
+		"    $sig=Set-AuthenticodeSignature -FilePath $cat -Certificate $cert -HashAlgorithm SHA256",
+		"    if(-not $sig.SignerCertificate -or $sig.SignerCertificate.Thumbprint -ne $cert.Thumbprint){ throw ('signing failed: '+$sig.StatusMessage) }",
+		"  } finally { Remove-Item -LiteralPath ('Cert:\\LocalMachine\\My\\'+$cert.Thumbprint) -DeleteKey }",
 		"  foreach($name in 'Root','TrustedPublisher'){ $st=New-Object Security.Cryptography.X509Certificates.X509Store($name,'LocalMachine'); $st.Open('ReadWrite'); $st.Add([Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.RawData)); $st.Close() }",
-		"} finally { Remove-Item -LiteralPath ('Cert:\\LocalMachine\\My\\'+$cert.Thumbprint) -DeleteKey }",
-		"$v=Get-AuthenticodeSignature -FilePath $cat",
-		"if($v.Status -ne 'Valid'){ throw ('catalog signature not trusted: '+$v.StatusMessage) }",
-		"'THUMBPRINT='+$cert.Thumbprint",
+		"  $v=Get-AuthenticodeSignature -FilePath $cat",
+		"  if($v.Status -ne 'Valid'){ throw ('catalog signature not trusted: '+$v.StatusMessage) }",
+		"  'THUMBPRINT='+$cert.Thumbprint",
+		"} catch {",
+		"  if($cert){ foreach($name in 'Root','TrustedPublisher'){ $path='Cert:\\LocalMachine\\'+$name+'\\'+$cert.Thumbprint; if(Test-Path -LiteralPath $path){ Remove-Item -LiteralPath $path } } }",
+		"  throw",
+		"}",
 	}, "\n")
 	cmd := exec.Command(windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
-	cmd.Env = append(os.Environ(), "DRAWSPLAY_WINUSB_DIR="+dir)
+	cmd.Env = append(os.Environ(), "DRAWSPLAY_DRIVER_SIGN_DIR="+dir)
 	hideChildWindow(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("sign WinUSB driver package: %w (%s)", err, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("sign %s: %w (%s)", catName, err, strings.TrimSpace(string(out)))
 	}
 	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == "PRESERVED_SIGNATURE" {
+			return "", nil
+		}
 		if t, ok := strings.CutPrefix(strings.TrimSpace(line), "THUMBPRINT="); ok && t != "" {
 			return t, nil
 		}
 	}
-	return "", fmt.Errorf("sign WinUSB driver package: no certificate thumbprint in output (%s)", strings.TrimSpace(string(out)))
+	return "", fmt.Errorf("sign %s: no certificate thumbprint in output (%s)", catName, strings.TrimSpace(string(out)))
 }
 
 // removeWinUSBSigningCerts (elevated) deletes the DrawSplay driver-signing
 // certificate with thumbprint from the machine stores, or every one when
 // thumbprint is "".
 func removeWinUSBSigningCerts(thumbprint string) error {
-	return removeWinUSBSigningCertsMatching("$_.Subject -like '" + winusbSignerSubject + "*' -and ('" + thumbprint + "' -eq '' -or $_.Thumbprint -eq '" + thumbprint + "')")
+	return removeDriverSigningCertsMatching("$_.Subject -like '" + winusbSignerSubject + "*' -and ('" + thumbprint + "' -eq '' -or $_.Thumbprint -eq '" + thumbprint + "')")
 }
 
 // removeWinUSBSigningCertsExcept deletes DrawSplay driver-signing
 // certificates other than keep (the one signing the current package).
 func removeWinUSBSigningCertsExcept(keep string) error {
-	return removeWinUSBSigningCertsMatching("$_.Subject -like '" + winusbSignerSubject + "*' -and $_.Thumbprint -ne '" + keep + "'")
+	return removeDriverSigningCertsMatching("$_.Subject -like '" + winusbSignerSubject + "*' -and $_.Thumbprint -ne '" + keep + "'")
 }
 
-func removeWinUSBSigningCertsMatching(filter string) error {
-	script := "foreach($name in 'Root','TrustedPublisher','My'){ Get-ChildItem ('Cert:\\LocalMachine\\'+$name) | " +
+func removeDriverSigningCertsMatching(filter string) error {
+	script := "$ErrorActionPreference='Stop'; foreach($name in 'Root','TrustedPublisher','My'){ Get-ChildItem ('Cert:\\LocalMachine\\'+$name) | " +
 		"Where-Object { " + filter + " } | ForEach-Object { Remove-Item -LiteralPath $_.PSPath -DeleteKey:($name -eq 'My') } }"
 	out, err := runHiddenCommand(windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
 	if err != nil {

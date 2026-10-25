@@ -5,9 +5,9 @@
 
 .DESCRIPTION
   The host binary embeds DrawSplayIdd.dll/.inf/.cat (idd_install_windows.go).
-  For a release those files must be rebuilt from drivers/windows/idd and the
-  catalog must be signed by the release code-signing certificate, or Windows
-  refuses to install the package on a Secure Boot machine.
+  For a release those files are rebuilt from drivers/windows/idd. Build-time
+  catalog signing is optional unless required below; the elevated installer
+  signs an unsigned catalog locally with a per-PC trusted certificate.
 
   Steps:
     1. Resolve the WDK root (Microsoft.Windows.WDK.x64 NuGet, or -WdkRoot).
@@ -20,7 +20,7 @@
 
   When no WDK and no signing certificate are available (local dev), the script
   warns and leaves the already-committed host/driver/idd artifacts in place so
-  local host builds still compile (extend mode works only with a signed cat).
+  local host builds still compile. The installer handles unsigned catalogs.
 
 .PARAMETER DriverVersion
   DriverVer version stamped into the INF (e.g. 1.0.0.0). Defaults to 1.0.0.0.
@@ -140,7 +140,7 @@ if ($canBuildDriver) {
             throw "Driver signing is required but DRAWSPLAY_WINDOWS_SIGNING_PFX_PATH/PASSWORD are not set."
         }
         else {
-            Write-Warning "No signing certificate; staging an UNSIGNED catalog (will not install under Secure Boot)."
+            Write-Warning "No signing certificate; staging an unsigned catalog for per-PC signing by the elevated installer."
         }
 
         New-Item -ItemType Directory -Force -Path $embedDir | Out-Null

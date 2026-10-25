@@ -7,9 +7,9 @@ package main
 // DrawSplay bundles its virtual display driver (built from drivers/windows/idd)
 // directly in the host binary via go:embed, replacing the former dependency on
 // the third-party Parsec VDD driver. The driver files are extracted at setup
-// time and installed with native Windows APIs (setupapi / newdev / pnputil) —
-// no PowerShell, no network download — which also avoids the Authenticode /
-// script-execution heuristics that made the installer trip Windows Defender.
+// time, locally catalog-signed with a per-PC certificate when unsigned, and
+// installed with native Windows APIs (setupapi / newdev / pnputil).
+// Signing uses in-box Windows PowerShell; no SDK or network download is needed.
 //
 // Extend mode creates a root-enumerated software device (Root\DrawSplayIdd);
 // the UMDF/IddCx driver exposes a control interface the host opens
@@ -41,11 +41,11 @@ const (
 	driverStatusInstalled     = "installed"
 	driverStatusPendingReboot = "installed (reboot may be required)"
 
-	driverInstallTimeout = 2 * time.Minute
+	driverInstallTimeout = 7 * time.Minute
 )
 
 // driverBundled reports whether this build embeds the driver package. Local
-// builds without the artifacts (or non-release CI) run in mirror mode.
+// builds without the artifacts can use an existing Parsec VDD or mirror.
 func driverBundled() bool {
 	for _, name := range []string{"DrawSplayIdd.dll", iddInfName, "DrawSplayIdd.cat"} {
 		data, err := embeddedDriver.ReadFile("driver/idd/" + name)
@@ -81,7 +81,7 @@ func extractEmbeddedDriver(dir string) (string, error) {
 
 // ensureVirtualDisplayDriver installs DrawSplay's virtual display driver if it
 // is not already present. Best-effort: on any failure it logs and returns,
-// leaving the host to run in mirror mode. Called once at startup.
+// leaving runtime selection to try existing drivers then mirror. Called once at startup.
 func ensureVirtualDisplayDriver(disabled bool) {
 	if disabled {
 		log.Println("Virtual display driver auto-install disabled (-no-driver-install)")
@@ -91,17 +91,17 @@ func ensureVirtualDisplayDriver(disabled bool) {
 		return // driver present
 	}
 	if !driverBundled() {
-		log.Println("Virtual display driver not bundled in this build; continuing in mirror mode")
+		log.Println("DrawSplay driver not bundled; runtime will try an existing Parsec VDD before mirroring")
 		return
 	}
 	if _, installed := loadInstallManifest(); installed {
 		// The installer owns elevated driver setup; an installed host never
 		// raises a UAC prompt on its own at launch.
-		log.Println("Virtual display driver not found; continuing in mirror mode (rerun the DrawSplay installer to add extend-mode support)")
+		log.Println("DrawSplay virtual display driver not found; runtime will try an existing Parsec VDD before mirroring (rerun setup to install a fallback)")
 		return
 	}
 	if isProcessElevated() {
-		logDriverInstallStatus(installIDDDriverPackage())
+		log.Printf("Windows virtual display setup: %s", installWindowsDisplayDriver().status)
 		return
 	}
 	if isFirstHostBoot() && !promptInstallDriverOnFirstRun() {
@@ -119,6 +119,8 @@ func ensureVirtualDisplayDriver(disabled bool) {
 	}
 	if _, err := iddDevicePath(); err == nil {
 		log.Println("Virtual display driver installed successfully")
+	} else if _, err := parsecDevicePath(); err == nil {
+		log.Println("Using signed Parsec VDD fallback")
 	} else {
 		log.Println("Virtual display driver install did not expose the control device; a reboot may be required for extend mode")
 	}
@@ -142,14 +144,17 @@ func runDriverInstallAdminMode(run bool) bool {
 	if !run {
 		return false
 	}
-	status := installIDDDriverPackage()
-	log.Printf("Elevated virtual display driver install: %s", status)
+	result := installWindowsDisplayDriver()
+	log.Printf("Elevated virtual display driver install: %s", result.status)
 	return true
 }
 
 // installIDDDriverPackage extracts the bundled driver and installs it. It must
 // run elevated. It returns driverStatus* or a "failed: ..." description.
 func installIDDDriverPackage() string {
+	if !isProcessElevated() {
+		return "failed: virtual display driver installation requires administrator approval"
+	}
 	if _, err := iddDevicePath(); err == nil {
 		return driverStatusPresent
 	}
@@ -160,17 +165,25 @@ func installIDDDriverPackage() string {
 	if err != nil {
 		return fmt.Sprintf("failed: staging dir: %v", err)
 	}
+	defer func() {
+		if err := os.RemoveAll(stageDir); err != nil {
+			log.Printf("Remove temporary virtual display driver files: %v", err)
+		}
+	}()
 	infPath, err := extractEmbeddedDriver(stageDir)
 	if err != nil {
 		return fmt.Sprintf("failed: extract driver: %v", err)
 	}
-	// Stage the package into the driver store first (pnputil is in-box and
-	// Microsoft-signed; no PowerShell). Non-fatal: UpdateDriverForPlugAndPlay
-	// also installs from the INF, but staging improves reliability.
-	if out, err := runHiddenCommand(system32Path("pnputil.exe"), "/add-driver", infPath, "/install"); err != nil {
-		log.Printf("pnputil /add-driver warning: %v (%s)", err, truncateForLog(out))
-	}
-	reboot, err := createRootDevnodeAndInstall(iddHardwareID, infPath)
+	reboot, err := installLocallySignedIDD(iddPackageInstallOps{
+		sign: func() (string, error) { return signIDDDriverPackage(stageDir) },
+		stage: func() error {
+			return runPnputilHidden(system32Path("pnputil.exe"), `/add-driver "`+infPath+`"`)
+		},
+		device: func() (bool, error) {
+			return createRootDevnodeAndInstall(iddHardwareID, infPath)
+		},
+		removeCert: removeIDDSigningCerts,
+	})
 	if err != nil {
 		return fmt.Sprintf("failed: %v", err)
 	}
@@ -192,14 +205,6 @@ func installIDDDriverPackage() string {
 	}
 }
 
-func driverStageDir() (string, error) {
-	base, err := configDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(base, "driver"), nil
-}
-
 // markVDDOwned records that DrawSplay installed the virtual display driver so
 // the uninstaller can remove it without asking.
 func markVDDOwned() {
@@ -215,7 +220,14 @@ func markVDDOwned() {
 func promptInstallDriverOnFirstRun() bool {
 	decision := askYesNo("DrawSplay",
 		"The DrawSplay virtual display driver is not installed.\n\n"+
-			"Install it now for extend-mode support? (Requires administrator approval.)")
+			"Install it now for extend-mode support?\n\n"+
+			"An unsigned driver catalog will be signed on this PC. This adds a "+
+			"DrawSplay certificate to this computer's Trusted Root and Trusted "+
+			"Publishers stores, then deletes its private signing key. Uninstall "+
+			"removes the driver and certificate. Secure Boot and signature "+
+			"enforcement are not changed. If this driver fails, setup uses an "+
+			"existing Parsec VDD or downloads a verified fallback only if needed."+
+			"\n\nRequires administrator approval.")
 	if err := persistNoDriverInstallPreference(!decision); err != nil {
 		log.Printf("Saving driver install preference failed (%v)", err)
 	}

@@ -168,6 +168,20 @@ func runInstall(exe string, o installerOptions) int {
 			"Start DrawSplay automatically in the system tray when you sign in to Windows?\n\n"+
 				"You can change this later on the DrawSplay settings page.")
 	}
+	if !o.Quiet && !o.SkipVDD {
+		if _, err := iddDevicePath(); err != nil {
+			o.SkipVDD = !askYesNo("Install DrawSplay virtual display",
+				"Install the virtual display driver for extend mode?\n\n"+
+					"If its catalog is unsigned, DrawSplay signs it on this PC and "+
+					"adds a certificate to this computer's Trusted Root and Trusted "+
+					"Publishers stores. Its private signing key is deleted immediately. "+
+					"Uninstall removes the driver and certificate.\n\n"+
+					"Secure Boot and signature enforcement are not changed. "+
+					"If DrawSplay's driver fails, setup uses an existing Parsec VDD "+
+					"or downloads and installs a verified Parsec fallback only if needed. "+
+					"Choose No to use mirror mode instead.")
+		}
+	}
 	dir := defaultInstallDir()
 	fmt.Printf("Installing DrawSplay to %s\n", dir)
 
@@ -220,6 +234,8 @@ func runInstall(exe string, o installerOptions) int {
 		markVDDOwned()
 	}
 	m.VDDOwned = m.VDDOwned || fileExists(filepath.Join(stateDir, vddOwnedMarkerName))
+	m.ParsecVDDOwned = m.ParsecVDDOwned || previous.ParsecVDDOwned ||
+		fileExists(filepath.Join(stateDir, parsecOwnedMarkerName))
 	if wantAutostart {
 		if err := installAutostartCommand(m.HostExe); err != nil {
 			m.Warnings = append(m.Warnings, fmt.Sprintf("login autostart: %v", err))
@@ -326,7 +342,11 @@ func runInstallElevated(resultPath string, skipVDD bool) int {
 	} else if skipVDD {
 		m.VDDDriver = "skipped (-no-driver-install); mirror mode only"
 	} else {
-		m.VDDDriver = installIDDDriverPackage()
+		result := installWindowsDisplayDriver()
+		m.VDDDriver, m.ParsecVDDOwned = result.status, result.parsecOwned
+		if strings.Contains(result.status, "failed") {
+			m.Warnings = append(m.Warnings, "Virtual display setup: "+result.status)
+		}
 	}
 	if m.VDDDriver == driverStatusInstalled || m.VDDDriver == driverStatusPendingReboot || m.VDDDriver == driverStatusPresent {
 		m.VDDOwned = true
@@ -687,7 +707,7 @@ func runUninstall(exe string, o installerOptions) int {
 				_ = os.Remove(filepath.Join(stateDir, name))
 			}
 			if vddRemoved {
-				_ = os.Remove(filepath.Join(stateDir, vddOwnedMarkerName))
+				_ = os.Remove(filepath.Join(stateDir, parsecOwnedMarkerName))
 			}
 		} else if err := os.RemoveAll(stateDir); err != nil {
 			problems = append(problems, fmt.Sprintf("remove %s: %v", stateDir, err))

@@ -24,6 +24,7 @@ package main
 // and no keepalive: closing the control handle removes the monitor.
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -111,8 +112,7 @@ func desiredDisplayMode(opts videoOptions) (w, h, hz, nativeW, nativeH int) {
 }
 
 // newVirtualDisplay creates the session display: a DrawSplay IddCx virtual
-// monitor when the driver is available, otherwise a mirror of the primary
-// output.
+// monitor when available, then a Parsec VDD monitor, then primary mirroring.
 //
 // Plugging the monitor connects it but Windows may leave it inactive (not
 // part of the desktop) — observed on Windows 11 where the OS remembers
@@ -129,10 +129,43 @@ func newVirtualDisplay(opts videoOptions) (virtualDisplay, error) {
 		return newMirrorDisplayForBaseline(before, baseline)
 	}
 
-	dev, err := openIDDDevice()
+	return firstWindowsDisplay(
+		func() (virtualDisplay, error) { return newDriverDisplay(opts, before, false) },
+		func() (virtualDisplay, error) { return newDriverDisplay(opts, before, true) },
+		func() (virtualDisplay, error) { return newMirrorDisplay(before) },
+	)
+}
+
+func firstWindowsDisplay(candidates ...func() (virtualDisplay, error)) (virtualDisplay, error) {
+	var failures []error
+	for _, candidate := range candidates {
+		display, err := candidate()
+		if err == nil {
+			return display, nil
+		}
+		failures = append(failures, err)
+		log.Printf("Windows display backend unavailable; trying next fallback: %v", err)
+	}
+	return nil, errors.Join(failures...)
+}
+
+type monitorDevice interface {
+	AddMonitor(int, int, int, int, int) (int, error)
+	RemoveMonitor(int) error
+	Close()
+}
+
+func openMonitorDevice(parsec bool) (monitorDevice, error) {
+	if parsec {
+		return openParsecDevice()
+	}
+	return openIDDDevice()
+}
+
+func newDriverDisplay(opts videoOptions, before []displayOutput, parsec bool) (virtualDisplay, error) {
+	dev, err := openMonitorDevice(parsec)
 	if err != nil {
-		log.Printf("DrawSplay virtual display driver unavailable (%v); falling back to mirroring the primary display. Reinstall DrawSplay to restore extend mode (see README).", err)
-		return newMirrorDisplay(before)
+		return nil, err
 	}
 
 	w, h, hz, nativeW, nativeH := desiredDisplayMode(opts)
@@ -140,12 +173,12 @@ func newVirtualDisplay(opts videoOptions) (virtualDisplay, error) {
 	monitorID, out, err := plugIDDMonitor(dev, w, h, hz, nativeW, nativeH, knownOutputs)
 	if err != nil {
 		dev.Close()
-		log.Printf("Virtual display did not appear (%v); falling back to mirror mode", err)
-		return newMirrorDisplay(before)
+		waitForVDDOutputGone(knownOutputs, 3*time.Second)
+		return nil, err
 	}
 
-	log.Printf("Virtual display up: %s at %dx%d @ %d Hz (tablet native %dx%d; 720p-4K selectable in Windows Display Settings)",
-		out.DeviceName, w, h, hz, nativeW, nativeH)
+	log.Printf("Virtual display up: %s at %dx%d (requested %dx%d @ %d Hz; Parsec fallback=%v)",
+		out.DeviceName, out.Rect.Right-out.Rect.Left, out.Rect.Bottom-out.Rect.Top, w, h, hz, parsec)
 
 	// Baseline user-change detection on the mode actually active.
 	if aw, ah := int(out.Rect.Right-out.Rect.Left), int(out.Rect.Bottom-out.Rect.Top); aw > 0 && ah > 0 && (aw >= ah) == (w >= h) {
@@ -162,6 +195,7 @@ func newVirtualDisplay(opts videoOptions) (virtualDisplay, error) {
 		refreshHz:    hz,
 		nativeWidth:  nativeW,
 		nativeHeight: nativeH,
+		parsec:       parsec,
 	}, nil
 }
 
@@ -170,7 +204,7 @@ func newVirtualDisplay(opts videoOptions) (virtualDisplay, error) {
 // DXGI output to become attached, forcing the extend topology if Windows
 // leaves the new monitor inactive. knownOutputs is the set of GDI device
 // names attached before this session; the new output is the one not in it.
-func plugIDDMonitor(dev *iddDevice, w, h, hz, nativeW, nativeH int, knownOutputs map[string]bool) (int, displayOutput, error) {
+func plugIDDMonitor(dev monitorDevice, w, h, hz, nativeW, nativeH int, knownOutputs map[string]bool) (int, displayOutput, error) {
 	monitorID, err := dev.AddMonitor(w, h, hz, nativeW, nativeH)
 	if err != nil {
 		return -1, displayOutput{}, err
@@ -188,7 +222,9 @@ func plugIDDMonitor(dev *iddDevice, w, h, hz, nativeW, nativeH int, knownOutputs
 		out, err = waitForNewOutput(knownOutputs, vddOutputPollTimeout)
 	}
 	if err != nil {
-		_ = dev.RemoveMonitor(monitorID)
+		if removeErr := dev.RemoveMonitor(monitorID); removeErr != nil {
+			err = errors.Join(err, removeErr)
+		}
 		return -1, displayOutput{}, err
 	}
 	return monitorID, applyPluggedMode(out, w, h, hz), nil
@@ -304,7 +340,7 @@ func resolveVDDOutput(current displayOutput, knownOutputs map[string]bool, outpu
 
 // iddDisplay is a live DrawSplay IddCx virtual monitor.
 type iddDisplay struct {
-	dev          *iddDevice
+	dev          monitorDevice
 	monitorID    int
 	output       displayOutput
 	knownOutputs map[string]bool
@@ -313,6 +349,7 @@ type iddDisplay struct {
 	refreshHz    int
 	nativeWidth  int
 	nativeHeight int
+	parsec       bool
 }
 
 func (d *iddDisplay) Target() captureTarget { return targetFor(d.output) }
@@ -364,6 +401,11 @@ func (d *iddDisplay) noteUserMode(t captureTarget) {
 }
 
 func (d *iddDisplay) Description() string {
+	if d.parsec {
+		return fmt.Sprintf("virtual display %s (Parsec VDD fallback #%d, adapter %d output %d, %dx%d)",
+			d.output.DeviceName, d.monitorID, d.output.AdapterIndex, d.output.OutputIndex,
+			int(d.output.Rect.Right-d.output.Rect.Left), int(d.output.Rect.Bottom-d.output.Rect.Top))
+	}
 	return fmt.Sprintf("virtual display %s (DrawSplay IDD #%d, adapter %d output %d, %dx%d @ %d Hz)",
 		d.output.DeviceName, d.monitorID, d.output.AdapterIndex, d.output.OutputIndex,
 		int(d.output.Rect.Right-d.output.Rect.Left), int(d.output.Rect.Bottom-d.output.Rect.Top), d.refreshHz)
@@ -373,13 +415,11 @@ func (d *iddDisplay) Description() string {
 // driver tears down the old monitor when the control handle closes, so the
 // recovery is a clean open/add cycle.
 func (d *iddDisplay) Recover() error {
-	_ = d.dev.RemoveMonitor(d.monitorID)
-	waitForVDDOutputGone(d.knownOutputs, 3*time.Second)
-	d.dev.Close()
+	d.Close()
 
-	newDev, err := reopenIDDDevice(10 * time.Second)
+	newDev, err := reopenMonitorDevice(d.parsec, 10*time.Second)
 	if err != nil {
-		return fmt.Errorf("reopen IDD control device: %w", err)
+		return fmt.Errorf("reopen virtual-display control device (Parsec fallback=%v): %w", d.parsec, err)
 	}
 	monitorID, out, err := plugIDDMonitor(newDev, d.width, d.height, d.refreshHz, d.nativeWidth, d.nativeHeight, d.knownOutputs)
 	if err != nil {
@@ -387,7 +427,7 @@ func (d *iddDisplay) Recover() error {
 		return fmt.Errorf("replug virtual display after recovery: %w", err)
 	}
 	d.dev, d.monitorID, d.output = newDev, monitorID, out
-	log.Printf("Recovered DrawSplay virtual display as %s", d.output.DeviceName)
+	log.Printf("Recovered virtual display as %s (Parsec fallback=%v)", d.output.DeviceName, d.parsec)
 	return nil
 }
 
@@ -415,9 +455,15 @@ func (d *iddDisplay) FallbackToMirror() (virtualDisplay, error) {
 // diff misidentify the new output. Waiting here keeps handoffs deterministic:
 // one display out, then one display in.
 func (d *iddDisplay) Close() {
-	_ = d.dev.RemoveMonitor(d.monitorID)
+	if d.dev == nil {
+		return
+	}
+	if err := d.dev.RemoveMonitor(d.monitorID); err != nil {
+		log.Printf("Remove session virtual display (Parsec fallback=%v): %v", d.parsec, err)
+	}
 	waitForVDDOutputGone(d.knownOutputs, 3*time.Second)
 	d.dev.Close()
+	d.dev = nil
 }
 
 // reopenIDDDevice retries opening the control device while the driver
@@ -426,6 +472,24 @@ func reopenIDDDevice(timeout time.Duration) (*iddDevice, error) {
 	deadline := time.Now().Add(timeout)
 	for {
 		dev, err := openIDDDevice()
+		if err == nil {
+			return dev, nil
+		}
+
+		if time.Now().After(deadline) {
+			return nil, err
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func reopenMonitorDevice(parsec bool, timeout time.Duration) (monitorDevice, error) {
+	if !parsec {
+		return reopenIDDDevice(timeout)
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		dev, err := openParsecDevice()
 		if err == nil {
 			return dev, nil
 		}

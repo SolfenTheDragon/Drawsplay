@@ -58,8 +58,8 @@ func planUninstallDeps(m installManifest) uninstallDepsPlan {
 	p := uninstallDepsPlan{ParsecApp: parsecAppInstalled()}
 	_, _, haveUninstaller := parsecVDDUninstaller()
 	p.VDDPresent = haveUninstaller || len(scanParsecVDDInfs()) > 0
-	p.VDDOwned = m.VDDOwned
-	if dir, err := userStateDir(); err == nil && fileExists(filepath.Join(dir, vddOwnedMarkerName)) {
+	p.VDDOwned = m.ParsecVDDOwned
+	if dir, err := userStateDir(); err == nil && fileExists(filepath.Join(dir, parsecOwnedMarkerName)) {
 		p.VDDOwned = true
 	}
 	p.OwnedINFs, p.ZadigINFs = scanAOAWinUSBInfs()
@@ -130,12 +130,21 @@ func removeDrawSplayIddDriver(res *uninstallResult) {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("remove DrawSplay virtual display device: %v", err))
 	}
 	pnputil := system32Path("pnputil.exe")
+	packagesRemoved := true
 	for _, inf := range scanDrawSplayIddInfs() {
 		if err := runPnputilHidden(pnputil, "/delete-driver "+inf+" /uninstall /force"); err != nil {
+			packagesRemoved = false
 			res.Warnings = append(res.Warnings, fmt.Sprintf("delete driver package %s: %v", inf, err))
 		} else {
 			res.Removed = append(res.Removed, "DrawSplay virtual display driver "+inf)
 		}
+	}
+	if packagesRemoved {
+		if err := removeIDDSigningCerts(""); err != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("remove virtual display signing certificates: %v", err))
+		}
+	} else {
+		res.Warnings = append(res.Warnings, "Retained virtual display signing certificates because a driver package could not be removed; rerun uninstall after resolving the driver removal failure.")
 	}
 }
 

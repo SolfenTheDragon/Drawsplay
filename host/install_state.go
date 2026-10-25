@@ -78,6 +78,7 @@ type installManifest struct {
 	InstalledAt     time.Time         `json:"installedAt"`
 	VDDDriver       string            `json:"vddDriver,omitempty"`
 	VDDOwned        bool              `json:"vddOwned,omitempty"`
+	ParsecVDDOwned  bool              `json:"parsecVddOwned,omitempty"`
 	WinUSBTask      string            `json:"winusbTask,omitempty"`
 	DesktopShortcut string            `json:"desktopShortcut,omitempty"`
 	WinUSB          map[string]string `json:"winusb,omitempty"`
