@@ -18,6 +18,12 @@ func withVkmsSetupTest(t *testing.T, loaded, available bool, load func(f *fakeXr
 	f.outputs = f.outputs[:2]
 	withFakeX11Ext(t, f)
 	t.Setenv("XDG_SESSION_TYPE", "x11")
+	t.Setenv(vkmsAutoloadEnv, "1")
+	// Never touch the real DRM connectors from tests.
+	prevSysfs, prevForce := sysfsDRMDir, forceConnectorPrivileged
+	sysfsDRMDir = t.TempDir()
+	forceConnectorPrivileged = func(string, string, bool) error { return errors.New("forcing connectors is disabled in tests") }
+	t.Cleanup(func() { sysfsDRMDir, forceConnectorPrivileged = prevSysfs, prevForce })
 	var calls atomic.Int32
 	prevLoad, prevLoaded, prevAvail, prevPoll := vkmsLoadPrivileged, vkmsIsLoaded, vkmsIsAvailable, vkmsOutputPoll
 	vkmsOutputPoll = time.Millisecond
@@ -112,5 +118,14 @@ func TestEnsureX11VirtualDisplayIgnoresNonX11Sessions(t *testing.T) {
 	ensureX11VirtualDisplay("test", true)
 	if calls.Load() != 0 {
 		t.Fatalf("load calls = %d on a Wayland session", calls.Load())
+	}
+}
+
+func TestEnsureX11VirtualDisplayIsOptIn(t *testing.T) {
+	_, calls := withVkmsSetupTest(t, false, true, func(*fakeXrandr) error { return nil })
+	t.Setenv(vkmsAutoloadEnv, "")
+	ensureX11VirtualDisplay("test", true)
+	if calls.Load() != 0 {
+		t.Fatalf("vkms was loaded without opt-in (%d calls)", calls.Load())
 	}
 }

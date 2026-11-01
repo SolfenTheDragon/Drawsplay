@@ -6,8 +6,8 @@ package main
 // when an X11 session has no virtual RandR output. It runs when the host
 // starts and whenever a tablet is newly connected. Loading a module needs
 // root: the host uses root or passwordless sudo, and when a tablet connects it
-// may show one polkit password prompt, which also configures vkms to load at
-// boot. It never prompts at login.
+// may show one polkit password prompt. It never prompts at login. The whole
+// feature is opt-in (see vkmsAutoloadEnv).
 
 import (
 	"bytes"
@@ -27,6 +27,24 @@ const (
 	vkmsRetryCooldown = 2 * time.Minute
 	vkmsOutputWait    = 5 * time.Second
 )
+
+// vkmsAutoloadEnv opts in to loading vkms into a running X session. It is off
+// by default: on kernels such as 7.0 (Ubuntu OEM), the X server's modesetting
+// driver trips a kernel WARNING in vkms_prepare_fb (dma_buf_vmap) when it
+// first sets a mode on the new device, and hot-adding the module crashed the
+// desktop session. A user who has verified vkms on their kernel can set
+// DRAWSPLAY_X11_VKMS_AUTOLOAD=1; otherwise the tablet mirrors the desktop
+// unless a virtual output already exists (DRAWSPLAY_X11_OUTPUT, vkms loaded
+// by the user before X started, an Intel VIRTUAL output).
+const vkmsAutoloadEnv = "DRAWSPLAY_X11_VKMS_AUTOLOAD"
+
+func vkmsAutoloadEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(vkmsAutoloadEnv))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
 
 var errVkmsPromptDeclined = errors.New("the password prompt was dismissed")
 
@@ -82,32 +100,41 @@ func ensureX11VirtualDisplay(reason string, mayPrompt bool) {
 		return
 	}
 	defer refreshX11VkmsWarning()
-	if vkmsIsLoaded() {
-		// The module is there but the X server has not picked it up; only a
-		// new X session fixes that.
-		return
-	}
-	if !vkmsIsAvailable() {
-		return
-	}
-	log.Printf("X11 has no virtual display (%s); loading the vkms kernel module", reason)
-	if err := vkmsLoadPrivileged(mayPrompt); err != nil {
-		// A no-prompt attempt that lacked root must not start the cooldown,
-		// or it would block the prompt when a tablet connects soon after.
-		failed = mayPrompt || !errors.Is(err, errVkmsNeedsRoot)
-		log.Printf("Could not load vkms automatically: %v; the tablet will mirror the desktop", err)
-		return
-	}
-	deadline := time.Now().Add(vkmsOutputWait)
-	for !x11VirtualDisplayReady() {
-		if time.Now().After(deadline) {
-			failed = true
-			log.Printf("vkms is loaded but the X server shows no virtual output; log out and back in to use it")
+	if vkmsAutoloadEnabled() && !vkmsIsLoaded() && vkmsIsAvailable() {
+		// Opt-in only: see vkmsAutoloadEnv.
+		log.Printf("X11 has no virtual display (%s); loading the vkms kernel module", reason)
+		if err := vkmsLoadPrivileged(mayPrompt); err != nil {
+			// A no-prompt attempt that lacked root must not start the cooldown,
+			// or it would block the prompt when a tablet connects soon after.
+			failed = mayPrompt || !errors.Is(err, errVkmsNeedsRoot)
+			log.Printf("Could not load vkms automatically: %v; the tablet will mirror the desktop", err)
 			return
 		}
-		time.Sleep(vkmsOutputPoll)
+		deadline := time.Now().Add(vkmsOutputWait)
+		for !x11VirtualDisplayReady() {
+			if time.Now().After(deadline) {
+				failed = true
+				log.Printf("vkms is loaded but the X server shows no virtual output; log out and back in to use it")
+				return
+			}
+			time.Sleep(vkmsOutputPoll)
+		}
+		log.Printf("vkms loaded; the X11 virtual display is ready")
+		settleNewX11Output()
+		return
 	}
-	log.Printf("vkms loaded; the X11 virtual display is ready")
+	// Fallback for systems where vkms is unavailable, not picked up by the X
+	// server, or unsafe: use a spare, unplugged connector of the GPU.
+	if x11VirtualDisplayReady() {
+		return
+	}
+	if err := ensureForcedConnectorDisplay(reason, mayPrompt); err != nil {
+		failed = mayPrompt || !errors.Is(err, errVkmsNeedsRoot)
+		if !errors.Is(err, errNoSpareConnector) {
+			log.Printf("Could not set up a spare-connector virtual display: %v; the tablet will mirror the desktop", err)
+		}
+		return
+	}
 	settleNewX11Output()
 }
 
@@ -143,13 +170,10 @@ var vkmsLoadCommands = [][]string{
 	{"modprobe", "vkms"},
 }
 
-// vkmsLoadAndPersistScript loads vkms and, on success, configures it to load
-// at boot so the prompt is needed only once.
-const vkmsLoadAndPersistScript = `(modprobe vkms create_default_dev=1 || modprobe vkms) && {
-[ -e /etc/modprobe.d/drawsplay-vkms.conf ] || echo 'options vkms create_default_dev=1' > /etc/modprobe.d/drawsplay-vkms.conf
-[ -e /etc/modules-load.d/drawsplay-vkms.conf ] || echo vkms > /etc/modules-load.d/drawsplay-vkms.conf
-true
-}`
+// vkmsLoadAndPersistScript loads vkms (opt-in only, see vkmsAutoloadEnv).
+// It deliberately does not persist anything: loading vkms at boot would
+// expose every login to the kernel issue described at vkmsAutoloadEnv.
+const vkmsLoadAndPersistScript = `modprobe vkms create_default_dev=1 || modprobe vkms`
 
 // loadVkmsPrivileged loads vkms as root: directly, through passwordless sudo,
 // or, when mayPrompt is set, through one polkit (pkexec) password prompt that

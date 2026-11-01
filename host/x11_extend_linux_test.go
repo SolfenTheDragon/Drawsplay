@@ -616,6 +616,8 @@ func withFakeX11Ext(t *testing.T, f *fakeXrandr) *fakeX11Session {
 	prevRun, prevMap := xrandrRun, mapX11Tablet
 	prevHotplug, prevPoll, prevRounds := x11HotplugWait, x11SettlePoll, x11SettleRounds
 	prevWatch, prevGrace, prevRetry := x11WatchInterval, x11ReleaseGrace, x11SwitchOffRetry
+	prevStep := x11OfferSteppedSizes
+	x11OfferSteppedSizes = false
 	xrandrRun = f.run
 	mapX11Tablet = func(output string) bool {
 		s.mapped = append(s.mapped, output)
@@ -633,6 +635,7 @@ func withFakeX11Ext(t *testing.T, f *fakeXrandr) *fakeX11Session {
 		unbindSessionClientIdentity(sessionID)
 		resetX11Ext()
 		xrandrRun, mapX11Tablet = prevRun, prevMap
+		x11OfferSteppedSizes = prevStep
 		x11HotplugWait, x11SettlePoll, x11SettleRounds = prevHotplug, prevPoll, prevRounds
 		x11WatchInterval, x11ReleaseGrace, x11SwitchOffRetry = prevWatch, prevGrace, prevRetry
 	})
@@ -1382,4 +1385,54 @@ func TestX11ExtendedDisplaySwitchesOffAnOutputThatComesBackAfterTheSession(t *te
 		o.mode = "1920x1080"
 	})
 	waitUntil(t, "the second switch-off", func() bool { return switchOffAttempts(s.xrandr) >= 2 })
+}
+
+func TestX11OfferedSizesStepDownFromTheNativeSize(t *testing.T) {
+	for _, native := range [][2]int{{2960, 1848}, {1920, 1200}, {1280, 800}} {
+		got := x11OfferedSizes(native[0], native[1])
+		if len(got) == 0 || got[0] != native {
+			t.Fatalf("native %v: sizes = %v, want the native size first", native, got)
+		}
+		seen := map[[2]int]bool{}
+		prev := native[0] * native[1]
+		for _, sz := range got {
+			if sz[0] > native[0] || sz[1] > native[1] {
+				t.Errorf("native %v: %v exceeds the native size", native, sz)
+			}
+			if seen[sz] {
+				t.Errorf("native %v: %v listed twice", native, sz)
+			}
+			seen[sz] = true
+			if p := sz[0] * sz[1]; p > prev {
+				t.Errorf("native %v: %v is not in descending order", native, got)
+			} else {
+				prev = p
+			}
+		}
+		if native[0] >= 1280 && !seen[[2]int{1280, 800}] {
+			t.Errorf("native %v: 1280x800 missing from %v", native, got)
+		}
+	}
+	if got := x11OfferedSizes(0, 0); got != nil {
+		t.Errorf("unknown native size: sizes = %v, want none", got)
+	}
+}
+
+func TestX11ExtendedDisplayOffersSteppedSizesBelowTheNativeSize(t *testing.T) {
+	f := newFakeLaptopWithVKMS()
+	s := withFakeX11Ext(t, f)
+	x11OfferSteppedSizes = true
+	newTestX11Display(t, 1280, 800)
+	added := map[string]bool{}
+	for _, c := range s.xrandr.commands() {
+		var out, mode string
+		if n, _ := fmt.Sscanf(c, "--addmode %s %s", &out, &mode); n == 2 {
+			added[mode] = true
+		}
+	}
+	for _, want := range []string{"1280x800_drawsplay", "2960x1848_drawsplay", "1920x1200_drawsplay", "1680x1050_drawsplay"} {
+		if !added[want] {
+			t.Errorf("mode %s was not offered; offered %v", want, added)
+		}
+	}
 }

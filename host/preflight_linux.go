@@ -92,7 +92,7 @@ func refreshX11VkmsWarning() {
 
 func x11VirtualDisplayWarningFor(st xrandrState, loaded, available bool) string {
 	for _, o := range st.Outputs {
-		if !x11AutoOutputPattern.MatchString(o.Name) {
+		if !isX11VirtualOutputName(o.Name) {
 			continue
 		}
 		if strings.HasPrefix(o.Name, "Virtual-") && !o.Connected {

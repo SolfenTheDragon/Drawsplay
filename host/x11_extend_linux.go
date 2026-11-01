@@ -43,6 +43,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -264,7 +265,7 @@ func pickX11VirtualOutput(st xrandrState, name string) (xrandrOutput, error) {
 	} else {
 		primary := ""
 		for _, o := range st.Outputs {
-			if !x11AutoOutputPattern.MatchString(o.Name) {
+			if !isX11VirtualOutputName(o.Name) {
 				continue
 			}
 			// vkms always reports connected; the intel driver's VIRTUAL
@@ -302,6 +303,47 @@ func findX11Mode(o xrandrOutput, w, h int) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// x11OfferSteppedSizes is a seam for tests.
+var x11OfferSteppedSizes = true
+
+// x11StandardSizes are common display sizes offered below the tablet's
+// native size.
+var x11StandardSizes = [][2]int{
+	{1024, 768}, {1280, 720}, {1280, 800}, {1366, 768}, {1440, 900},
+	{1600, 900}, {1600, 1000}, {1680, 1050}, {1920, 1080}, {1920, 1200},
+	{2048, 1280}, {2560, 1440}, {2560, 1600}, {2736, 1824}, {2800, 1752},
+}
+
+// x11OfferedSizes lists the sizes to make selectable for a tablet of the
+// given native size, largest first: the native size, the standard sizes that
+// fit inside it, and steps of the native aspect ratio (80%, 2/3, 50%) with the width rounded to 8 and the height to 2.
+func x11OfferedSizes(nativeW, nativeH int) [][2]int {
+	if nativeW <= 0 || nativeH <= 0 {
+		return nil
+	}
+	seen := map[[2]int]bool{}
+	var out [][2]int
+	add := func(w, h int) {
+		sz := [2]int{w, h}
+		if w < 640 || h < 400 || w > nativeW || h > nativeH || seen[sz] {
+			return
+		}
+		seen[sz] = true
+		out = append(out, sz)
+	}
+	add(nativeW, nativeH)
+	for _, sz := range x11StandardSizes {
+		add(sz[0], sz[1])
+	}
+	for _, f := range [][2]int{{4, 5}, {2, 3}, {1, 2}} {
+		w := (nativeW*f[0]/f[1] + 4) / 8 * 8
+		h := (nativeH*f[0]/f[1] + 1) / 2 * 2
+		add(w, h)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i][0]*out[i][1] > out[j][0]*out[j][1] })
+	return out
 }
 
 func x11ModeName(w, h int) string {
@@ -651,12 +693,24 @@ func configureX11Extended(display, name string, w, h, nativeW, nativeH int) (x11
 			return res, fmt.Errorf("adding a %dx%d mode to %s: %w", w, h, out.Name, err)
 		}
 		hotplugged = hotplugged || added
-		if nativeW > 0 && nativeH > 0 && (nativeW != w || nativeH != h) {
-			// Offered so it can be picked in the display settings.
-			if _, added, err := ensureX11Mode(display, out, nativeW, nativeH); err != nil {
-				log.Printf("X11 extended display: could not offer the tablet's native %dx%d mode: %v", nativeW, nativeH, err)
-			} else {
-				hotplugged = hotplugged || added
+		if nativeW > 0 && nativeH > 0 {
+			// Offered so they can be picked in the display settings: the
+			// tablet's native size and the steps below it. An output with
+			// no EDID (a forced spare connector) lists nothing above
+			// 1024x768 by itself. A size the driver refuses is skipped.
+			offered := [][2]int{{nativeW, nativeH}}
+			if x11OfferSteppedSizes {
+				offered = x11OfferedSizes(nativeW, nativeH)
+			}
+			for _, sz := range offered {
+				if sz[0] == w && sz[1] == h {
+					continue // created above
+				}
+				if _, added, err := ensureX11Mode(display, out, sz[0], sz[1]); err != nil {
+					log.Printf("X11 extended display: could not offer a %dx%d mode: %v", sz[0], sz[1], err)
+				} else {
+					hotplugged = hotplugged || added
+				}
 			}
 		}
 		res.changed = res.changed || hotplugged
@@ -753,7 +807,7 @@ func x11FallbackOutput(st xrandrState, except string) (xrandrOutput, bool) {
 	var pick xrandrOutput
 	found := false
 	for _, o := range st.Outputs {
-		if o.Name == except || !o.Connected || x11AutoOutputPattern.MatchString(o.Name) {
+		if o.Name == except || !o.Connected || isX11VirtualOutputName(o.Name) {
 			continue
 		}
 		if o.Primary {
