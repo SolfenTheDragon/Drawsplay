@@ -13,6 +13,12 @@ import (
 )
 
 func TestVerifyEmbeddedIDDPackage(t *testing.T) {
+	// DrawSplayIdd.dll is a build output (*.dll is git-ignored), so a plain
+	// checkout, such as CI, embeds only the INF and catalog. The host runs
+	// without the driver in that case, so there is nothing to verify.
+	if _, err := embeddedDriver.ReadFile("driver/idd/DrawSplayIdd.dll"); err != nil {
+		t.Skip("the driver DLL is not embedded in this build: " + err.Error())
+	}
 	dir := t.TempDir()
 	if _, err := extractEmbeddedDriver(dir); err != nil {
 		t.Fatal(err)
