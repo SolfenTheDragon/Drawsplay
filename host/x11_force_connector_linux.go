@@ -188,3 +188,26 @@ func writeConnectorStatusPrivileged(path, value string, mayPrompt bool) error {
 	}
 	return err
 }
+
+// releaseForcedConnectors returns every spare connector that is forced on
+// (connected without an EDID, which a real monitor always has) to the
+// kernel's own detection, so no phantom HDMI monitor outlives the host. It
+// never prompts: with no root access it reports the failure and leaves the
+// connector for the uninstaller or the next host start to clear. It reports
+// how many connectors it released.
+func releaseForcedConnectors() int {
+	released := 0
+	for _, c := range listHDMIConnectors() {
+		if c.Status != "connected" || !c.NoEDID {
+			continue
+		}
+		if err := forceConnectorPrivileged(filepath.Join(c.Dir, "status"), "detect", false); err != nil {
+			log.Printf("Could not release the forced connector %s: %v (run: echo detect | sudo tee %s)",
+				c.XName, err, filepath.Join(c.Dir, "status"))
+			continue
+		}
+		log.Printf("Released the forced connector %s", c.XName)
+		released++
+	}
+	return released
+}

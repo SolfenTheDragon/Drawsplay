@@ -99,3 +99,30 @@ func TestConnectorWriteRejectsOddPaths(t *testing.T) {
 		t.Fatal("accepted an arbitrary value")
 	}
 }
+
+func TestReleaseForcedConnectors(t *testing.T) {
+	fakeSysfsDRM(t, "connected", nil)
+	var wrote []string
+	prev := forceConnectorPrivileged
+	forceConnectorPrivileged = func(path, value string, mayPrompt bool) error {
+		if mayPrompt {
+			t.Fatal("release on exit must never prompt")
+		}
+		wrote = append(wrote, value)
+		return nil
+	}
+	t.Cleanup(func() { forceConnectorPrivileged = prev })
+	if n := releaseForcedConnectors(); n != 1 || len(wrote) != 1 || wrote[0] != "detect" {
+		t.Fatalf("released %d, wrote %v", n, wrote)
+	}
+}
+
+func TestReleaseForcedConnectorsLeavesRealMonitors(t *testing.T) {
+	fakeSysfsDRM(t, "connected", []byte{0, 0xff, 0xff})
+	prev := forceConnectorPrivileged
+	forceConnectorPrivileged = func(string, string, bool) error { t.Fatal("must not touch a real monitor"); return nil }
+	t.Cleanup(func() { forceConnectorPrivileged = prev })
+	if n := releaseForcedConnectors(); n != 0 {
+		t.Fatalf("released %d", n)
+	}
+}

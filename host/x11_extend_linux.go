@@ -969,6 +969,7 @@ func releaseVirtualDisplaysOnExit() {
 	verifyX11ReleasedLocked()
 	switchOffX11OutputsLocked()
 	x11Ext.mu.Unlock()
+	releaseForcedConnectors()
 	releaseMutterOnExit()
 	releaseWlExtOnExit()
 }
