@@ -6,8 +6,8 @@ package main
 // when an X11 session has no virtual RandR output. It runs when the host
 // starts and whenever a tablet is newly connected. Loading a module needs
 // root: the host uses root or passwordless sudo, and when a tablet connects it
-// may show one polkit password prompt. It never prompts at login. The whole
-// feature is opt-in (see vkmsAutoloadEnv).
+// may show one polkit password prompt. It never prompts at login. See vkmsAutoloadEnv
+// for when it is skipped.
 
 import (
 	"bytes"
@@ -28,17 +28,27 @@ const (
 	vkmsOutputWait    = 5 * time.Second
 )
 
-// vkmsAutoloadEnv opts in to loading vkms into a running X session. It is off
-// by default: on kernels such as 7.0 (Ubuntu OEM), the X server's modesetting
-// driver trips a kernel WARNING in vkms_prepare_fb (dma_buf_vmap) when it
-// first sets a mode on the new device, and hot-adding the module crashed the
-// desktop session. A user who has verified vkms on their kernel can set
-// DRAWSPLAY_X11_VKMS_AUTOLOAD=1; otherwise the tablet mirrors the desktop
-// unless a virtual output already exists (DRAWSPLAY_X11_OUTPUT, vkms loaded
-// by the user before X started, an Intel VIRTUAL output).
+// vkmsAutoloadEnv controls loading vkms into a running X session. vkms is
+// the primary virtual display and loading it is on by default; the spare
+// HDMI connector is the fallback. Because on kernels such as 7.0 (Ubuntu OEM)
+// the X server's modesetting driver trips a kernel WARNING in
+// vkms_prepare_fb (dma_buf_vmap) when it first sets a mode on the new device,
+// vkms is guarded (x11_display_guard_linux.go): a failure in the kernel log
+// or an interrupted setup turns it off for that kernel, and the fallback
+// takes over. "0" turns loading off for good; "1" additionally overrides the
+// guard for a user who has verified vkms on their kernel.
 const vkmsAutoloadEnv = "DRAWSPLAY_X11_VKMS_AUTOLOAD"
 
 func vkmsAutoloadEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(vkmsAutoloadEnv))) {
+	case "0", "false", "no", "off":
+		return false
+	}
+	return true
+}
+
+// vkmsForcedByUser reports an explicit opt-in that overrides the guard.
+func vkmsForcedByUser() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(vkmsAutoloadEnv))) {
 	case "1", "true", "yes", "on":
 		return true
@@ -100,9 +110,11 @@ func ensureX11VirtualDisplay(reason string, mayPrompt bool) {
 		return
 	}
 	defer refreshX11VkmsWarning()
-	if vkmsAutoloadEnabled() && !vkmsIsLoaded() && vkmsIsAvailable() {
-		// Opt-in only: see vkmsAutoloadEnv.
+	if vkmsAutoloadEnabled() && !vkmsBlockedFn() && !vkmsIsLoaded() && vkmsIsAvailable() {
+		// Primary method; guarded: see vkmsAutoloadEnv.
 		log.Printf("X11 has no virtual display (%s); loading the vkms kernel module", reason)
+		displayGuardBegin(guardMethodVkms)
+		defer displayGuardEnd(guardMethodVkms)
 		if err := vkmsLoadPrivileged(mayPrompt); err != nil {
 			// A no-prompt attempt that lacked root must not start the cooldown,
 			// or it would block the prompt when a tablet connects soon after.
@@ -128,7 +140,14 @@ func ensureX11VirtualDisplay(reason string, mayPrompt bool) {
 	if x11VirtualDisplayReady() {
 		return
 	}
-	if err := ensureForcedConnectorDisplay(reason, mayPrompt); err != nil {
+	if why, denied := displayGuardDenied(guardMethodForcedConnector); denied {
+		log.Printf("Not using a spare connector as a virtual display: %s; the tablet will mirror the desktop", why)
+		return
+	}
+	displayGuardBegin(guardMethodForcedConnector)
+	err := ensureForcedConnectorDisplay(reason, mayPrompt)
+	displayGuardEnd(guardMethodForcedConnector)
+	if err != nil {
 		failed = mayPrompt || !errors.Is(err, errVkmsNeedsRoot)
 		if !errors.Is(err, errNoSpareConnector) {
 			log.Printf("Could not set up a spare-connector virtual display: %v; the tablet will mirror the desktop", err)

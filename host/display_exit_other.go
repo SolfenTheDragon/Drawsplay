@@ -10,3 +10,7 @@ func releaseVirtualDisplaysOnExit() {}
 // its displays itself when the host process stops pinging it, and the GNOME
 // virtual monitor dies with the host's D-Bus connection.
 func releaseStaleVirtualDisplays() {}
+
+// recoverDisplayGuard is a no-op here: the crash-recovery guard covers the
+// Linux X11 virtual display methods only (see x11_display_guard_linux.go).
+func recoverDisplayGuard() {}
