@@ -28,6 +28,18 @@ object EchoTracker {
         return seq
     }
 
+    /**
+     * When input [seq] was sent (System.nanoTime), or 0 when it is unknown or
+     * too old. Input is sent in order, so everything recorded before this
+     * time was sent no later than [seq].
+     */
+    fun sentTimeNs(seq: Int): Long = synchronized(this) {
+        if (seq == 0) return 0L
+        val newest = counter.get()
+        if (newest - seq !in 0 until RING) return 0L
+        sentNs[seq and (RING - 1)]
+    }
+
     /** Called when a frame whose capture saw input [seq] arrives. */
     fun onFrameMeta(seq: Int, nowNs: Long = System.nanoTime()) {
         if (seq == 0) return

@@ -1,12 +1,19 @@
 ﻿package com.drawsplay.tablet.input
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
 import android.os.SystemClock
 import android.os.Build
 import android.util.AttributeSet
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
+import com.drawsplay.tablet.video.CursorPacket
+import com.drawsplay.tablet.video.EchoTracker
 
 /**
  * One captured input sample, ready for serialization on the input channel.
@@ -64,6 +71,171 @@ class InputPadView(context: Context, attrs: AttributeSet? = null) : View(context
         }
 
     private val predictor = PenPredictor()
+
+    // ---------------------------------------------------------------
+    // Instant ink preview (host web UI "Instant pen ink preview").
+    //
+    // Stylus contact strokes are drawn here at once as a thin neutral line
+    // and erased piece by piece once the host's own rendering of them is on
+    // screen (see PenInkTrail), so ink appears with tablet-local latency
+    // instead of after the full capture/encode/decode round trip. Off: no
+    // preview is drawn at all.
+
+    @Volatile
+    var penInkPreviewEnabled: Boolean = false
+        set(value) {
+            field = value
+            if (!value) post {
+                ink.clear()
+                invalidate()
+            }
+        }
+
+    private val ink = PenInkTrail()
+    private val inkPredictor = PenPredictor()
+    private var inkReflectionsSeen = false
+    private val density = context.resources.displayMetrics.density
+    private val inkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        strokeWidth = INK_WIDTH_DP * density
+        color = INK_COLOR
+    }
+    private val inkPath = Path()
+
+    /**
+     * A video frame showing the host's state after input [inputSeq] is on
+     * screen (UI thread). Erases the preview the host has caught up with,
+     * one display refresh later so the frame has actually been presented.
+     */
+    fun onHostFrameShown(inputSeq: Int) {
+        if (!penInkPreviewEnabled) return
+        val sentNs = EchoTracker.sentTimeNs(inputSeq)
+        if (sentNs == 0L) return
+        inkReflectionsSeen = true
+        postDelayed({
+            if (ink.eraseReflected(sentNs)) invalidate()
+        }, refreshIntervalMs())
+    }
+
+    private fun refreshIntervalMs(): Long {
+        val hz = display?.refreshRate ?: 60f
+        return (1000f / hz.coerceAtLeast(30f)).toLong().coerceAtLeast(1L)
+    }
+
+    private fun recordInk(event: MotionEvent) {
+        if (!penInkPreviewEnabled) return
+        val idx = event.actionIndex.coerceAtLeast(0)
+        if (event.getToolType(idx) != MotionEvent.TOOL_TYPE_STYLUS) return
+        val now = System.nanoTime()
+        fun point(x: Float, y: Float, p: Float) = PenInkTrail.Point(x, y, p, now)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                inkPredictor.reset()
+                ink.begin(point(event.getX(idx), event.getY(idx), event.getPressure(idx)))
+                inkPredictor.record(event.getX(idx), event.getY(idx), event.eventTime)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                for (h in 0 until event.historySize) {
+                    ink.add(point(event.getHistoricalX(idx, h), event.getHistoricalY(idx, h), event.getHistoricalPressure(idx, h)))
+                    inkPredictor.record(event.getHistoricalX(idx, h), event.getHistoricalY(idx, h), event.getHistoricalEventTime(h))
+                }
+                ink.add(point(event.getX(idx), event.getY(idx), event.getPressure(idx)))
+                inkPredictor.record(event.getX(idx), event.getY(idx), event.eventTime)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (event.actionMasked == MotionEvent.ACTION_UP) {
+                    ink.add(point(event.getX(idx), event.getY(idx), event.getPressure(idx)))
+                }
+                ink.end()
+                inkPredictor.reset()
+            }
+            else -> return
+        }
+        invalidate()
+    }
+
+    // ---------------------------------------------------------------
+    // Host cursor overlay (video packet type 5, client feature cursor1):
+    // the Windows helper sends the cursor separately instead of encoding it
+    // into the video, and it is drawn here in host-frame coordinates scaled
+    // to this view (which covers the video exactly).
+
+    private var cursorBitmap: Bitmap? = null
+    private var cursorShapeId = 0
+    private var cursorVisible = false
+    private var cursorX = 0
+    private var cursorY = 0
+    private var videoWidth = 0
+    private var videoHeight = 0
+    private val cursorPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val cursorRect = RectF()
+
+    /** Size of the host frames, for cursor coordinates (UI thread). */
+    fun setVideoSize(width: Int, height: Int) {
+        videoWidth = width
+        videoHeight = height
+        invalidate()
+    }
+
+    /** Applies a cursor update from the host (UI thread). */
+    fun showCursor(packet: CursorPacket) {
+        packet.shape?.let { s ->
+            cursorBitmap = Bitmap.createBitmap(s.argb, s.width, s.height, Bitmap.Config.ARGB_8888)
+            cursorShapeId = packet.shapeId
+        }
+        cursorVisible = packet.visible && cursorBitmap != null && cursorShapeId == packet.shapeId
+        cursorX = packet.x
+        cursorY = packet.y
+        invalidate()
+    }
+
+    /** Hides the overlay: a new stream may carry the cursor in its frames. */
+    fun hideCursor() {
+        if (!cursorVisible && cursorBitmap == null) return
+        cursorVisible = false
+        cursorBitmap = null
+        invalidate()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        drawInk(canvas)
+        drawCursor(canvas)
+    }
+
+    private fun drawInk(canvas: Canvas) {
+        if (ink.isEmpty) return
+        val maxAge = if (inkReflectionsSeen) PenInkTrail.MAX_AGE_NS else PenInkTrail.UNREFLECTED_MAX_AGE_NS
+        ink.eraseOlderThan(System.nanoTime(), maxAge)
+        for (stroke in ink.strokes) {
+            val start = stroke.anchor ?: stroke.points.firstOrNull() ?: continue
+            inkPath.reset()
+            inkPath.moveTo(start.x, start.y)
+            for (p in stroke.points) inkPath.lineTo(p.x, p.y)
+            if (stroke.open) {
+                // A few milliseconds of extrapolated stroke hide the last
+                // bit of input-to-display delay.
+                inkPredictor.predict()?.let { inkPath.lineTo(it.x, it.y) }
+            }
+            if (stroke.points.size == 1 && stroke.anchor == null) {
+                inkPath.lineTo(start.x + 0.1f, start.y) // a dot for a tap
+            }
+            canvas.drawPath(inkPath, inkPaint)
+        }
+        // Keep ageing out ink even when no new input or frames arrive.
+        if (!ink.isEmpty) postInvalidateOnAnimation()
+    }
+
+    private fun drawCursor(canvas: Canvas) {
+        val bmp = cursorBitmap ?: return
+        if (!cursorVisible || videoWidth <= 0 || videoHeight <= 0) return
+        val sx = width.toFloat() / videoWidth
+        val sy = height.toFloat() / videoHeight
+        cursorRect.set(cursorX * sx, cursorY * sy, (cursorX + bmp.width) * sx, (cursorY + bmp.height) * sy)
+        canvas.drawBitmap(bmp, null, cursorRect, cursorPaint)
+    }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
@@ -146,12 +318,22 @@ class InputPadView(context: Context, attrs: AttributeSet? = null) : View(context
         }
 
         trackTouches(event, packets)
+        // Ink is recorded before the batch is queued for sending, so every
+        // point's time precedes its send time (see PenInkTrail).
+        recordInk(event)
         onInputBatch?.invoke(packets)
 
         if (event.actionMasked == MotionEvent.ACTION_UP) {
             performClick()
         }
         return true
+    }
+
+    private companion object {
+        const val INK_WIDTH_DP = 2.5f
+        // Neutral grey that reads on light and dark canvases; it is only
+        // visible until the host's own stroke replaces it.
+        const val INK_COLOR = 0xB0707070.toInt()
     }
 
     override fun performClick(): Boolean {

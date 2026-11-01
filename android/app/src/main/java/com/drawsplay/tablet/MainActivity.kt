@@ -41,6 +41,7 @@ import com.drawsplay.tablet.input.InputPadView
 import com.drawsplay.tablet.transport.AccessoryTransport
 import com.drawsplay.tablet.transport.HostEndpointSelector
 import com.drawsplay.tablet.transport.WiFiDiscoveryManager
+import com.drawsplay.tablet.video.CursorPacket
 import com.drawsplay.tablet.video.VideoChannel
 import com.drawsplay.tablet.video.VideoScaling
 
@@ -214,9 +215,11 @@ class MainActivity : AppCompatActivity() {
                 wifiAuthToken: String,
                 wifiTlsRequired: Boolean,
                 wifiTlsFingerprint: String,
-                penPrediction: Boolean
+                penPrediction: Boolean,
+                penInkPreview: Boolean
             ) {
                 inputPad.penPredictionEnabled = penPrediction
+                inputPad.penInkPreviewEnabled = penInkPreview
                 applySessionPolicy(
                     keepAliveOnBackground,
                     wifiEnabled,
@@ -268,8 +271,19 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     videoWidth = width
                     videoHeight = height
+                    inputPad.setVideoSize(width, height)
                     applyVideoLayout()
                 }
+            }
+
+            override fun onHostCursor(packet: CursorPacket?) {
+                inputPad.post {
+                    if (packet == null) inputPad.hideCursor() else inputPad.showCursor(packet)
+                }
+            }
+
+            override fun onHostFrameShown(inputSeq: Int) {
+                inputPad.post { inputPad.onHostFrameShown(inputSeq) }
             }
         }, endpointSelector) { appForeground }
         wifiDiscoveryManager = WiFiDiscoveryManager(

@@ -46,7 +46,8 @@ class InputChannel(
             wifiAuthToken: String,
             wifiTlsRequired: Boolean,
             wifiTlsFingerprint: String,
-            penPrediction: Boolean
+            penPrediction: Boolean,
+            penInkPreview: Boolean
         )
     }
 
@@ -312,7 +313,10 @@ class InputChannel(
                     obj.optString("wifiAuthToken", ""),
                     obj.optBoolean("wifiTlsRequired", false),
                     obj.optString("wifiTlsFingerprint", ""),
-                    obj.optBoolean("penPrediction", false)
+                    obj.optBoolean("penPrediction", false),
+                    // Hosts without the setting predate the preview's
+                    // reconciliation support: keep it off for them.
+                    obj.optBoolean("penInkPreview", false)
                 )
             }
         } catch (_: Exception) {
@@ -440,7 +444,12 @@ class InputChannel(
             // the app replies with modePrefs for that host.
             put("hostPrefs", true)
             put("videoCodecs", advertisedVideoCodecs())
-            put("videoFeatures", JSONArray().put("tile1").put("meta1"))
+            // ack1: the video channel sends cumulative frame acks upstream
+            // (FrameAckReporter) for the host's in-flight frame window, and
+            // asks for keyframes when it drops pictures.
+            // cursor1: the host cursor may arrive as video packet 5 and is
+            // drawn by InputPadView instead of being encoded into frames.
+            put("videoFeatures", JSONArray().put("tile1").put("meta1").put("ack1").put("cursor1"))
             put("inputProtocol", "mux-v1")
             put("timestamp", System.currentTimeMillis())
             if (!endpoint?.authToken.isNullOrBlank()) {

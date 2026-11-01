@@ -63,6 +63,19 @@ class VideoChannel(
 
         /** The lossless tile layer should be shown or hidden (UI thread not guaranteed). */
         fun onTileLayerVisible(visible: Boolean) {}
+
+        /**
+         * Host cursor update (video packet 5); null hides the overlay, e.g.
+         * when a new stream starts that may draw the cursor into its frames.
+         * Not on the UI thread.
+         */
+        fun onHostCursor(packet: CursorPacket?) {}
+
+        /**
+         * A decoded frame showing the host's state after input [inputSeq]
+         * is being presented (frame metadata). Not on the UI thread.
+         */
+        fun onHostFrameShown(inputSeq: Int) {}
     }
 
     /** Receives tile pictures; null keeps the tile packets unused. */
@@ -193,7 +206,30 @@ class VideoChannel(
                 onPictureReady = listener::onPictureReady
             )
             val decoder = VideoDecoder(renderSurface, onPictureReady = pictureReady::signal) { w, h -> listener.onVideoSize(w, h) }
-            val statsThread = startStatsReporter(socket, decoder)
+            val upstreamLock = Any()
+            val statsThread = startStatsReporter(socket, decoder, upstreamLock)
+            val acks = FrameAckReporter(socket.getOutputStream(), upstreamLock, decoder::ackedFrames)
+            // Frame metadata (input sequence per picture) waiting for its
+            // picture to leave the decoder; one entry per access unit.
+            val pendingMeta = ArrayDeque<Int>()
+            var shownFrames = decoder.finishedFrames()
+            decoder.onFramesAcked = acks::notifyFinished
+            decoder.onFramesFinished = { shown ->
+                var seq = 0
+                synchronized(pendingMeta) {
+                    val done = decoder.finishedFrames()
+                    while (shownFrames < done) {
+                        shownFrames++
+                        pendingMeta.removeFirstOrNull()?.let { seq = it }
+                    }
+                }
+                // Only a picture actually on screen tells the ink preview
+                // that the host's stroke is visible; drops just consume
+                // their metadata.
+                if (shown && seq != 0) listener.onHostFrameShown(seq)
+            }
+            decoder.onRandomAccessWanted = acks::requestKeyframe
+            acks.start()
             val tiles = tileSink?.let { TileDecoder(PictureReadyTileSink(it, pictureReady)) }
             var tileModeActive = false
             try {
@@ -206,6 +242,19 @@ class VideoChannel(
                     val payload = ByteArray(length)
                     input.readFully(payload)
 
+                    when (type) {
+                        PACKET_CONFIG -> {
+                            // A (re)started pipeline: it may draw the cursor
+                            // into its frames, and old metadata no longer
+                            // lines up with pictures.
+                            listener.onHostCursor(null)
+                            synchronized(pendingMeta) {
+                                pendingMeta.clear()
+                                shownFrames = decoder.finishedFrames()
+                            }
+                        }
+                        else -> {}
+                    }
                     when (type) {
                         PACKET_CONFIG -> handleConfig(payload, decoder) { encoder, fps ->
                             mainHandler.post {
@@ -226,8 +275,14 @@ class VideoChannel(
                             hideTileLayerAfterNextRender(decoder, baseline, gen)
                         }
                         PACKET_FRAME_META -> if (payload.size >= 4) {
-                            EchoTracker.onFrameMeta(java.nio.ByteBuffer.wrap(payload).int)
+                            val seq = java.nio.ByteBuffer.wrap(payload).int
+                            EchoTracker.onFrameMeta(seq)
+                            synchronized(pendingMeta) {
+                                pendingMeta.addLast(seq)
+                                if (pendingMeta.size > MAX_PENDING_META) pendingMeta.removeFirst()
+                            }
                         }
+                        PACKET_CURSOR -> CursorPacket.parse(payload)?.let(listener::onHostCursor)
                         else -> Log.w(TAG, "Unknown video packet type $type")
                     }
                 }
@@ -237,6 +292,11 @@ class VideoChannel(
                 pictureReady.close()
                 activeSocket = null
                 statsThread.interrupt()
+                decoder.onFramesFinished = null
+                decoder.onFramesAcked = null
+                decoder.onRandomAccessWanted = null
+                acks.stop()
+                listener.onHostCursor(null)
                 tiles?.release()
                 if (tileModeActive) listener.onTileLayerVisible(false)
                 decoder.release()
@@ -256,7 +316,7 @@ class VideoChannel(
      * a fast dead-peer signal. Reporter failures end silently â€” the reader
      * side will notice a dead socket on its own.
      */
-    private fun startStatsReporter(socket: Socket, decoder: VideoDecoder): Thread {
+    private fun startStatsReporter(socket: Socket, decoder: VideoDecoder, writeLock: Any): Thread {
         val output = socket.getOutputStream()
         val thread = Thread({
             try {
@@ -279,8 +339,10 @@ class VideoChannel(
                         put("appForeground", isAppForeground())
                         EchoTracker.medianMs().takeIf { it > 0 }?.let { put("echoMs", it) }
                     }.toString() + "\n"
-                    output.write(line.toByteArray(Charsets.UTF_8))
-                    output.flush()
+                    synchronized(writeLock) {
+                        output.write(line.toByteArray(Charsets.UTF_8))
+                        output.flush()
+                    }
                 }
             } catch (_: InterruptedException) {
             } catch (e: Exception) {
@@ -393,6 +455,8 @@ class VideoChannel(
         private const val PACKET_TILE = 2
         private const val PACKET_MODE = 3
         private const val PACKET_FRAME_META = 4
+        private const val PACKET_CURSOR = 5
+        private const val MAX_PENDING_META = 64
         private const val MAX_PACKET_BYTES = 8 * 1024 * 1024
     }
 }

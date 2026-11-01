@@ -119,6 +119,66 @@ class VideoDecoder(
     private val frameDrops = AtomicLong(0)
     private val staleFrames = AtomicLong(0)
 
+    // Pictures this decoder is done with: decoded (shown or not), or dropped
+    // before decoding by the backlog/stale policies. Pairs frame metadata
+    // with pictures for the ink preview.
+    private val framesFinished = AtomicLong(0)
+
+    // Pictures acknowledged to the host: handed to the codec, or dropped
+    // before decoding. Counted at codec input, not output, because hardware
+    // decoders hold their last frame or two until more input arrives; acking
+    // at output would leave those unacknowledged whenever the screen stops
+    // changing, so the host's frame window would stay full and the next
+    // change would wait for its stall guard (a ~1 s hiccup). Pictures waiting
+    // for a free codec input buffer are still unacknowledged, so a decoder
+    // that cannot keep up still holds the host back.
+    private val framesAcked = AtomicLong(0)
+
+    /** Called (decoder or reader thread) whenever [ackedFrames] grows. */
+    @Volatile
+    var onFramesAcked: (() -> Unit)? = null
+
+    /** Pictures acknowledged to the host so far (monotonic). */
+    fun ackedFrames(): Long = framesAcked.get()
+
+    private fun ackFrames(n: Long) {
+        if (n <= 0) return
+        framesAcked.addAndGet(n)
+        onFramesAcked?.invoke()
+    }
+
+    /**
+     * Called (on a decoder or reader thread) whenever [finishedFrames]
+     * grows; `shown` is true only for a picture released to the display
+     * (drops and stale outputs pass false).
+     */
+    @Volatile
+    var onFramesFinished: ((shown: Boolean) -> Unit)? = null
+
+    /**
+     * Called whenever a picture was discarded so the stream needs a keyframe
+     * to be correct again (backlog dropped, oversized NAL, no decoder yet).
+     * Native host helpers send keyframes only on request, so the channel
+     * asks the host for one; repeats are rate-limited there.
+     */
+    @Volatile
+    var onRandomAccessWanted: (() -> Unit)? = null
+
+    /** Pictures received and finished with so far (monotonic). */
+    fun finishedFrames(): Long = framesFinished.get()
+
+    /**
+     * [n] pictures are done with. Drops (the default) never reach the codec,
+     * so they are acknowledged here too; decoded outputs were acknowledged
+     * when queued ([ack] = false).
+     */
+    private fun finishFrames(n: Long, shown: Boolean = false, ack: Boolean = true) {
+        if (n <= 0) return
+        framesFinished.addAndGet(n)
+        if (ack) ackFrames(n)
+        onFramesFinished?.invoke(shown)
+    }
+
     /** One harvested statistics interval (all values are deltas). */
     data class Stats(
         val framesReceived: Long,
@@ -309,6 +369,9 @@ class VideoDecoder(
         }
         Log.e(TAG, "No decoder for $mime accepted any configuration", lastError)
         if (consecutiveHwFailures < MAX_HW_FAILURES) consecutiveHwFailures++
+        // The next attempt (possibly in software) needs the next keyframe's
+        // parameter sets; with keyframes on request that must be asked for.
+        onRandomAccessWanted?.invoke()
     }
 
     private fun createDecoder(candidate: DecoderCandidate, mime: String): MediaCodec {
@@ -364,7 +427,17 @@ class VideoDecoder(
     }
 
     private fun queueForDecode(nal: ByteArray, countFrame: Boolean) {
-        val c = codec ?: return
+        val c = codec ?: run {
+            // No decoder yet (waiting for parameter sets): the picture is
+            // discarded, so it is finished as far as the host is concerned.
+            if (countFrame && DecoderBacklogPolicy.startsPicture(nal, streamCodec)) {
+                finishFrames(1)
+                // Configuration needs fresh parameter sets, which arrive
+                // with a keyframe.
+                onRandomAccessWanted?.invoke()
+            }
+            return
+        }
         if (countFrame) framesReceived.incrementAndGet()
         synchronized(pendingLock) {
             enqueuePendingLocked(nal)
@@ -393,7 +466,12 @@ class VideoDecoder(
         val info = DecoderBacklogPolicy.inspect(nal, streamCodec)
         if (awaitingRandomAccess) {
             if (!info.isRandomAccessStart) {
-                if (info.startsPicture) staleFrames.incrementAndGet()
+                if (info.startsPicture) {
+                    staleFrames.incrementAndGet()
+                    finishFrames(1)
+                    // Keep asking while waiting (the reporter spaces repeats).
+                    onRandomAccessWanted?.invoke()
+                }
                 return
             }
             enqueueRecoveryParameterSetsLocked()
@@ -417,11 +495,14 @@ class VideoDecoder(
         pending.clear()
         result.retained.forEach(pending::addLast)
         val retainedPictures = DecoderBacklogPolicy.countPictureStarts(pending, streamCodec)
-        staleFrames.addAndGet((pendingPictureStarts - retainedPictures).coerceAtLeast(0).toLong())
+        val trimmed = (pendingPictureStarts - retainedPictures).coerceAtLeast(0).toLong()
+        staleFrames.addAndGet(trimmed)
+        finishFrames(trimmed)
         pendingPictureStarts = retainedPictures
         awaitingRandomAccess = result.awaitRandomAccess
         if (awaitingRandomAccess) {
             Log.w(TAG, "Decoder backlog dropped; waiting for next random-access frame")
+            onRandomAccessWanted?.invoke()
         }
     }
 
@@ -437,6 +518,7 @@ class VideoDecoder(
         result.retained.forEach(pending::addLast)
         pendingPictureStarts = DecoderBacklogPolicy.countPictureStarts(pending, streamCodec)
         staleFrames.addAndGet(result.droppedPictures.toLong())
+        finishFrames(result.droppedPictures.toLong())
         Log.i(TAG, "Skipped ${result.droppedPictures} stale pictures to a queued keyframe")
     }
 
@@ -461,6 +543,11 @@ class VideoDecoder(
                     // decoder that ignores the hint must not crash the feed.
                     Log.w(TAG, "NAL (${nal.size} B) exceeds input buffer (${buffer.capacity()} B); dropped")
                     freeInputs.addFirst(index)
+                    if (startsPicture) finishFrames(1)
+                    // Pictures after this one reference what was lost: skip
+                    // them and ask for a keyframe instead of showing damage.
+                    awaitingRandomAccess = true
+                    onRandomAccessWanted?.invoke()
                     continue
                 }
                 buffer.clear()
@@ -468,7 +555,10 @@ class VideoDecoder(
                 val ptsUs = maxOf(System.nanoTime() / 1000, lastInputPtsUs + 1)
                 lastInputPtsUs = ptsUs
                 c.queueInputBuffer(index, 0, nal.size, ptsUs, 0)
-                if (startsPicture) staleFrameTracker.onPictureQueued(ptsUs)
+                if (startsPicture) {
+                    staleFrameTracker.onPictureQueued(ptsUs)
+                    ackFrames(1)
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "queueInputBuffer failed", e)
                 return
@@ -520,6 +610,7 @@ class VideoDecoder(
                     nowNs = nowNs
                 )
             }
+            var shown = false
             try {
                 if (fps > 0 && renderMode == "smooth") {
                     // Paced release: keep an even presentation cadence at the
@@ -540,11 +631,13 @@ class VideoDecoder(
                     val presentDelayUs = (renderAt - now).coerceAtLeast(0L) / 1000L
                     presentLatencyUsSum.addAndGet(presentDelayUs)
                     codec.releaseOutputBuffer(index, renderAt)
+                    shown = true
                 } else if (current) {
                     // Latency mode (default): present immediately.
                     framesRendered.incrementAndGet()
                     presentLatencyUsSum.addAndGet(0L)
                     codec.releaseOutputBuffer(index, System.nanoTime())
+                    shown = true
                 } else {
                     // Newer frames are already queued behind this one after a
                     // stall: showing it would replay the stall in fast forward.
@@ -553,7 +646,11 @@ class VideoDecoder(
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "releaseOutputBuffer failed", e)
+                shown = false
             }
+            // The picture is done with (shown or skipped as stale); it was
+            // acknowledged when it went into the codec.
+            finishFrames(1, shown, ack = false)
         }
 
         override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
