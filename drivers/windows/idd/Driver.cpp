@@ -316,13 +316,14 @@ NTSTATUS DrawSplayDeviceD0Entry(WDFDEVICE Device, WDF_POWER_DEVICE_STATE Previou
 _Use_decl_annotations_
 VOID DrawSplayFileCleanup(WDFFILEOBJECT FileObject)
 {
-    // When the host's control handle closes (graceful or crash), remove every
-    // monitor so the virtual display never outlives the session.
+    // When the host's control handle closes (graceful or crash), remove the
+    // monitors it created so the virtual display never outlives the session.
+    // Other handles (the capture helper's) own no monitors and remove none.
     WDFDEVICE Device = WdfFileObjectGetDevice(FileObject);
     auto* pContext = WdfObjectGet_IndirectDeviceContextWrapper(Device);
     if (pContext && pContext->pContext)
     {
-        pContext->pContext->RemoveAllMonitors();
+        pContext->pContext->RemoveMonitorsOwnedBy(FileObject);
     }
 }
 
@@ -387,8 +388,22 @@ HRESULT Direct3DDevice::Init()
 
 #pragma region SwapChainProcessor
 
-SwapChainProcessor::SwapChainProcessor(IDDCX_SWAPCHAIN hSwapChain, shared_ptr<Direct3DDevice> Device, HANDLE NewFrameEvent)
-    : m_hSwapChain(hSwapChain), m_Device(Device), m_hAvailableBufferEvent(NewFrameEvent)
+FrameExport::~FrameExport()
+{
+    if (Cursor)
+    {
+        UnmapViewOfFile(Cursor);
+    }
+    if (CursorMapping)
+    {
+        CloseHandle(CursorMapping);
+    }
+}
+
+SwapChainProcessor::SwapChainProcessor(IDDCX_SWAPCHAIN hSwapChain, shared_ptr<Direct3DDevice> Device, HANDLE NewFrameEvent,
+    IDDCX_MONITOR Monitor, DWORD MonitorId, shared_ptr<FrameExport> Export)
+    : m_hSwapChain(hSwapChain), m_Device(Device), m_hAvailableBufferEvent(NewFrameEvent),
+      m_Monitor(Monitor), m_MonitorId(MonitorId), m_Export(move(Export))
 {
     m_hTerminateEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
     m_hThread.Attach(CreateThread(nullptr, 0, RunThread, this, 0, nullptr));
@@ -416,6 +431,10 @@ void SwapChainProcessor::Run()
     HANDLE AvTaskHandle = AvSetMmThreadCharacteristicsW(L"Distribution", &AvTask);
 
     RunCore();
+    ReleaseSharedTexture();
+    // The next swap chain starts with the OS drawing the cursor again until
+    // it is handed over anew; hide the published one meanwhile.
+    HideSharedCursor();
 
     WdfObjectDelete((WDFOBJECT)m_hSwapChain);
     m_hSwapChain = nullptr;
@@ -446,6 +465,18 @@ void SwapChainProcessor::RunCore()
 
     for (;;)
     {
+        if (!m_CursorSetupTried && m_Export &&
+            InterlockedCompareExchange(&m_Export->CursorRequested, 0, 0) != 0)
+        {
+            SetupHardwareCursor();
+        }
+        // Cursor changes are published even while frames stream back to back.
+        if (m_hCursorEvent.IsValid() && WaitForSingleObject(m_hCursorEvent.Get(), 0) == WAIT_OBJECT_0)
+        {
+            PublishCursor();
+        }
+        FlushPendingFrame();
+
         ComPtr<IDXGIResource> AcquiredBuffer;
 
         IDARG_OUT_RELEASEANDACQUIREBUFFER Buffer = {};
@@ -456,11 +487,20 @@ void SwapChainProcessor::RunCore()
             HANDLE WaitHandles[] =
             {
                 m_hAvailableBufferEvent,
-                m_hTerminateEvent.Get()
+                m_hTerminateEvent.Get(),
+                m_hCursorEvent.Get()
             };
-            DWORD WaitResult = WaitForMultipleObjects(ARRAYSIZE(WaitHandles), WaitHandles, FALSE, 16);
+            const DWORD Count = m_hCursorEvent.IsValid() ? 3 : 2;
+            // A parked frame is retried every 2 ms until the consumer frees
+            // the shared texture (it holds it only for a GPU copy).
+            DWORD WaitResult = WaitForMultipleObjects(Count, WaitHandles, FALSE, m_FramePending ? 2 : 16);
             if (WaitResult == WAIT_OBJECT_0 || WaitResult == WAIT_TIMEOUT)
             {
+                continue;
+            }
+            else if (WaitResult == WAIT_OBJECT_0 + 2)
+            {
+                PublishCursor();
                 continue;
             }
             else if (WaitResult == WAIT_OBJECT_0 + 1)
@@ -475,9 +515,15 @@ void SwapChainProcessor::RunCore()
         }
         else if (SUCCEEDED(hr))
         {
-            // DrawSplay captures the virtual monitor out-of-band via DDA
-            // (ddagrab), so the swap-chain surface itself is simply released.
+            // With frame export enabled (the native capture helper asked for
+            // it) the frame is copied into the shared texture; otherwise the
+            // host captures out-of-band via DDA (ffmpeg ddagrab) and the
+            // surface is simply released.
             AcquiredBuffer.Attach(Buffer.MetaData.pSurface);
+            if (m_Export && InterlockedCompareExchange(&m_Export->Requested, 0, 0) != 0)
+            {
+                ExportFrame(AcquiredBuffer.Get());
+            }
             AcquiredBuffer.Reset();
 
             hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
@@ -491,6 +537,317 @@ void SwapChainProcessor::RunCore()
             break;
         }
     }
+}
+
+// Security descriptor for a monitor's shared texture and cursor block:
+// SYSTEM and the user who created the monitor only, so another user signed
+// in to the same PC (fast user switching, RDP) cannot open them. Returns
+// false (and export stays off) when the owner is unknown.
+static bool OwnerOnlySecurity(const FrameExport& Export, PSECURITY_DESCRIPTOR* ppSd)
+{
+    if (Export.OwnerSid.empty() || !IsValidSid((PSID) Export.OwnerSid.data()))
+    {
+        return false;
+    }
+    LPWSTR SidString = nullptr;
+    if (!ConvertSidToStringSidW((PSID) Export.OwnerSid.data(), &SidString))
+    {
+        return false;
+    }
+    wchar_t Sddl[256];
+    swprintf_s(Sddl, L"D:P(A;;GA;;;SY)(A;;GA;;;%s)", SidString);
+    LocalFree(SidString);
+    return ConvertStringSecurityDescriptorToSecurityDescriptorW(Sddl, SDDL_REVISION_1, ppSd, nullptr) != FALSE;
+}
+
+bool SwapChainProcessor::EnsureSharedTexture(const D3D11_TEXTURE2D_DESC& SourceDesc)
+{
+    if (m_SharedTexture &&
+        m_SharedDesc.Width == SourceDesc.Width &&
+        m_SharedDesc.Height == SourceDesc.Height &&
+        m_SharedDesc.Format == SourceDesc.Format)
+    {
+        return true;
+    }
+    ReleaseSharedTexture();
+
+    D3D11_TEXTURE2D_DESC Desc = {};
+    Desc.Width = SourceDesc.Width;
+    Desc.Height = SourceDesc.Height;
+    Desc.MipLevels = 1;
+    Desc.ArraySize = 1;
+    Desc.Format = SourceDesc.Format;
+    Desc.SampleDesc.Count = 1;
+    Desc.Usage = D3D11_USAGE_DEFAULT;
+    // Consumers read it as a video-processor input or shader resource.
+    Desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    Desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE | D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+
+    ComPtr<ID3D11Texture2D> Texture;
+    HRESULT hr = m_Device->Device->CreateTexture2D(&Desc, nullptr, &Texture);
+    ComPtr<IDXGIKeyedMutex> Mutex;
+    ComPtr<IDXGIResource1> Resource;
+    if (SUCCEEDED(hr)) hr = Texture.As(&Mutex);
+    if (SUCCEEDED(hr)) hr = Texture.As(&Resource);
+    if (FAILED(hr))
+    {
+        InterlockedExchange(&m_Export->Failed, 1);
+        return false;
+    }
+
+    PSECURITY_DESCRIPTOR pSd = nullptr;
+    if (!OwnerOnlySecurity(*m_Export, &pSd))
+    {
+        InterlockedExchange(&m_Export->Failed, 1);
+        return false;
+    }
+    SECURITY_ATTRIBUTES Sa = { sizeof(Sa), pSd, FALSE };
+
+    // Each texture gets a fresh generation, so a consumer holding the old
+    // one can tell it was replaced.
+    LONG Generation = InterlockedCompareExchange(&m_Export->Generation, 0, 0) + 1;
+    wchar_t Name[96];
+    swprintf_s(Name, DRAWSPLAY_FRAME_SURFACE_NAME_FORMAT, m_MonitorId, (unsigned) Generation);
+
+    HANDLE Shared = nullptr;
+    hr = Resource->CreateSharedHandle(&Sa, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, Name, &Shared);
+    LocalFree(pSd);
+    if (FAILED(hr))
+    {
+        InterlockedExchange(&m_Export->Failed, 1);
+        return false;
+    }
+
+    m_SharedTexture = Texture;
+    m_SharedMutex = Mutex;
+    m_SharedHandle.Attach(Shared);
+    m_SharedDesc = Desc;
+
+    m_Export->Width = Desc.Width;
+    m_Export->Height = Desc.Height;
+    m_Export->Format = (UINT) Desc.Format;
+    m_Export->AdapterLuid = m_Device->AdapterLuid;
+    InterlockedExchange(&m_Export->Failed, 0);
+    InterlockedExchange(&m_Export->Generation, Generation);
+    return true;
+}
+
+void SwapChainProcessor::ReleaseSharedTexture()
+{
+    m_SharedMutex.Reset();
+    m_SharedTexture.Reset();
+    m_SharedHandle.Close();
+    m_SharedDesc = {};
+    m_PendingTexture.Reset();
+    m_FramePending = false;
+}
+
+void SwapChainProcessor::SetupHardwareCursor()
+{
+    m_CursorSetupTried = true; // once per swap chain, success or not
+
+    if (!m_Export->Cursor)
+    {
+        PSECURITY_DESCRIPTOR pSd = nullptr;
+        if (!OwnerOnlySecurity(*m_Export, &pSd))
+        {
+            return;
+        }
+        SECURITY_ATTRIBUTES Sa = { sizeof(Sa), pSd, FALSE };
+        wchar_t Name[96];
+        swprintf_s(Name, DRAWSPLAY_CURSOR_NAME_FORMAT, m_MonitorId);
+        HANDLE Mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, &Sa, PAGE_READWRITE, 0,
+            (DWORD) sizeof(DRAWSPLAY_CURSOR_SHARED), Name);
+        LocalFree(pSd);
+        if (!Mapping)
+        {
+            return;
+        }
+        auto* View = static_cast<DRAWSPLAY_CURSOR_SHARED*>(
+            MapViewOfFile(Mapping, FILE_MAP_WRITE, 0, 0, sizeof(DRAWSPLAY_CURSOR_SHARED)));
+        if (!View)
+        {
+            CloseHandle(Mapping);
+            return;
+        }
+        m_Export->CursorMapping = Mapping;
+        m_Export->Cursor = View;
+    }
+
+    m_hCursorEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
+    if (!m_hCursorEvent.IsValid())
+    {
+        return;
+    }
+
+    // Alpha cursors only: XOR/inverting cursors (and any larger than the
+    // maximum) keep being drawn into the frames by the OS, so nothing is
+    // ever lost when the consumer cannot reproduce them.
+    IDARG_IN_SETUP_HWCURSOR Setup = {};
+    Setup.CursorInfo.Size = sizeof(Setup.CursorInfo);
+    Setup.CursorInfo.ColorXorCursorSupport = IDDCX_XOR_CURSOR_SUPPORT_NONE;
+    Setup.CursorInfo.AlphaCursorSupport = TRUE;
+    Setup.CursorInfo.MaxX = DRAWSPLAY_CURSOR_MAX;
+    Setup.CursorInfo.MaxY = DRAWSPLAY_CURSOR_MAX;
+    Setup.hNewCursorDataAvailable = m_hCursorEvent.Get();
+    if (!NT_SUCCESS(IddCxMonitorSetupHardwareCursor(m_Monitor, &Setup)))
+    {
+        m_hCursorEvent.Close();
+        return;
+    }
+    m_CursorBuffer.resize(DRAWSPLAY_CURSOR_MAX * DRAWSPLAY_CURSOR_MAX * 4);
+    m_LastShapeId = (DWORD) -1;
+    InterlockedExchange(&m_Export->HardwareCursor, 1);
+    PublishCursor();
+}
+
+void SwapChainProcessor::PublishCursor()
+{
+    DRAWSPLAY_CURSOR_SHARED* c = m_Export ? m_Export->Cursor : nullptr;
+    if (!c || m_CursorBuffer.empty())
+    {
+        return;
+    }
+    IDARG_IN_QUERY_HWCURSOR In = {};
+    In.LastShapeId = m_LastShapeId;
+    In.ShapeBufferSizeInBytes = (UINT) m_CursorBuffer.size();
+    In.pShapeBuffer = m_CursorBuffer.data();
+    IDARG_OUT_QUERY_HWCURSOR Out = {};
+    if (!NT_SUCCESS(IddCxMonitorQueryHardwareCursor(m_Monitor, &In, &Out)))
+    {
+        return;
+    }
+
+    InterlockedIncrement(&c->Seq); // odd: writing
+    MemoryBarrier();
+    c->Visible = Out.IsCursorVisible ? 1 : 0;
+    c->X = Out.X;
+    c->Y = Out.Y;
+    if (Out.IsCursorVisible && Out.IsCursorShapeUpdated)
+    {
+        const IDDCX_CURSOR_SHAPE_INFO& Info = Out.CursorShapeInfo;
+        const UINT W = min(Info.Width, (UINT) DRAWSPLAY_CURSOR_MAX);
+        const UINT H = min(Info.Height, (UINT) DRAWSPLAY_CURSOR_MAX);
+        const bool Masked = Info.CursorType == IDDCX_CURSOR_SHAPE_TYPE_MASKED_COLOR;
+        for (UINT y = 0; y < H; ++y)
+        {
+            const BYTE* Src = m_CursorBuffer.data() + (size_t) y * Info.Pitch;
+            BYTE* Dst = c->Shape + (size_t) y * W * 4;
+            memcpy(Dst, Src, (size_t) W * 4);
+            if (Masked)
+            {
+                // Not expected (XOR support is off), but if one arrives,
+                // approximate it: mask 0 = opaque colour; mask 0xFF = XOR,
+                // shown opaque where it changes the screen.
+                for (UINT x = 0; x < W; ++x)
+                {
+                    BYTE* p = Dst + x * 4;
+                    const bool Xor = p[3] != 0;
+                    const bool Black = p[0] == 0 && p[1] == 0 && p[2] == 0;
+                    p[3] = (Xor && Black) ? 0 : 0xFF;
+                }
+            }
+        }
+        c->Width = W;
+        c->Height = H;
+        c->XHot = Info.XHot;
+        c->YHot = Info.YHot;
+        c->ShapeId = Info.ShapeId;
+        m_LastShapeId = Info.ShapeId;
+    }
+    MemoryBarrier();
+    InterlockedIncrement(&c->Seq); // even: stable
+}
+
+void SwapChainProcessor::HideSharedCursor()
+{
+    if (m_Export)
+    {
+        InterlockedExchange(&m_Export->HardwareCursor, 0);
+    }
+    DRAWSPLAY_CURSOR_SHARED* c = m_Export ? m_Export->Cursor : nullptr;
+    if (!c || !m_hCursorEvent.IsValid())
+    {
+        return;
+    }
+    InterlockedIncrement(&c->Seq);
+    MemoryBarrier();
+    c->Visible = 0;
+    MemoryBarrier();
+    InterlockedIncrement(&c->Seq);
+}
+
+void SwapChainProcessor::ExportFrame(IDXGIResource* pSurface)
+{
+    ComPtr<ID3D11Texture2D> Source;
+    if (FAILED(pSurface->QueryInterface(IID_PPV_ARGS(&Source))))
+    {
+        return;
+    }
+    D3D11_TEXTURE2D_DESC SourceDesc = {};
+    Source->GetDesc(&SourceDesc);
+    if (!EnsureSharedTexture(SourceDesc))
+    {
+        return;
+    }
+
+    // Never wait here: this thread paces the desktop's presentation. If the
+    // consumer has not taken the previous frame yet, this one is parked in
+    // a private texture (replacing any older parked frame) and published by
+    // FlushPendingFrame as soon as the shared texture is free again.
+    HRESULT hr = m_SharedMutex->AcquireSync(0, 0);
+    if (hr == static_cast<HRESULT>(WAIT_TIMEOUT))
+    {
+        if (!m_PendingTexture)
+        {
+            D3D11_TEXTURE2D_DESC Desc = m_SharedDesc;
+            Desc.MiscFlags = 0;
+            if (FAILED(m_Device->Device->CreateTexture2D(&Desc, nullptr, &m_PendingTexture)))
+            {
+                InterlockedIncrement(&m_Export->FramesSkipped);
+                return;
+            }
+        }
+        m_Device->DeviceContext->CopyResource(m_PendingTexture.Get(), Source.Get());
+        if (m_FramePending)
+        {
+            InterlockedIncrement(&m_Export->FramesSkipped); // the older parked frame is replaced
+        }
+        m_FramePending = true;
+        return;
+    }
+    if (FAILED(hr))
+    {
+        // Device removed or the mutex was abandoned: rebuild on next frame.
+        ReleaseSharedTexture();
+        return;
+    }
+    m_Device->DeviceContext->CopyResource(m_SharedTexture.Get(), Source.Get());
+    m_SharedMutex->ReleaseSync(1);
+    m_FramePending = false; // superseded by this newer frame
+    InterlockedIncrement(&m_Export->FramesPublished);
+}
+
+void SwapChainProcessor::FlushPendingFrame()
+{
+    if (!m_FramePending || !m_SharedMutex || !m_PendingTexture)
+    {
+        return;
+    }
+    HRESULT hr = m_SharedMutex->AcquireSync(0, 0);
+    if (hr == static_cast<HRESULT>(WAIT_TIMEOUT))
+    {
+        return; // still held; try again shortly
+    }
+    if (FAILED(hr))
+    {
+        ReleaseSharedTexture();
+        return;
+    }
+    m_Device->DeviceContext->CopyResource(m_SharedTexture.Get(), m_PendingTexture.Get());
+    m_SharedMutex->ReleaseSync(1);
+    m_FramePending = false;
+    InterlockedIncrement(&m_Export->FramesPublished);
 }
 
 #pragma endregion
@@ -560,7 +917,8 @@ void IndirectDeviceContext::SetAdapterInitStatus(NTSTATUS Status)
     InterlockedExchange(&m_AdapterReady, NT_SUCCESS(Status) ? 1 : 0);
 }
 
-NTSTATUS IndirectDeviceContext::AddMonitor(DWORD Width, DWORD Height, DWORD RefreshHz, DWORD NativeWidth, DWORD NativeHeight, DWORD* pMonitorId)
+NTSTATUS IndirectDeviceContext::AddMonitor(DWORD Width, DWORD Height, DWORD RefreshHz, DWORD NativeWidth, DWORD NativeHeight, WDFFILEOBJECT Owner,
+    const vector<BYTE>& OwnerSid, DWORD* pMonitorId)
 {
     if (!m_Adapter || InterlockedCompareExchange(&m_AdapterReady, 0, 0) == 0)
     {
@@ -568,12 +926,13 @@ NTSTATUS IndirectDeviceContext::AddMonitor(DWORD Width, DWORD Height, DWORD Refr
     }
 
     AcquireSRWLockExclusive(&m_Lock);
-    NTSTATUS Status = AddMonitorLocked(Width, Height, RefreshHz, NativeWidth, NativeHeight, pMonitorId);
+    NTSTATUS Status = AddMonitorLocked(Width, Height, RefreshHz, NativeWidth, NativeHeight, Owner, OwnerSid, pMonitorId);
     ReleaseSRWLockExclusive(&m_Lock);
     return Status;
 }
 
-NTSTATUS IndirectDeviceContext::AddMonitorLocked(DWORD Width, DWORD Height, DWORD RefreshHz, DWORD NativeWidth, DWORD NativeHeight, DWORD* pMonitorId)
+NTSTATUS IndirectDeviceContext::AddMonitorLocked(DWORD Width, DWORD Height, DWORD RefreshHz, DWORD NativeWidth, DWORD NativeHeight, WDFFILEOBJECT Owner,
+    const vector<BYTE>& OwnerSid, DWORD* pMonitorId)
 {
     if (m_Monitors.size() >= DRAWSPLAY_MAX_MONITORS)
     {
@@ -639,6 +998,7 @@ NTSTATUS IndirectDeviceContext::AddMonitorLocked(DWORD Width, DWORD Height, DWOR
     pMonitorContext->m_RefreshHz = RefreshHz;
     pMonitorContext->m_NativeWidth = NativeWidth;
     pMonitorContext->m_NativeHeight = NativeHeight;
+    pMonitorContext->m_Export->OwnerSid = OwnerSid;
     pMonitorContextWrapper->pContext = pMonitorContext;
 
     IDARG_OUT_MONITORARRIVAL ArrivalOut;
@@ -649,7 +1009,7 @@ NTSTATUS IndirectDeviceContext::AddMonitorLocked(DWORD Width, DWORD Height, DWOR
         return Status;
     }
 
-    m_Monitors.push_back({ MonitorId, MonitorCreateOut.MonitorObject });
+    m_Monitors.push_back({ MonitorId, MonitorCreateOut.MonitorObject, Owner, pMonitorContext->m_Export });
     if (pMonitorId)
     {
         *pMonitorId = MonitorId;
@@ -696,6 +1056,80 @@ void IndirectDeviceContext::RemoveAllMonitors()
     }
 }
 
+void IndirectDeviceContext::RemoveMonitorsOwnedBy(WDFFILEOBJECT Owner)
+{
+    vector<ActiveMonitor> Removed;
+    AcquireSRWLockExclusive(&m_Lock);
+    for (auto it = m_Monitors.begin(); it != m_Monitors.end();)
+    {
+        // A monitor with no recorded owner keeps the old behaviour: any
+        // closing handle removes it.
+        if (it->Owner == Owner || it->Owner == nullptr)
+        {
+            Removed.push_back(*it);
+            it = m_Monitors.erase(it);
+        }
+        else
+        {
+            // The capture helper that enabled export has gone (the host may
+            // have fallen back to Desktop Duplication): stop the per-frame
+            // copies. A new helper re-enables export with its own request.
+            if (it->Export && it->Export->Requester == Owner)
+            {
+                InterlockedExchange(&it->Export->Requested, 0);
+                InterlockedExchange(&it->Export->CursorRequested, 0);
+                it->Export->Requester = nullptr;
+            }
+            ++it;
+        }
+    }
+    ReleaseSRWLockExclusive(&m_Lock);
+
+    for (auto& m : Removed)
+    {
+        IddCxMonitorDeparture(m.Monitor);
+    }
+}
+
+NTSTATUS IndirectDeviceContext::GetFrameSurface(DWORD MonitorId, const vector<BYTE>& CallerSid, WDFFILEOBJECT Requester,
+    shared_ptr<FrameExport>* pExport)
+{
+    AcquireSRWLockExclusive(&m_Lock);
+    shared_ptr<FrameExport> Export;
+    for (const auto& m : m_Monitors)
+    {
+        if (m.Id == MonitorId)
+        {
+            Export = m.Export;
+            break;
+        }
+    }
+    NTSTATUS Status = STATUS_SUCCESS;
+    if (!Export)
+    {
+        Status = STATUS_NOT_FOUND;
+    }
+    else if (Export->OwnerSid.empty() || CallerSid.empty() ||
+        !EqualSid((PSID) Export->OwnerSid.data(), (PSID) CallerSid.data()))
+    {
+        // Another user's monitor (or an unidentifiable caller): never
+        // export it. The helper then exits and the host uses DDA.
+        Status = STATUS_ACCESS_DENIED;
+    }
+    else
+    {
+        Export->Requester = Requester;
+        InterlockedExchange(&Export->Requested, 1);
+    }
+    ReleaseSRWLockExclusive(&m_Lock);
+
+    if (NT_SUCCESS(Status))
+    {
+        *pExport = move(Export);
+    }
+    return Status;
+}
+
 IndirectMonitorContext::IndirectMonitorContext(_In_ IDDCX_MONITOR Monitor) :
     m_Monitor(Monitor)
 {
@@ -727,7 +1161,7 @@ void IndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN SwapChain, LUID Ren
 
     if (Device)
     {
-        unique_ptr<SwapChainProcessor> Processor(new SwapChainProcessor(SwapChain, Device, NewFrameEvent));
+        unique_ptr<SwapChainProcessor> Processor(new SwapChainProcessor(SwapChain, Device, NewFrameEvent, m_Monitor, m_MonitorId, m_Export));
         if (Processor->Started())
         {
             m_ProcessingThread = move(Processor);
@@ -890,6 +1324,39 @@ NTSTATUS DrawSplayMonitorUnassignSwapChain(IDDCX_MONITOR MonitorObject)
     return STATUS_SUCCESS;
 }
 
+// Runs while impersonating the requesting process: records its user SID.
+static VOID CaptureCallerSid(WDFREQUEST Request, PVOID Context)
+{
+    UNREFERENCED_PARAMETER(Request);
+    auto* Sid = static_cast<vector<BYTE>*>(Context);
+    HANDLE Token = nullptr;
+    if (!OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &Token))
+    {
+        return;
+    }
+    BYTE Buffer[sizeof(TOKEN_USER) + SECURITY_MAX_SID_SIZE];
+    DWORD Length = 0;
+    if (GetTokenInformation(Token, TokenUser, Buffer, sizeof(Buffer), &Length))
+    {
+        PSID UserSid = reinterpret_cast<TOKEN_USER*>(Buffer)->User.Sid;
+        const BYTE* p = static_cast<const BYTE*>(UserSid);
+        Sid->assign(p, p + GetLengthSid(UserSid));
+    }
+    CloseHandle(Token);
+}
+
+// The user behind a control request, or empty when it cannot be determined
+// (export is then refused, never granted).
+static vector<BYTE> CallerSid(WDFREQUEST Request)
+{
+    vector<BYTE> Sid;
+    if (!NT_SUCCESS(WdfRequestImpersonate(Request, SecurityImpersonation, CaptureCallerSid, &Sid)))
+    {
+        Sid.clear();
+    }
+    return Sid;
+}
+
 _Use_decl_annotations_
 VOID DrawSplayDeviceIoControl(WDFDEVICE Device, WDFREQUEST Request, size_t OutputBufferLength, size_t InputBufferLength, ULONG IoControlCode)
 {
@@ -927,7 +1394,8 @@ VOID DrawSplayDeviceIoControl(WDFDEVICE Device, WDFREQUEST Request, size_t Outpu
         // Accept both the v1 (12-byte) and v2 (with native size) layouts.
         memcpy(&In, pRawIn, min(RawInLen, sizeof(In)));
         DWORD MonitorId = 0;
-        Status = pContext->AddMonitor(In.Width, In.Height, In.RefreshHz, In.NativeWidth, In.NativeHeight, &MonitorId);
+        Status = pContext->AddMonitor(In.Width, In.Height, In.RefreshHz, In.NativeWidth, In.NativeHeight,
+            WdfRequestGetFileObject(Request), CallerSid(Request), &MonitorId);
         if (NT_SUCCESS(Status))
         {
             pOut->MonitorId = MonitorId;
@@ -955,6 +1423,54 @@ VOID DrawSplayDeviceIoControl(WDFDEVICE Device, WDFREQUEST Request, size_t Outpu
     {
         pContext->RemoveAllMonitors();
         Status = STATUS_SUCCESS;
+        break;
+    }
+    case IOCTL_DRAWSPLAY_GET_FRAME_SURFACE:
+    {
+        if (InputBufferLength < DRAWSPLAY_GET_FRAME_SURFACE_IN_V1_SIZE ||
+            OutputBufferLength < sizeof(DRAWSPLAY_GET_FRAME_SURFACE_OUT))
+        {
+            Status = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+        PVOID pRawIn = nullptr;
+        size_t RawInLen = 0;
+        DRAWSPLAY_GET_FRAME_SURFACE_OUT* pOut = nullptr;
+        if (!NT_SUCCESS(WdfRequestRetrieveInputBuffer(Request, DRAWSPLAY_GET_FRAME_SURFACE_IN_V1_SIZE, &pRawIn, &RawInLen)) ||
+            !NT_SUCCESS(WdfRequestRetrieveOutputBuffer(Request, sizeof(*pOut), (PVOID*)&pOut, nullptr)))
+        {
+            Status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        // METHOD_BUFFERED: in and out share one buffer, so copy the input first.
+        DRAWSPLAY_GET_FRAME_SURFACE_IN In = {};
+        memcpy(&In, pRawIn, min(RawInLen, sizeof(In)));
+        shared_ptr<FrameExport> Export;
+        Status = pContext->GetFrameSurface(In.MonitorId, CallerSid(Request), WdfRequestGetFileObject(Request), &Export);
+        if (!NT_SUCCESS(Status))
+        {
+            break;
+        }
+        if (In.Flags & DRAWSPLAY_FRAME_SURFACE_FLAG_HW_CURSOR)
+        {
+            InterlockedExchange(&Export->CursorRequested, 1);
+        }
+        DRAWSPLAY_GET_FRAME_SURFACE_OUT Out = {};
+        // Read the generation first: the fields it publishes are written
+        // before it is bumped.
+        Out.Generation = (unsigned int) InterlockedCompareExchange(&Export->Generation, 0, 0);
+        MemoryBarrier();
+        Out.Width = Export->Width;
+        Out.Height = Export->Height;
+        Out.Format = Export->Format;
+        Out.AdapterLuidLow = Export->AdapterLuid.LowPart;
+        Out.AdapterLuidHigh = Export->AdapterLuid.HighPart;
+        Out.FramesPublished = (unsigned int) InterlockedCompareExchange(&Export->FramesPublished, 0, 0);
+        Out.FramesSkipped = (unsigned int) InterlockedCompareExchange(&Export->FramesSkipped, 0, 0);
+        Out.Failed = (unsigned int) InterlockedCompareExchange(&Export->Failed, 0, 0);
+        Out.HardwareCursor = (unsigned int) InterlockedCompareExchange(&Export->HardwareCursor, 0, 0);
+        *pOut = Out;
+        Information = sizeof(*pOut);
         break;
     }
     default:

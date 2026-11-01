@@ -17,10 +17,14 @@
 #include <dxgi1_5.h>
 #include <d3d11_2.h>
 #include <avrt.h>
+#include <sddl.h>
 #include <wrl.h>
 
 #include <memory>
 #include <vector>
+
+// Defined in Public.h (shared with the host and helper).
+struct _DRAWSPLAY_CURSOR_SHARED;
 
 namespace Microsoft
 {
@@ -55,12 +59,52 @@ namespace Microsoft
         };
 
         /// <summary>
+        /// Per-monitor frame-export state, shared between the IOCTL path
+        /// (which enables export and reads the published surface info) and
+        /// the swap-chain thread (which creates the shared texture and copies
+        /// frames into it). Plain fields are published before Generation is
+        /// bumped with an interlocked write, so a reader that sees a new
+        /// generation also sees its size, format and adapter.
+        /// </summary>
+        struct FrameExport
+        {
+            volatile LONG Requested = 0;
+            volatile LONG Generation = 0;
+            volatile LONG Failed = 0;
+            volatile LONG FramesPublished = 0;
+            volatile LONG FramesSkipped = 0;
+            UINT Width = 0;
+            UINT Height = 0;
+            UINT Format = 0;
+            LUID AdapterLuid = {};
+
+            // Hardware cursor hand-off (DRAWSPLAY_FRAME_SURFACE_FLAG_HW_CURSOR).
+            volatile LONG CursorRequested = 0;
+            volatile LONG HardwareCursor = 0;
+            // Named shared block (Public.h DRAWSPLAY_CURSOR_SHARED), created
+            // by the swap-chain thread on first use; lives with the monitor.
+            HANDLE CursorMapping = nullptr;
+            ::_DRAWSPLAY_CURSOR_SHARED* Cursor = nullptr;
+
+            // User (SID) who created the monitor. Only this user may enable
+            // export, and the shared texture and cursor block are shared
+            // with this user (and SYSTEM) only. Set once at creation.
+            std::vector<BYTE> OwnerSid;
+            // Control handle that enabled export; export is switched off
+            // when it closes, so an exited helper costs no frame copies.
+            WDFFILEOBJECT volatile Requester = nullptr;
+
+            ~FrameExport();
+        };
+
+        /// <summary>
         /// Consumes buffers from an indirect display swap-chain object.
         /// </summary>
         class SwapChainProcessor
         {
         public:
-            SwapChainProcessor(IDDCX_SWAPCHAIN hSwapChain, std::shared_ptr<Direct3DDevice> Device, HANDLE NewFrameEvent);
+            SwapChainProcessor(IDDCX_SWAPCHAIN hSwapChain, std::shared_ptr<Direct3DDevice> Device, HANDLE NewFrameEvent,
+                IDDCX_MONITOR Monitor, DWORD MonitorId, std::shared_ptr<FrameExport> Export);
             ~SwapChainProcessor();
 
             // False when the processing thread could not be created; the
@@ -73,11 +117,44 @@ namespace Microsoft
             void Run();
             void RunCore();
 
+            // Copies one acquired swap-chain surface into the shared texture
+            // when export is enabled (see Public.h for the hand-off protocol).
+            void ExportFrame(IDXGIResource* pSurface);
+            bool EnsureSharedTexture(const D3D11_TEXTURE2D_DESC& SourceDesc);
+            void ReleaseSharedTexture();
+
+            // Hardware cursor: enabled once per swap chain on request, then
+            // every cursor change is published to the shared block.
+            void SetupHardwareCursor();
+            void PublishCursor();
+            void HideSharedCursor();
+
+            // A frame that arrived while the consumer held the shared
+            // texture is kept here and published as soon as the texture is
+            // free, so the newest picture (e.g. the end of a stroke) is never
+            // lost when nothing else changes on screen afterwards.
+            void FlushPendingFrame();
+
             IDDCX_SWAPCHAIN m_hSwapChain;
             std::shared_ptr<Direct3DDevice> m_Device;
             HANDLE m_hAvailableBufferEvent;
             Microsoft::WRL::Wrappers::Thread m_hThread;
             Microsoft::WRL::Wrappers::Event m_hTerminateEvent;
+
+            IDDCX_MONITOR m_Monitor;
+            DWORD m_MonitorId;
+            std::shared_ptr<FrameExport> m_Export;
+            bool m_CursorSetupTried = false;
+            Microsoft::WRL::Wrappers::Event m_hCursorEvent;
+            std::vector<BYTE> m_CursorBuffer;
+            DWORD m_LastShapeId = (DWORD) -1;
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> m_SharedTexture;
+            Microsoft::WRL::ComPtr<IDXGIKeyedMutex> m_SharedMutex;
+            // The named NT handle keeps the texture's name alive for consumers.
+            Microsoft::WRL::Wrappers::HandleT<Microsoft::WRL::Wrappers::HandleTraits::HANDLENullTraits> m_SharedHandle;
+            D3D11_TEXTURE2D_DESC m_SharedDesc = {};
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> m_PendingTexture;
+            bool m_FramePending = false;
         };
 
         /// <summary>
@@ -98,6 +175,7 @@ namespace Microsoft
             DWORD m_RefreshHz = 60;
             DWORD m_NativeWidth = 0;
             DWORD m_NativeHeight = 0;
+            std::shared_ptr<FrameExport> m_Export = std::make_shared<FrameExport>();
             std::unique_ptr<SwapChainProcessor> m_ProcessingThread;
         };
 
@@ -115,14 +193,26 @@ namespace Microsoft
 
             // Host-driven monitor lifecycle. m_Lock serializes it against
             // control-handle cleanup, which can run concurrently.
-            NTSTATUS AddMonitor(DWORD Width, DWORD Height, DWORD RefreshHz, DWORD NativeWidth, DWORD NativeHeight, _Out_ DWORD* pMonitorId);
+            // Owner is the control handle (file object) that created the
+            // monitor; closing that handle removes it (RemoveMonitorsOwnedBy).
+            NTSTATUS AddMonitor(DWORD Width, DWORD Height, DWORD RefreshHz, DWORD NativeWidth, DWORD NativeHeight, WDFFILEOBJECT Owner,
+                const std::vector<BYTE>& OwnerSid, _Out_ DWORD* pMonitorId);
             NTSTATUS RemoveMonitor(DWORD MonitorId);
             void RemoveAllMonitors();
+            // Called when a control handle closes: removes the monitors it
+            // created and switches off export it enabled.
+            void RemoveMonitorsOwnedBy(WDFFILEOBJECT Owner);
+
+            // Enables frame export for a monitor and reports its surface.
+            // Only the user who created the monitor (CallerSid) may do so.
+            NTSTATUS GetFrameSurface(DWORD MonitorId, const std::vector<BYTE>& CallerSid, WDFFILEOBJECT Requester,
+                _Out_ std::shared_ptr<FrameExport>* pExport);
 
             IDDCX_ADAPTER m_Adapter;
 
         protected:
-            NTSTATUS AddMonitorLocked(DWORD Width, DWORD Height, DWORD RefreshHz, DWORD NativeWidth, DWORD NativeHeight, _Out_ DWORD* pMonitorId);
+            NTSTATUS AddMonitorLocked(DWORD Width, DWORD Height, DWORD RefreshHz, DWORD NativeWidth, DWORD NativeHeight, WDFFILEOBJECT Owner,
+                const std::vector<BYTE>& OwnerSid, _Out_ DWORD* pMonitorId);
 
             WDFDEVICE m_WdfDevice;
             DWORD m_NextMonitorId = 1;
@@ -136,6 +226,8 @@ namespace Microsoft
             {
                 DWORD Id;
                 IDDCX_MONITOR Monitor;
+                WDFFILEOBJECT Owner;
+                std::shared_ptr<FrameExport> Export;
             };
             std::vector<ActiveMonitor> m_Monitors;
         };

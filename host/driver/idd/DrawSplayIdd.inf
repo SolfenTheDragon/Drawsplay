@@ -10,7 +10,7 @@ Class = Display
 ClassVer = 2.0
 Provider=%ManufacturerName%
 CatalogFile=DrawSplayIdd.cat
-DriverVer = 10/16/2026,1.0.2.0
+DriverVer = 10/31/2026,1.0.3.0
 
 [Manufacturer]
 ; IddCx 1.4 (the version the driver is built against) ships with Windows 10
@@ -52,6 +52,10 @@ Needs=WUDFRD.NT.Services
 UmdfService=DrawSplayIdd,DrawSplayIdd_Install
 UmdfServiceOrder=DrawSplayIdd
 UmdfKernelModeClientPolicy = AllowKernelModeClients
+; Lets the driver identify the user behind a control request
+; (WdfRequestImpersonate): frame export is limited to the user who created
+; the monitor, and its shared objects are shared with that user only.
+UmdfImpersonationLevel = Impersonation
 
 [DrawSplayIdd_Install]
 UmdfLibraryVersion=2.25.0
