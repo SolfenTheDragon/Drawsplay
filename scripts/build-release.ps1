@@ -141,6 +141,16 @@ if (-not $?) {
   throw "IddCx driver staging failed"
 }
 
+Write-Host "Building native media helper..."
+# Embedded into the host (host/mediahelper, go:embed); it reads frames from
+# the driver's shared texture and encodes them with Media Foundation.
+& "$repoRoot\native\drawsplay-media-win\build.ps1" -OutDir "$repoRoot\host\mediahelper"
+if (-not $?) {
+  throw "Native media helper build failed"
+}
+Remove-Item -Recurse -Force "$repoRoot\host\mediahelper\obj" -ErrorAction SilentlyContinue
+Sign-WindowsExecutable -ExePath "$repoRoot\host\mediahelper\drawsplay-media.exe"
+
 Write-Host "Building host..."
 Set-Location "$repoRoot\host"
 # GUI subsystem: the host runs in the system tray and never opens a console.

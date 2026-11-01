@@ -352,7 +352,18 @@ type iddDisplay struct {
 	parsec       bool
 }
 
-func (d *iddDisplay) Target() captureTarget { return targetFor(d.output) }
+func (d *iddDisplay) Target() captureTarget { return d.target() }
+
+// target is the capture target of the current output, tagged with the
+// DrawSplay driver's monitor ID so the native helper can read its frames.
+// The Parsec VDD cannot export frames, so its monitors stay untagged.
+func (d *iddDisplay) target() captureTarget {
+	t := targetFor(d.output)
+	if !d.parsec {
+		t.IDDMonitorID = d.monitorID
+	}
+	return t
+}
 
 // Refresh re-locates the virtual monitor by GDI name or, after a name churn,
 // by the output added for this session. A size change since the last refresh
@@ -378,7 +389,7 @@ func (d *iddDisplay) Refresh() (captureTarget, error) {
 	}
 	d.output = resolved
 	d.noteUserMode(targetFor(d.output))
-	return targetFor(d.output), nil
+	return d.target(), nil
 }
 
 // noteUserMode remembers a resolution the user switched the virtual monitor

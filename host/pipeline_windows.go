@@ -73,7 +73,8 @@ func buildCapturePipelines(target captureTarget, opts videoOptions) ([]pipelineS
 			specs = append(specs, plainSpec)
 		}
 	}
-	return withAccessUnitWrites(withWindowsVBV(specs, opts), opts), nil
+	specs = withAccessUnitWrites(withWindowsVBV(specs, opts), opts)
+	return withWindowsNativeHelperCandidate(specs, opts, target), nil
 }
 
 // PCI vendor IDs reported by DXGI adapters.

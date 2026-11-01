@@ -83,3 +83,7 @@ play-store/
 
 # DrawSplay IddCx driver build outputs (built per-machine / in CI from the WDK NuGet)
 drivers/windows/idd/out/
+
+# Windows native media helper build outputs (embedded into the host by build-release.ps1)
+native/drawsplay-media-win/out/
+host/mediahelper/obj/

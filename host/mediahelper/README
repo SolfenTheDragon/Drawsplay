@@ -1,0 +1,10 @@
+# Embedded Windows media helper
+
+Release builds place `drawsplay-media.exe` (built from
+`native/drawsplay-media-win` by `scripts/build-release.ps1`) in this folder,
+and the Windows host embeds it with `go:embed`. At runtime the host extracts it
+to `%LOCALAPPDATA%\DrawSplay\media-helper\` and runs it for sessions on
+DrawSplay's own virtual display (see `native_media_windows.go`).
+
+The executable is a build output and is not committed. Without it the host
+works as before, using ffmpeg Desktop Duplication capture.
