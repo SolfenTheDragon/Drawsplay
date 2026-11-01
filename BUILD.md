@@ -147,6 +147,19 @@ scripts/build-native-media.sh                 # DRAWSPLAY_HELPER_DEST=host/ to c
 
 Place `drawsplay-media` next to the host executable (or set `DRAWSPLAY_MEDIA_HELPER`). Without it the host uses ffmpeg exactly as before. See `native/drawsplay-media/README.md`.
 
+## Build the native media helper (Windows)
+
+`scripts/build-release.ps1` builds it and stages it into `host/mediahelper/` for `go:embed`. To build it by hand (Visual Studio or the C++ Build Tools; no WDK needed):
+
+```powershell
+native\drawsplay-media-win\build.ps1 -OutDir host\mediahelper   # embed into the next host build
+# or: -OutDir <folder of host.exe> to run it next to an existing host
+native\drawsplay-media-win\out\drawsplay-media.exe --probe       # finds a GPU H.264 encoder?
+native\drawsplay-media-win\out\drawsplay-media.exe --selftest > frames.bin
+```
+
+It needs the frame-export IddCx driver from this repository; with an older driver it exits at once and the host uses ffmpeg.
+
 ## Build the Android app
 
 From the repository root:

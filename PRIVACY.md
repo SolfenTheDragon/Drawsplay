@@ -33,7 +33,7 @@ On the computer, DrawSplay stores settings (bitrate, resolution, input toggles, 
 ## Permissions
 
 - **Android:** USB accessory access, and (only if Wi-Fi mode is used) local network access. These are used solely to connect to your computer.
-- **Computer:** the installer may add udev rules and group membership (`input`, `plugdev`), install a virtual display driver (Windows) or load the `vkms` module (Linux X11), and register the host to start at login. These are used only to create the virtual display, capture it, and inject your input.
+- **Computer:** the installer may add udev rules and group membership (`input`, `plugdev`), install a virtual display driver (Windows), and register the host to start at login. On Linux X11 the host may, with one password prompt when a tablet connects, switch an unplugged HDMI port of your GPU on through `/sys/class/drm` (it stays forced until you reboot or reset it; nothing persists across reboots), or load the `vkms` module if you opt in with `DRAWSPLAY_X11_VKMS_AUTOLOAD=1`. These are used only to create the virtual display, capture it, and inject your input.
 
 ## Third parties
 

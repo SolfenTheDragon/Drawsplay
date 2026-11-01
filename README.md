@@ -26,7 +26,7 @@ No source build is required.
 
 - A USB cable between the computer and the tablet
 - **Windows:** Windows 10/11 (the extended display needs Windows 10 version 1903 or later; any NVIDIA, AMD or Intel GPU works), with the WinUSB driver bound to the tablet (see Install). Internet access during install: the installer downloads the newest ffmpeg build compatible with your Windows version and CPU (SHA-256 verified). adb is not needed or downloaded.
-- **Linux:** an x86-64 computer with ffmpeg. Wayland is preferred (GNOME, KDE Plasma 6, sway and Hyprland support an extended desktop); X11 also works and needs the `vkms` kernel module for an extended desktop. Without a virtual display DrawSplay mirrors your screen instead. On X11 with an Intel GPU an optional native helper (`drawsplay-media`, see `BUILD.md`) lowers latency; ffmpeg remains the automatic fallback, and AMD/NVIDIA keep using ffmpeg unless you opt in.
+- **Linux:** an x86-64 computer with ffmpeg. Wayland is preferred (GNOME, KDE Plasma 6, sway and Hyprland support an extended desktop); X11 also works: for an extended desktop it uses an unplugged HDMI port of your GPU as the tablet's display (forced on while the tablet is connected, with one password prompt), or the `vkms` kernel module if you opt in. Without a virtual display DrawSplay mirrors your screen instead. On X11 with an Intel GPU an optional native helper (`drawsplay-media`, see `BUILD.md`) lowers latency; ffmpeg remains the automatic fallback, and AMD/NVIDIA keep using ffmpeg unless you opt in.
 - **Tablet:** an Android device. No Developer options or USB debugging are needed.
 
 ## Install
@@ -73,7 +73,7 @@ If you want to keep the tablet in File transfer mode until you choose otherwise,
 
 For smoother streaming, install your GPU's VA-API driver (for example `intel-media-va-driver-non-free` or `mesa-va-drivers`).
 
-More per-desktop detail (X11/vkms, GNOME, KDE, sway, Hyprland) is in the project wiki.
+More per-desktop detail (X11, GNOME, KDE, sway, Hyprland) is in the project wiki.
 
 ## Use
 
@@ -119,7 +119,7 @@ Video setting changes restart the stream automatically.
 
 - Windows: use **Windows Display Settings**. The tablet's native resolution is offered at its panel's highest refresh rate (for example 120 Hz), and DrawSplay never streams faster than the tablet's screen can show.
 - GNOME Wayland: **Settings > Displays**.
-- X11: your desktop's display settings (the `Virtual-1-1` display).
+- X11: your desktop's display settings (the `HDMI-1` or `Virtual-1-1` display).
 - sway / Hyprland: their output commands.
 - KDE Plasma: DrawSplay's settings page.
 
@@ -135,7 +135,7 @@ On Linux the frame rate is limited to 60, except on X11 hosts with VA-API (Intel
 
 **Linux shows a mirror instead of an extra display.**
 - Wayland: use GNOME, KDE Plasma 6, sway or Hyprland. Other Wayland desktops can't extend and show only X11 apps.
-- X11: run `sudo modprobe vkms`, then reconnect; log out and back in if `xrandr` doesn't list `Virtual-1-1`.
+- X11: the GPU needs an unplugged HDMI port (`ls /sys/class/drm | grep HDMI`); DrawSplay forces it on when the tablet connects and asks for your password once (`pkexec`), or run the host with passwordless `sudo`. Without a spare HDMI port, set `DRAWSPLAY_X11_VKMS_AUTOLOAD=1` to let DrawSplay load `vkms`, or load it yourself with `sudo modprobe vkms`. vkms can crash the X session on some kernels (seen on Linux 7.0 OEM with the `modesetting` driver), which is why it is not the default. When the tablet disconnects the display is switched off, but the port stays forced until you reboot or run `echo detect | sudo tee /sys/class/drm/card0-HDMI-A-1/status` (use your card and port); nothing is kept across reboots.
 - The host log states the reason, and the settings page shows warnings.
 
 **Multi-touch gestures don't work in an X11 app.** Some apps need touch enabled; for Firefox start it with `MOZ_USE_XINPUT2=1 firefox`.
