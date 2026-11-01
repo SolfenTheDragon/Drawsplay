@@ -16,6 +16,8 @@ struct x11cap {
     Window root;
     int rx, ry, w, h;
     int use_damage, use_cursor;
+    /* Cursor tracked for the tablet to draw (x11_cursor_get), not blended into the frame. */
+    int cursor_overlay;
 
     XImage *img;
     XShmSegmentInfo shm;
@@ -31,6 +33,7 @@ struct x11cap {
 
     uint32_t *cpix;
     int cw, ch, cxhot, cyhot;
+    uint32_t cshape; /* bumped on every shape change; 0 = none fetched yet */
     int px, py;
     rect_t cur_rect;
 };
@@ -59,6 +62,7 @@ static void fetch_cursor(x11cap *c)
         c->ch = ci->height;
         c->cxhot = ci->xhot;
         c->cyhot = ci->yhot;
+        c->cshape++;
     }
     XFree(ci);
 }
@@ -223,7 +227,7 @@ const uint8_t *x11_frame(const x11cap *c)
 
 int x11_pending(const x11cap *c)
 {
-    return !rect_empty(&c->gdirty) || c->cursor_dirty;
+    return !rect_empty(&c->gdirty) || (c->cursor_dirty && !c->cursor_overlay);
 }
 
 static void handle_events(x11cap *c)
@@ -263,6 +267,30 @@ void x11_poll_pointer(x11cap *c)
         c->py = ryp;
         c->cursor_dirty = 1;
     }
+}
+
+void x11_set_cursor_overlay(x11cap *c, int on)
+{
+    c->cursor_overlay = on && c->use_cursor;
+}
+
+int x11_cursor_get(const x11cap *c, x11_cursor *out)
+{
+    if (!c->use_cursor)
+        return 0;
+    out->w = c->cw;
+    out->h = c->ch;
+    out->hot_x = c->cxhot;
+    out->hot_y = c->cyhot;
+    out->shape_id = c->cshape;
+    out->argb = c->cpix;
+    /* Top-left of the cursor image in captured-frame pixels. */
+    out->x = c->px - c->rx - c->cxhot;
+    out->y = c->py - c->ry - c->cyhot;
+    rect_t raw = {out->x, out->y, c->cw, c->ch};
+    rect_t vis = rect_clip(raw, c->w, c->h);
+    out->visible = c->cpix && !rect_empty(&vis);
+    return 1;
 }
 
 static void blend_cursor(x11cap *c, rect_t cr, int ox, int oy)
@@ -340,7 +368,7 @@ int x11_capture(x11cap *c, rect_t *dirty)
     }
 
     rect_t d = g;
-    if (c->use_cursor) {
+    if (c->use_cursor && !c->cursor_overlay) {
         rect_t cr = {0, 0, 0, 0};
         int ox = c->px - c->rx - c->cxhot, oy = c->py - c->ry - c->cyhot;
         if (c->cpix) {

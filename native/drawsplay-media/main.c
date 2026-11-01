@@ -14,10 +14,14 @@
 #include "va_encode.h"
 #include "x11_capture.h"
 
-#define HELPER_VERSION 1
+/* 2: --max-inflight and the "A <n>" frame-ack command.
+ * 3: --cursor overlay (cursor sent as KIND_CURSOR frames, not in the video).
+ * The host passes these only to helpers reporting at least that version. */
+#define HELPER_VERSION 3
 #define KIND_AU 1
 #define KIND_TILE 2
 #define KIND_MODE 3
+#define KIND_CURSOR 4
 
 #define POINTER_POLL_US 8000
 
@@ -28,12 +32,15 @@ typedef struct {
     const char *display, *render_node;
     int x, y, w, h, fps, kbps, gop;
     int tiles_policy;
-    int damage, cursor;
+    int damage, cursor, cursor_overlay;
     int keepalive_ms;
+    int max_inflight;
 } options;
 
 static struct {
     atomic_uint kick_seq;
+    atomic_llong acked;
+    atomic_int acks_seen;
     atomic_int force_idr;
     atomic_int new_kbps;
     atomic_int mode_req;
@@ -57,6 +64,15 @@ static void parse_line(char *line)
     case 'K':
         atomic_store(&g_cmd.kick_seq, (unsigned)strtoul(line + 1, NULL, 10));
         break;
+    case 'A': {
+        /* Cumulative count of this helper's frames the tablet finished. */
+        long long v = strtoll(line + 1, NULL, 10);
+        long long cur = atomic_load(&g_cmd.acked);
+        while (v > cur && !atomic_compare_exchange_weak(&g_cmd.acked, &cur, v)) {
+        }
+        atomic_store(&g_cmd.acks_seen, 1);
+        break;
+    }
     case 'I':
         atomic_store(&g_cmd.force_idr, 1);
         break;
@@ -187,6 +203,7 @@ static int usage(void)
             "       drawsplay-media --display :0 [--x N --y N --w N --h N] --fps N --bitrate-kbps N\n"
             "                       [--gop N] [--render-node PATH] [--tiles auto|off|force]\n"
             "                       [--damage on|off] [--keepalive-ms N] [--no-cursor]\n"
+            "                       [--max-inflight N] [--cursor overlay|off]\n"
             "       drawsplay-media --selftest-tiles --display :0\n");
     return 2;
 }
@@ -240,8 +257,23 @@ static int parse_options(int argc, char **argv, options *o)
         } else if (!strcmp(a, "--gop")) {
             o->gop = atoi(v);
             i++;
+        } else if (!strcmp(a, "--cursor")) {
+            if (!strcmp(v, "overlay")) {
+                o->cursor = 1;
+                o->cursor_overlay = 1;
+            } else if (!strcmp(v, "off")) {
+                o->cursor = 0;
+                o->cursor_overlay = 0;
+            } else {
+                LOG("--cursor takes overlay or off");
+                return -1;
+            }
+            i++;
         } else if (!strcmp(a, "--keepalive-ms")) {
             o->keepalive_ms = atoi(v);
+            i++;
+        } else if (!strcmp(a, "--max-inflight")) {
+            o->max_inflight = atoi(v);
             i++;
         } else if (!strcmp(a, "--tiles")) {
             if (!strcmp(v, "auto"))
@@ -270,8 +302,8 @@ static int parse_options(int argc, char **argv, options *o)
             return -1;
         }
     }
-    if (o->fps < 1 || o->fps > 240 || o->kbps < 100 || o->keepalive_ms < 0) {
-        LOG("invalid --fps/--bitrate-kbps/--keepalive-ms");
+    if (o->fps < 1 || o->fps > 240 || o->kbps < 100 || o->keepalive_ms < 0 || o->max_inflight < 0) {
+        LOG("invalid --fps/--bitrate-kbps/--keepalive-ms/--max-inflight");
         return -1;
     }
     if (o->gop <= 0)
@@ -376,6 +408,203 @@ static void emit_tile_packets(session *s, int full, uint32_t seq, uint64_t t0)
     }
 }
 
+/*
+ * Frame window (flow control borrowed from SuperDisplay; see
+ * wiki/topics/superdisplay-windows-pipeline.md). With --max-inflight N and
+ * once the host forwards tablet acks ("A <n>"), a new video frame is
+ * captured and encoded only while fewer than N encoded frames are
+ * unacknowledged. A deferred capture loses nothing: damage keeps
+ * accumulating, and the next capture after an ack takes the newest screen,
+ * so a slow link or decoder costs frame rate, never queued latency.
+ */
+/* Short: a full window without ack progress this long means a lost ack, and
+ * the wait is a visible freeze (normal round trips are milliseconds). */
+#define ACK_STALL_US 300000
+/* The window covers one measured send->ack round trip (minimum over a
+ * sliding 2-4 s span), at least 2 frames and at most --max-inflight. */
+#define MIN_WINDOW 2
+#define RTT_SPAN_US 2000000
+#define SEND_RING 512
+
+static struct {
+    long long sent, assumed_through, last_acked, stalls;
+    uint64_t full_since; /* when the window last became full; 0 = not full */
+    uint64_t send_us[SEND_RING];
+    int64_t rtt_best, rtt_next;
+    uint64_t rtt_roll;
+    int window;
+} g_win = {.rtt_best = INT64_MAX, .rtt_next = INT64_MAX};
+
+static void rtt_add(uint64_t now, int64_t v)
+{
+    if (now >= g_win.rtt_roll) {
+        g_win.rtt_best = g_win.rtt_next;
+        g_win.rtt_next = INT64_MAX;
+        g_win.rtt_roll = now + RTT_SPAN_US;
+    }
+    if (v < g_win.rtt_next)
+        g_win.rtt_next = v;
+    if (v < g_win.rtt_best)
+        g_win.rtt_best = v;
+}
+
+static int window_for_rtt(int64_t rtt, int fps, int max)
+{
+    if (rtt == INT64_MAX)
+        return max;
+    int64_t interval = 1000000 / (fps > 0 ? fps : 60);
+    int64_t frames = (rtt + interval - 1) / interval + 1;
+    if (frames < MIN_WINDOW)
+        frames = MIN_WINDOW;
+    if (frames > max)
+        frames = max;
+    return (int)frames;
+}
+
+static int window_open(const options *o)
+{
+    if (o->max_inflight <= 0 || !atomic_load(&g_cmd.acks_seen))
+        return 1;
+    if (!g_win.window)
+        g_win.window = o->max_inflight;
+    long long acked = atomic_load(&g_cmd.acked);
+    uint64_t now = now_us();
+    if (acked != g_win.last_acked) {
+        /* Acks count this helper's frames in order: frame acked-1 is the
+         * newest acknowledged one. */
+        long long frame = acked - 1;
+        if (acked > g_win.last_acked && frame >= 0 && frame < g_win.sent && g_win.sent - frame <= SEND_RING) {
+            rtt_add(now, (int64_t)(now - g_win.send_us[frame % SEND_RING]));
+            g_win.window = window_for_rtt(g_win.rtt_best, o->fps, o->max_inflight);
+        }
+        g_win.last_acked = acked;
+        g_win.full_since = 0; /* progress: restart the stall clock */
+    }
+    /* Frames before assumed_through were written off by the stall guard;
+     * late acks for them only catch up to this floor, so they never widen
+     * the window. */
+    long long done = acked > g_win.assumed_through ? acked : g_win.assumed_through;
+    long long inflight = g_win.sent - done;
+    if (inflight < g_win.window) {
+        g_win.full_since = 0;
+        return 1;
+    }
+    /* The stall clock runs only while the window is full, so an idle pause
+     * never makes the first full window of the next burst look stalled. */
+    if (!g_win.full_since) {
+        g_win.full_since = now;
+    } else if (now - g_win.full_since > ACK_STALL_US) {
+        /* Acks stopped (lost on a reconnect, or a client that quit acking):
+         * write the in-flight frames off instead of freezing the stream. */
+        g_win.assumed_through = g_win.sent;
+        g_win.full_since = 0;
+        g_win.stalls++;
+        LOG("frame acks stalled; releasing %lld in-flight frames", inflight);
+        return 1;
+    }
+    return 0;
+}
+
+/*
+ * Cursor overlay (--cursor overlay): the cursor is not blended into the
+ * frames. Changes go out as small KIND_CURSOR frames at once, independent of
+ * video frames, for the tablet to draw. Payload, big-endian (the host
+ * forwards it as video packet 5; see CursorPacket.kt): u8 flags (1 visible,
+ * 2 shape follows), i32 x, i32 y (top-left of the cursor image in frame
+ * pixels), u32 shape id; with a shape: u16 w, u16 h, u16 hot x, u16 hot y,
+ * w*h*4 bytes BGRA, straight alpha.
+ */
+#define CURSOR_MAX_SIDE 256 /* larger shapes are rejected by the tablet */
+#define CURSOR_FLAG_VISIBLE 1
+#define CURSOR_FLAG_SHAPE 2
+#define CURSOR_HEADER 13
+#define CURSOR_SHAPE_HEADER 8
+
+static struct {
+    int sent_any, last_visible, last_x, last_y;
+    uint32_t last_shape;
+    uint8_t *buf; /* 16 spare bytes, then the payload */
+    size_t cap;
+} g_cur;
+
+static void put_be32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >> 8);
+    p[3] = (uint8_t)v;
+}
+
+static void put_be16(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v >> 8);
+    p[1] = (uint8_t)v;
+}
+
+/* Sends the cursor when it moved, changed shape or visibility. */
+static void relay_cursor(const x11cap *cap)
+{
+    x11_cursor c;
+    if (!x11_cursor_get(cap, &c))
+        return;
+    int w = c.w > CURSOR_MAX_SIDE ? CURSOR_MAX_SIDE : c.w;
+    int h = c.h > CURSOR_MAX_SIDE ? CURSOR_MAX_SIDE : c.h;
+    int visible = c.visible && w > 0 && h > 0;
+    if (g_cur.sent_any && visible == g_cur.last_visible &&
+        (!visible || (c.x == g_cur.last_x && c.y == g_cur.last_y && c.shape_id == g_cur.last_shape)))
+        return;
+    int have_shape = c.argb && w > 0 && h > 0 && (!g_cur.sent_any || c.shape_id != g_cur.last_shape);
+    size_t len = CURSOR_HEADER + (have_shape ? CURSOR_SHAPE_HEADER + (size_t)w * h * 4 : 0);
+    if (16 + len > g_cur.cap) {
+        uint8_t *nb = realloc(g_cur.buf, 16 + len);
+        if (!nb) {
+            LOG("out of memory");
+            exit(1);
+        }
+        g_cur.buf = nb;
+        g_cur.cap = 16 + len;
+    }
+    uint8_t *p = g_cur.buf + 16;
+    p[0] = (uint8_t)((visible ? CURSOR_FLAG_VISIBLE : 0) | (have_shape ? CURSOR_FLAG_SHAPE : 0));
+    put_be32(p + 1, (uint32_t)c.x);
+    put_be32(p + 5, (uint32_t)c.y);
+    put_be32(p + 9, c.shape_id);
+    if (have_shape) {
+        uint8_t *q = p + CURSOR_HEADER;
+        put_be16(q, (uint32_t)w);
+        put_be16(q + 2, (uint32_t)h);
+        put_be16(q + 4, c.hot_x < 0 ? 0 : (uint32_t)c.hot_x);
+        put_be16(q + 6, c.hot_y < 0 ? 0 : (uint32_t)c.hot_y);
+        uint8_t *d = q + CURSOR_SHAPE_HEADER;
+        for (int y = 0; y < h; y++) {
+            const uint32_t *src = c.argb + (size_t)y * c.w;
+            for (int x = 0; x < w; x++, d += 4) {
+                /* X gives premultiplied ARGB; the wire wants straight alpha. */
+                uint32_t px = src[x], a = px >> 24;
+                uint32_t b = px & 0xff, g = (px >> 8) & 0xff, r = (px >> 16) & 0xff;
+                if (a != 0 && a != 255) {
+                    b = b * 255 / a;
+                    g = g * 255 / a;
+                    r = r * 255 / a;
+                    b = b > 255 ? 255 : b;
+                    g = g > 255 ? 255 : g;
+                    r = r > 255 ? 255 : r;
+                }
+                d[0] = (uint8_t)b;
+                d[1] = (uint8_t)g;
+                d[2] = (uint8_t)r;
+                d[3] = (uint8_t)a;
+            }
+        }
+        g_cur.last_shape = c.shape_id;
+    }
+    send_frame(p, len, KIND_CURSOR, 0, atomic_load(&g_cmd.kick_seq), now_us());
+    g_cur.sent_any = 1;
+    g_cur.last_visible = visible;
+    g_cur.last_x = c.x;
+    g_cur.last_y = c.y;
+}
+
 static void emit_video(session *s, int force_idr, uint32_t seq, uint64_t t0)
 {
     uint8_t *au;
@@ -386,6 +615,8 @@ static void emit_video(session *s, int force_idr, uint32_t seq, uint64_t t0)
         exit(1);
     }
     send_frame(au, len, KIND_AU, idr ? 1 : 0, seq, t0);
+    g_win.send_us[g_win.sent % SEND_RING] = now_us();
+    g_win.sent++;
 }
 
 static void enter_tile(session *s, uint32_t seq, uint64_t t0)
@@ -513,6 +744,7 @@ static int run_capture(const options *o)
     s.cap = x11_open(o->display, o->x, o->y, o->w, o->h, o->damage, o->cursor);
     if (!s.cap)
         return 1;
+    x11_set_cursor_overlay(s.cap, o->cursor_overlay);
     s.w = x11_width(s.cap);
     s.h = x11_height(s.cap);
     s.enc = va_enc_open(o->render_node, s.w, s.h, o->fps, o->kbps, o->gop, NULL);
@@ -561,6 +793,11 @@ static int run_capture(const options *o)
         x11_drain(s.cap);
         int pending = x11_pending(s.cap);
         apply_mode_request(&s);
+        /* Only once the stream has opened with its first picture: the host
+         * discards cursor frames ahead of it, and the first one sent must
+         * carry the full cursor state. */
+        if (o->cursor_overlay && have_frame)
+            relay_cursor(s.cap);
 
         uint64_t now = now_us();
         if (have_frame && atomic_load(&g_cmd.force_idr)) {
@@ -575,11 +812,16 @@ static int run_capture(const options *o)
             continue;
         }
 
+        /* Video mode waits while the tablet has max_inflight frames in hand. */
+        int gated = s.mode == 0 && !first && !window_open(o);
+
         int due_capture = first || (o->damage ? pending : 1);
         uint64_t next_ok = last_start + interval;
         if (due_capture && !first && now < next_ok)
             due_capture = 0;
         if (!o->damage && !first && now < next_ok)
+            due_capture = 0;
+        if (gated)
             due_capture = 0;
 
         if (due_capture) {
@@ -598,7 +840,7 @@ static int run_capture(const options *o)
             continue;
         }
 
-        if (keepalive && s.mode == 0 && have_frame && now - last_send >= keepalive) {
+        if (keepalive && s.mode == 0 && have_frame && !gated && now - last_send >= keepalive) {
             uint64_t t0 = now;
             emit_video(&s, 0, atomic_load(&g_cmd.kick_seq), t0);
             last_send = now_us();
@@ -614,6 +856,14 @@ static int run_capture(const options *o)
             int64_t k = (int64_t)(last_send + keepalive - now);
             if (wait < 0 || k < wait)
                 wait = k;
+        }
+        if (gated) {
+            /* An ack wakes the loop through wake_fd; the timeout only
+             * bounds the wait for the stall guard. */
+            int64_t k = (int64_t)(g_win.full_since + ACK_STALL_US) - (int64_t)now;
+            if (k < 1000)
+                k = 1000;
+            wait = k;
         }
         if (o->cursor && (wait < 0 || wait > POINTER_POLL_US))
             wait = POINTER_POLL_US;
