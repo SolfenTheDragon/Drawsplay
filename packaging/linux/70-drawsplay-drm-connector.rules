@@ -1,0 +1,7 @@
+# DrawSplay: lets members of the plugdev group force a spare, unplugged HDMI
+# connector on or off without root. On X11, DrawSplay uses such a connector as
+# the tablet's virtual display when the vkms module is unavailable or unsafe
+# (it writes "on" / "detect" to the connector's sysfs status file).
+# Only the status file of HDMI-A connectors is opened up; DisplayPort and
+# USB-C connectors are never touched.
+ACTION=="add|change", SUBSYSTEM=="drm", KERNEL=="card[0-9]*-HDMI-A-[0-9]*", RUN+="/bin/sh -c 'chgrp plugdev /sys%p/status && chmod 0664 /sys%p/status'"
