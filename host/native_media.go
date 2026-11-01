@@ -41,6 +41,7 @@ const (
 	nativeFrameKindAU       = 1
 	nativeFrameKindTile     = 2
 	nativeFrameKindMode     = 3
+	nativeFrameKindCursor   = 4
 	nativeMediaModeAuto     = "auto"
 	nativeMediaModeOn       = "on"
 	nativeMediaModeOff      = "off"
@@ -165,15 +166,93 @@ func noteInputInjected(seq uint32) {
 	}
 }
 
-// nativeHelperInput feeds the helper's stdin with "K <seq>" kicks until ctx
-// ends.
+// nativeMaxInflight bounds the frames a native helper keeps unacknowledged
+// by the tablet (once the tablet acknowledges frames at all). SuperDisplay
+// uses the same window: deep enough to cover one USB round trip plus the
+// decoder at 60-120 fps, shallow enough that a stall never queues more than
+// a few frames of latency.
+const nativeMaxInflight = 5
+
+// clientRequestsKeyframes reports whether the tablet asks for a keyframe
+// whenever it drops pictures (clients with frame acks also do that). Native
+// helpers then send keyframes only on request instead of every two seconds:
+// on a lossless link (USB, TCP) a periodic keyframe only adds a periodic
+// burst, several frames in size, to the link and the latency.
+func clientRequestsKeyframes() bool { return clientHasFeature(clientFeatureFrameAck) }
+
+// nativeFlowControlHelperVersion is the first Linux helper version that
+// accepts --max-inflight and frame acks ("A <n>"). Older helper binaries
+// (built separately, see BUILD.md) reject unknown options, so they get the
+// command line they always had.
+const nativeFlowControlHelperVersion = 2
+
+// nativeFlowControlArgs returns the frame-window and keyframe options for a
+// Linux helper of the given probed version.
+func nativeFlowControlArgs(helperVersion, fps int) []string {
+	if helperVersion < nativeFlowControlHelperVersion {
+		return nil
+	}
+	args := []string{"--max-inflight", strconv.Itoa(nativeMaxInflight)}
+	if clientRequestsKeyframes() {
+		// Keyframes only when the tablet asks: no periodic IDR spikes.
+		args = append(args, "--gop", strconv.Itoa(onDemandGOPFrames(fps)))
+	}
+	return args
+}
+
+// nativeCursorHelperVersion is the first Linux helper version that accepts
+// --cursor overlay (cursor sent as separate frames). Older helpers burn the
+// cursor into the video and reject the option.
+const nativeCursorHelperVersion = 3
+
+// nativeCursorArgs returns --cursor overlay for a Linux helper of the given
+// probed version when the tablet draws the host cursor itself: cursor motion
+// then costs no encode and never waits behind a video frame, as on Windows.
+func nativeCursorArgs(helperVersion int) []string {
+	if helperVersion < nativeCursorHelperVersion || !clientHasFeature(clientFeatureCursor) {
+		return nil
+	}
+	return []string{"--cursor", "overlay"}
+}
+
+// onDemandGOPFrames is the keyframe interval used with keyframes on
+// request: an hour, i.e. effectively never.
+func onDemandGOPFrames(fps int) int { return max(fps, 1) * 3600 }
+
+// helperKeyframeSignal asks the active native helper for a keyframe ("I"),
+// which it produces in place instead of restarting like ffmpeg must.
+var helperKeyframeSignal = make(chan struct{}, 1)
+
+func requestHelperKeyframe() {
+	select {
+	case helperKeyframeSignal <- struct{}{}:
+	default:
+	}
+}
+
+// nativeHelperInput feeds the helper's stdin until ctx ends: "K <seq>"
+// input kicks, "A <n>" tablet frame acknowledgements of this helper's
+// frames, and "I" keyframe requests.
 func nativeHelperInput(ctx context.Context, w io.Writer) error {
+	forwardedAtStart := frameAcks.forwarded.Load()
+	lastAck := int64(-1)
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-kickSignal:
 			if _, err := fmt.Fprintf(w, "K %d\n", latestInputSeq.Load()); err != nil {
+				return err
+			}
+		case <-frameAcks.signal:
+			if n := helperAckedFrames(forwardedAtStart); n != lastAck {
+				lastAck = n
+				if _, err := fmt.Fprintf(w, "A %d\n", n); err != nil {
+					return err
+				}
+			}
+		case <-helperKeyframeSignal:
+			if _, err := io.WriteString(w, "I\n"); err != nil {
 				return err
 			}
 		}
@@ -195,7 +274,7 @@ var nativeProbeCache = struct {
 }{byPath: map[string]nativeProbeResult{}}
 
 // findNativeHelper locates the helper binary: the env override, then next to
-// the host executable.
+// the host executable, then (Windows) the copy embedded in the host.
 func findNativeHelper() string {
 	if p := strings.TrimSpace(os.Getenv(nativeHelperEnv)); p != "" {
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {
@@ -216,7 +295,7 @@ func findNativeHelper() string {
 	if st, err := os.Stat(p); err == nil && !st.IsDir() {
 		return p
 	}
-	return ""
+	return platformNativeHelperPath()
 }
 
 func probeNativeHelper(path string) nativeProbeResult {
@@ -301,11 +380,14 @@ func withNativeHelperCandidate(specs []pipelineSpec, opts videoOptions, target c
 		log.Printf("Native media helper skipped for VA driver %q in %s mode; using ffmpeg (set nativeMediaHelper to \"on\" to try it)", res.Vendor, mode)
 		return specs
 	}
+	args := nativeHelperArgs(display, target.Rect, opts.FPS, opts.Bitrate, clientHasFeature(clientFeatureTiles))
+	args = append(args, nativeFlowControlArgs(res.Version, opts.FPS)...)
+	args = append(args, nativeCursorArgs(res.Version)...)
 	spec := pipelineSpec{
 		Name:        "native_vaapi",
 		BaseEncoder: vaapiH264Encoder,
 		Cmd:         path,
-		Args:        nativeHelperArgs(display, target.Rect, opts.FPS, opts.Bitrate, clientHasFeature(clientFeatureTiles)),
+		Args:        args,
 		Framed:      true,
 		Input:       nativeHelperInput,
 	}
@@ -353,6 +435,7 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 	}
 	sendMeta := clientHasFeature(clientFeatureFrameMeta)
 	sendTiles := clientHasFeature(clientFeatureTiles)
+	sendCursor := clientHasFeature(clientFeatureCursor)
 	nextSummary := time.Now().Add(sessionSummaryInterval)
 	telemetry := newPipelineTelemetry(spec.Name)
 	defer telemetry.finish()
@@ -376,6 +459,11 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 		}
 		if sessionDisplayBlackout() != expectBlackout {
 			return produced.Load(), errPrivacyModeChanged
+		}
+		if first && hdr.Kind == nativeFrameKindCursor {
+			// A cursor update ahead of the first picture carries no video;
+			// the stream proper must still open with a keyframe.
+			continue
 		}
 		if first {
 			if hdr.Kind != nativeFrameKindAU || !auIsDecodableStart(payload) {
@@ -411,12 +499,24 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 			units := splitAnnexBAll(payload)
 			telemetry.addUnits(len(units))
 			for _, unit := range units {
+				if spec.SignalBT709Limited && h264NALType(unit) == 7 {
+					unit = withBT709LimitedVUI(unit)
+				}
 				if err := writeVideoPacket(w, videoPacketNAL, unit); err != nil {
 					return true, fmt.Errorf("client write: %w", err)
 				}
 				sentNALs++
 				sentBytes += int64(len(unit))
 			}
+			noteFrameForwarded()
+		case nativeFrameKindCursor:
+			if !sendCursor {
+				break
+			}
+			if err := writeVideoPacket(w, videoPacketCursor, payload); err != nil {
+				return true, fmt.Errorf("client write: %w", err)
+			}
+			sentBytes += int64(len(payload))
 		case nativeFrameKindTile, nativeFrameKindMode:
 			if !sendTiles {
 				break
@@ -433,6 +533,11 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 		switch adaptToLinkFeedback(monitor, rc, temporal, gate, spec) {
 		case congestionActionRestart:
 			return true, errRateChanged
+		}
+		// Helpers make a keyframe on request without the restart (and the
+		// hiccup) the ffmpeg pipelines need for one.
+		if monitor.consumeKeyframeRequest(time.Now()) {
+			requestHelperKeyframe()
 		}
 		if now := time.Now(); now.After(nextSummary) {
 			nextSummary = now.Add(sessionSummaryInterval)

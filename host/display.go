@@ -56,6 +56,11 @@ type captureTarget struct {
 	// PCI vendor ID of that adapter (0 = unknown). Windows orders encoder
 	// candidates so the capture GPU's own encoder is tried first.
 	AdapterVendor uint32
+	// IDDMonitorID is the DrawSplay IddCx monitor behind this output (0 =
+	// none: mirroring, or the Parsec VDD fallback). With it the Windows
+	// native helper reads frames straight from the driver instead of
+	// re-capturing them through Desktop Duplication.
+	IDDMonitorID int
 
 	// PipeWire node ID (Kind == capturePipeWire).
 	Node uint32

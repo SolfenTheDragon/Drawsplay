@@ -96,6 +96,11 @@ func startCapturePipeline(ctx context.Context, spec pipelineSpec) (*capturePipel
 	fullPipeBound := fullPipeBoundFor(spec, stdout)
 	stderr := &boundedBuffer{max: 8 * 1024}
 	cmd.Stderr = stderr
+	if spec.Framed {
+		// Native helpers log sparingly (startup, a stats line every few
+		// seconds); keep it in the host log, not just in failure reports.
+		cmd.Stderr = io.MultiWriter(stderr, &lineLogger{prefix: "[" + spec.Name + "] "})
+	}
 	var stdin io.WriteCloser
 	if spec.Input != nil {
 		if stdin, err = cmd.StdinPipe(); err != nil {
@@ -168,6 +173,34 @@ func (p *capturePipeline) waitInput() {
 	case <-time.After(pipelineKillWaitTimeout):
 		log.Printf("Capture input did not stop within %s", pipelineKillWaitTimeout)
 	}
+}
+
+// lineLogger writes each complete line it receives to the host log.
+type lineLogger struct {
+	prefix string
+	mu     sync.Mutex
+	buf    []byte
+}
+
+func (l *lineLogger) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.buf = append(l.buf, p...)
+	for {
+		i := bytes.IndexByte(l.buf, '\n')
+		if i < 0 {
+			break
+		}
+		if line := strings.TrimRight(string(l.buf[:i]), "\r"); line != "" {
+			log.Print(l.prefix + line)
+		}
+		l.buf = l.buf[i+1:]
+	}
+	if len(l.buf) > 4096 { // a runaway line without newline
+		log.Print(l.prefix + string(l.buf))
+		l.buf = l.buf[:0]
+	}
+	return len(p), nil
 }
 
 // errorTail returns captured stderr, and why the capture input failed, for

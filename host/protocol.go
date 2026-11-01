@@ -65,7 +65,15 @@ const (
 	videoPacketTile      = 2
 	videoPacketMode      = 3
 	videoPacketFrameMeta = 4
+	// videoPacketCursor (5) carries the host cursor for the tablet to draw
+	// itself (clientFeatureCursor); the payload is the helper's cursor frame
+	// (native/drawsplay-media-win/main.cpp, kKindCursor).
+	videoPacketCursor = 5
 )
+
+// clientFeatureCursor: the client draws the host cursor from
+// videoPacketCursor, so the Windows helper may take it out of the frames.
+const clientFeatureCursor = "cursor1"
 
 // packet is the union of all input-channel packet fields.
 type packet struct {
@@ -237,6 +245,7 @@ type hostSessionPolicyMsg struct {
 	Type                  string `json:"type"` // always "sessionPolicy"
 	KeepAliveOnBackground bool   `json:"keepAliveOnBackground"`
 	PenPrediction         bool   `json:"penPrediction"`
+	PenInkPreview         bool   `json:"penInkPreview"`
 	VideoScaling          string `json:"videoScaling,omitempty"`
 	WifiEnabled           bool   `json:"wifiEnabled"`
 	WifiAuthToken         string `json:"wifiAuthToken,omitempty"`
@@ -316,7 +325,9 @@ func negotiateVideoCodec() string {
 // channel (client → host, newline-delimited JSON; see feedback.go). All
 // counters are per-interval deltas, not cumulative.
 type clientStatsMsg struct {
-	Type           string  `json:"type"` // always "stats"
+	Type           string  `json:"type"` // "stats"; also "keyframe" and "ack" (see feedback.go)
+	// Frames is the cumulative picture count of an "ack" message.
+	Frames         int64   `json:"frames,omitempty"`
 	IntervalMs     int64   `json:"intervalMs"`
 	FramesReceived int64   `json:"framesReceived"`
 	FramesRendered int64   `json:"framesRendered"`

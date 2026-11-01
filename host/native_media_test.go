@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -106,5 +107,20 @@ func TestProbeRealHelper(t *testing.T) {
 	args := nativeHelperArgs(":0", displayRect{}, 60, "8M", true)
 	if len(args) == 0 {
 		t.Fatal("no args")
+	}
+}
+
+func TestNativeCursorArgs(t *testing.T) {
+	t.Cleanup(func() { publishClientVideoFeatures(nil) })
+	publishClientVideoFeatures([]string{"tile1", "cursor1"})
+	if got := strings.Join(nativeCursorArgs(nativeCursorHelperVersion), " "); got != "--cursor overlay" {
+		t.Fatalf("helper with cursor support: args = %q", got)
+	}
+	if got := nativeCursorArgs(nativeCursorHelperVersion - 1); got != nil {
+		t.Fatalf("older helper rejects --cursor, got %v", got)
+	}
+	publishClientVideoFeatures([]string{"tile1"})
+	if got := nativeCursorArgs(nativeCursorHelperVersion); got != nil {
+		t.Fatalf("tablet without cursor1 must keep the cursor in the video, got %v", got)
 	}
 }

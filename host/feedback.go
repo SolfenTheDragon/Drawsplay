@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -59,6 +60,88 @@ type sessionMonitor struct {
 	keyframeWanted atomic.Bool
 	// lastKeyframeRestart is owned by the session goroutine.
 	lastKeyframeRestart time.Time
+	// lastAckFrames is the client's latest cumulative frame ack on this
+	// connection; owned by the reader goroutine.
+	lastAckFrames int64
+}
+
+// Frame acknowledgements (flow control borrowed from SuperDisplay, see
+// wiki/topics/superdisplay-windows-pipeline.md). A client advertising
+// clientFeatureFrameAck reports {"type":"ack","frames":N} upstream, N being
+// the pictures it has finished with (decoded, or dropped before decoding)
+// on this connection. Native helpers read the count on stdin ("A <n>") and
+// keep at most a few frames unacknowledged, encoding only the newest frame
+// when the window opens, so neither the link nor the decoder can build a
+// backlog. ffmpeg pipelines ignore it.
+//
+// The counters are process-wide and monotonic so helper restarts and
+// reconnects need no coordination: forwarded counts access units written to
+// any client, acked the acknowledgements received, and a new connection
+// starts with nothing in flight (acked := forwarded).
+var frameAcks struct {
+	forwarded atomic.Int64
+	acked     atomic.Int64
+	signal    chan struct{}
+}
+
+func init() { frameAcks.signal = make(chan struct{}, 1) }
+
+const clientFeatureFrameAck = "ack1"
+
+// noteFrameForwarded records one picture written to the client, from any
+// pipeline: the client acknowledges every picture it receives.
+func noteFrameForwarded() { frameAcks.forwarded.Add(1) }
+
+// nalStartsPicture reports whether an Annex-B NAL unit is the first slice
+// of a picture (the client counts pictures the same way): an H.264 slice
+// with first_mb_in_slice == 0, or an HEVC slice segment with
+// first_slice_segment_in_pic_flag set. Both are the first bit after the NAL
+// header (ue(v) zero encodes as a single 1 bit).
+func nalStartsPicture(codec string, unit []byte) bool {
+	off := annexBNALHeaderOffset(unit)
+	if off < 0 {
+		return false
+	}
+	if strings.EqualFold(codec, "hevc") || strings.EqualFold(codec, "h265") {
+		if off+2 >= len(unit) {
+			return false
+		}
+		nalType := (unit[off] >> 1) & 0x3F
+		return nalType <= 31 && unit[off+2]&0x80 != 0
+	}
+	if off+1 >= len(unit) {
+		return false
+	}
+	nalType := unit[off] & 0x1F
+	return (nalType == 1 || nalType == 5) && unit[off+1]&0x80 != 0
+}
+
+// resetFrameAcks marks every frame forwarded so far as settled: frames sent
+// to a previous connection will never be acknowledged.
+func resetFrameAcks() { frameAcks.acked.Store(frameAcks.forwarded.Load()) }
+
+// addFrameAcks credits newly acknowledged frames and wakes the helper feeder.
+func addFrameAcks(n int64) {
+	if n <= 0 {
+		return
+	}
+	frameAcks.acked.Add(n)
+	select {
+	case frameAcks.signal <- struct{}{}:
+	default:
+	}
+}
+
+// helperAckedFrames converts the process-wide counters into the count a
+// helper started at forwardedAtStart understands: acknowledgements of its
+// own frames only, clamped to what it has actually produced. Frames from
+// before it (an earlier pipeline) are acknowledged first, in order.
+func helperAckedFrames(forwardedAtStart int64) int64 {
+	n := frameAcks.acked.Load() - forwardedAtStart
+	if produced := frameAcks.forwarded.Load() - forwardedAtStart; n > produced {
+		n = produced
+	}
+	return max(n, 0)
 }
 
 // keyframeRequestCooldown spaces encoder restarts for client keyframe
@@ -84,6 +167,7 @@ var latestClientVideoStats = struct {
 func (m *sessionMonitor) runStatsReader(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 0, 512), maxStatsLineBytes)
+	resetFrameAcks()
 	for scanner.Scan() {
 		var stats clientStatsMsg
 		if err := json.Unmarshal(scanner.Bytes(), &stats); err != nil {
@@ -91,6 +175,13 @@ func (m *sessionMonitor) runStatsReader(conn net.Conn) {
 		}
 		if stats.Type == "keyframe" {
 			m.keyframeWanted.Store(true)
+			continue
+		}
+		if stats.Type == "ack" {
+			if stats.Frames > m.lastAckFrames {
+				addFrameAcks(stats.Frames - m.lastAckFrames)
+				m.lastAckFrames = stats.Frames
+			}
 			continue
 		}
 		if stats.Type != "stats" {

@@ -50,6 +50,11 @@ type settings struct {
 	// PenPrediction makes the tablet extrapolate stylus hover motion a few
 	// milliseconds ahead so the host cursor tracks the pen with less lag.
 	PenPrediction bool `json:"penPrediction"`
+	// PenInkPreview makes the tablet draw a provisional pen stroke at once
+	// and erase it when the host's own picture of the stroke arrives, so ink
+	// appears with tablet-local latency. The preview is a thin neutral line,
+	// not the host app's brush; turning this off removes it entirely.
+	PenInkPreview bool `json:"penInkPreview"`
 	// IdleCaptureGate pauses the Linux X11 capture process while the screen is
 	// static (no damage, no pointer movement) and resumes it on the first
 	// change, cutting idle CPU, bitrate and tablet decode work. Off by
@@ -111,6 +116,7 @@ func defaultSettings() settings {
 		KeyboardEnabled:       true,
 		KeepAliveOnBackground: false,
 		PenPrediction:         true,
+		PenInkPreview:         true,
 		X11HighRateCapture:    true,
 		VideoScaling:          videoScalingFill,
 		NoDriverInstall:       false,

@@ -426,6 +426,7 @@ async function loadSettings() {
   $("adb-serial").value = s.preferredADBSerial || "";
   $("paired-wifi-enabled").checked = !!s.pairedWifiEnabled;
   wifiSelectedInterface = s.pairedWifiInterface || "";
+  // Legacy Wi-Fi transport (Advanced settings > Advanced systems).
   $("wifi-enabled").checked = !!s.wifiEnabled;
   $("wifi-service-name").value = s.wifiServiceName || "DrawSplay";
   $("wifi-bind-address").value = s.wifiBindAddress || "0.0.0.0";
@@ -450,6 +451,7 @@ async function loadSettings() {
   $("keep-alive-on-background").checked = !!s.keepAliveOnBackground;
   $("idle-display-timeout").value = Number.isFinite(s.idleDisplayTimeoutSec) ? s.idleDisplayTimeoutSec : 600;
   $("pen-prediction").checked = !!s.penPrediction;
+  $("pen-ink-preview").checked = s.penInkPreview !== false;
   $("idle-capture-gate").checked = !!s.idleCaptureGate;
   $("x11-high-rate-capture").checked = !!s.x11HighRateCapture;
   $("video-scaling").value = s.videoScaling || "fill";
@@ -756,6 +758,7 @@ $("form").addEventListener("submit", async (ev) => {
       keepAliveOnBackground: $("keep-alive-on-background").checked,
       idleDisplayTimeoutSec: Math.max(0, parseInt($("idle-display-timeout").value, 10) || 0),
       penPrediction: $("pen-prediction").checked,
+      penInkPreview: $("pen-ink-preview").checked,
       idleCaptureGate: $("idle-capture-gate").checked,
       x11HighRateCapture: $("x11-high-rate-capture").checked,
       videoScaling: $("video-scaling").value,

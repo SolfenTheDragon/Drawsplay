@@ -1102,6 +1102,12 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 		}
 		sentNALs++
 		sentBytes += int64(len(unit))
+		// The client acknowledges every picture, ffmpeg's included; count
+		// them so a native helper started later on this connection gets
+		// only its own frames' acknowledgements.
+		if nalStartsPicture(opts.Codec, unit) {
+			noteFrameForwarded()
+		}
 		return nil
 	}
 	type readChunk struct {

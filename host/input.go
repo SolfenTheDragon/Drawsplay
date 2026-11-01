@@ -148,7 +148,7 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			log.Printf("Display-preference clear push failed (session=%d)", id)
 		}
 	}
-	sendSessionPolicy := func(keepAlive bool, penPrediction bool, videoScaling string, wifiEnabled bool, wifiAuthToken string) {
+	sendSessionPolicy := func(keepAlive bool, penPrediction bool, penInkPreview bool, videoScaling string, wifiEnabled bool, wifiAuthToken string) {
 		tlsRequired, tlsFP := currentWiFiPolicyTLS()
 		clientWiFiEnabled := wifiEnabled && tlsRequired && strings.TrimSpace(tlsFP) != ""
 		clientWiFiToken := ""
@@ -159,6 +159,7 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			Type:                  "sessionPolicy",
 			KeepAliveOnBackground: keepAlive,
 			PenPrediction:         penPrediction,
+			PenInkPreview:         penInkPreview,
 			VideoScaling:          videoScaling,
 			WifiEnabled:           clientWiFiEnabled,
 			WifiAuthToken:         clientWiFiToken,
@@ -210,9 +211,9 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			subscribeModePreferenceClears(id, sendClearDisplayMode)
 			cfg := store.get()
 			if transport == "usb" || transport == "wifi" {
-				sendSessionPolicy(cfg.KeepAliveOnBackground, cfg.PenPrediction, cfg.VideoScaling, cfg.WifiEnabled, cfg.WifiAuthToken)
+				sendSessionPolicy(cfg.KeepAliveOnBackground, cfg.PenPrediction, cfg.PenInkPreview, cfg.VideoScaling, cfg.WifiEnabled, cfg.WifiAuthToken)
 			} else {
-				sendSessionPolicy(cfg.KeepAliveOnBackground, cfg.PenPrediction, cfg.VideoScaling, false, "")
+				sendSessionPolicy(cfg.KeepAliveOnBackground, cfg.PenPrediction, cfg.PenInkPreview, cfg.VideoScaling, false, "")
 			}
 			return true
 		case "modePrefs":
