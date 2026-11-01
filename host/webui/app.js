@@ -1053,6 +1053,16 @@ setDebugConsoleEnabled(false);
 setCalibrationForm("", { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 });
 loadSettings().catch((e) => showMsg(e.message, false));
 refreshStatus();
+if (window.EventSource) {
+  // The tray asks an already-open settings page to come to the front.
+  new EventSource("/api/focus-events").addEventListener("focus", () => {
+    window.focus();
+    const base = document.title.replace(/^● /, "");
+    document.title = "● " + base;
+    const clear = () => { document.title = base; window.removeEventListener("focus", clear); };
+    window.addEventListener("focus", clear);
+  });
+}
 setInterval(refreshStatus, 2000);
 setInterval(refreshWifiPairing, 2000);
 setInterval(renderWifiPairing, 1000);

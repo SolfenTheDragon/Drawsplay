@@ -65,6 +65,7 @@ func (api webUIAPI) register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/csrf", getOnly(api.handleCSRF))
 	mux.HandleFunc("/api/settings", api.handleSettings)
 	mux.HandleFunc("/api/status", getOnly(api.handleStatus))
+	mux.HandleFunc("/api/focus-events", getOnly(handleFocusEvents))
 	mux.HandleFunc("/api/setup-check", getOnly(api.handleSetupCheck))
 	mux.HandleFunc("/api/setup/remediate", securePost(api.csrfToken, api.handleSetupRemediate))
 	mux.HandleFunc("/api/diagnostics", getOnly(api.handleDiagnostics))

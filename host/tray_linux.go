@@ -244,12 +244,35 @@ func (m *trayMenu) AboutToShowGroup([]int32) ([]int32, []int32, *dbus.Error) {
 	return []int32{}, []int32{}, nil
 }
 
+// trayDoubleClick is the longest gap between two activations that counts as
+// a double click.
+const trayDoubleClick = 500 * time.Millisecond
+
+// trayItem declares ItemIsMenu, so a single click shows the menu. Hosts that
+// still deliver Activate get double-click detection: two activations in quick
+// succession open the settings page.
 type trayItem struct {
 	onActivate func()
+	mu         sync.Mutex
+	last       time.Time
 }
 
-func (i *trayItem) Activate(int32, int32) *dbus.Error          { i.onActivate(); return nil }
-func (i *trayItem) SecondaryActivate(int32, int32) *dbus.Error { i.onActivate(); return nil }
+func (i *trayItem) Activate(int32, int32) *dbus.Error {
+	i.mu.Lock()
+	now := time.Now()
+	double := !i.last.IsZero() && now.Sub(i.last) <= trayDoubleClick
+	if double {
+		i.last = time.Time{}
+	} else {
+		i.last = now
+	}
+	i.mu.Unlock()
+	if double {
+		i.onActivate()
+	}
+	return nil
+}
+func (i *trayItem) SecondaryActivate(int32, int32) *dbus.Error { return nil }
 func (i *trayItem) ContextMenu(int32, int32) *dbus.Error       { return nil }
 func (i *trayItem) Scroll(int32, string) *dbus.Error           { return nil }
 
@@ -268,9 +291,22 @@ func runBackgroundTrayController(background bool, parent context.Context, cancel
 }
 
 func openSettingsWebUI() {
+	// A settings page that is already open gets raised instead of a new tab.
+	if focusOpenSettingsPage() {
+		raiseSettingsWindow()
+		return
+	}
 	url := fmt.Sprintf("http://127.0.0.1:%d", webuiPort)
 	if err := exec.Command("xdg-open", url).Start(); err != nil {
 		log.Printf("Open Web UI failed: %v", err)
+	}
+}
+
+// raiseSettingsWindow best-effort activates the browser window showing the
+// settings page (matched by its title) when wmctrl is installed.
+func raiseSettingsWindow() {
+	if path, err := exec.LookPath("wmctrl"); err == nil {
+		_ = exec.Command(path, "-a", "DrawSplay Settings").Run()
 	}
 }
 
@@ -319,7 +355,7 @@ func runStatusTray(ctx context.Context, quit context.CancelFunc) error {
 		"WindowId":   {Value: uint32(0)},
 		"IconName":   {Value: ""},
 		"IconPixmap": {Value: trayIconPixmaps()},
-		"ItemIsMenu": {Value: false},
+		"ItemIsMenu": {Value: true},
 		"Menu":       {Value: trayMenuPath},
 		"ToolTip":    {Value: tooltip("DrawSplay", menu.status)},
 	}})
