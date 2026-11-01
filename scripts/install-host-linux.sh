@@ -308,94 +308,52 @@ else
 fi
 echo
 
-# --- X11 extended display (vkms) --------------------------------------------
-# X11 has no virtual-monitor API, so the host extends the desktop onto a vkms
-# output. Without one the tablet mirrors the desktop. Loading vkms reconfigures
-# the X screen, so it is only done after explicit confirmation.
-x11_virtual_output() {
-  xrandr --current 2>/dev/null | awk '
-    ($1 ~ /^Virtual-[0-9]+-[0-9]+$/ && $2 == "connected") || $1 ~ /^VIRTUAL[0-9]+$/ { print $1; exit }'
-}
-vkms_load_configured() {
-  grep -RqsE '^[[:space:]]*vkms([[:space:]]|$)' \
-    /etc/modules-load.d /run/modules-load.d /usr/lib/modules-load.d /lib/modules-load.d 2>/dev/null
-}
-configure_vkms_autoload() {
-  local modules_load_file="/etc/modules-load.d/drawsplay-vkms.conf"
-  if [[ -d /sys/module/vkms/parameters ]] && ! grep -Rqs 'create_default_dev' /etc/modprobe.d 2>/dev/null; then
-    printf 'options vkms create_default_dev=1\n' | sudo tee /etc/modprobe.d/drawsplay-vkms.conf >/dev/null || true
+# --- Spare HDMI connector access (X11 virtual display fallback) --------------
+# Lets the plugdev group force an unplugged HDMI port on, so the X11 fallback
+# virtual display works without root or a password prompt on every boot.
+if [[ "$WAYLAND_CAPTURE" -eq 0 ]]; then
+  DRM_RULE_SOURCE="$SCRIPT_DIR/70-drawsplay-drm-connector.rules"
+  if [[ ! -f "$DRM_RULE_SOURCE" ]]; then
+    DRM_RULE_SOURCE="$ROOT_DIR/packaging/linux/70-drawsplay-drm-connector.rules"
   fi
-  if vkms_load_configured; then
-    echo "vkms is already configured to load automatically at boot."
-  elif printf 'vkms\n' | sudo tee -a "$modules_load_file" >/dev/null; then
-    echo "Configured vkms to load automatically at boot."
+  DRM_RULE_TARGET="/etc/udev/rules.d/70-drawsplay-drm-connector.rules"
+  DRM_MANUAL="  sudo cp 70-drawsplay-drm-connector.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=drm --action=change"
+  if [[ ! -f "$DRM_RULE_SOURCE" ]]; then
+    echo "udev rule 70-drawsplay-drm-connector.rules not found; the X11 spare-connector display will ask for a password each boot without it."
+  elif cmp -s "$DRM_RULE_SOURCE" "$DRM_RULE_TARGET" 2>/dev/null; then
+    echo "Display connector udev rule already installed: $DRM_RULE_TARGET"
+  elif [[ "$SKIP_INSTALL" -eq 1 ]]; then
+    echo "Run manually:"
+    echo "$DRM_MANUAL"
   else
-    echo "Could not configure vkms to load at boot."
-    echo "Run manually: echo vkms | sudo tee $modules_load_file"
-  fi
-}
-if [[ "$WAYLAND_CAPTURE" -eq 0 ]] && [[ -d /sys/module/vkms ]] && ! vkms_load_configured; then
-  echo "vkms is loaded for this session but may not load after a restart."
-  if [[ "$SKIP_INSTALL" -eq 0 && -t 0 ]]; then
-    if read -r -p "Configure vkms to load automatically at boot? [Y/n] " reply; then
-      if [[ -z "$reply" || "$reply" =~ ^[Yy] ]]; then
-        configure_vkms_autoload
-      fi
+    echo "Installing display connector udev rule (asks for your password)..."
+    if sudo install -m 0644 "$DRM_RULE_SOURCE" "$DRM_RULE_TARGET" &&
+      sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=drm --action=change; then
+      echo "Installed $DRM_RULE_TARGET."
+    else
+      echo "Could not install the udev rule. Run manually:" >&2
+      echo "$DRM_MANUAL" >&2
     fi
-  else
-    echo "To keep the extended display after restarts, run:"
-    echo "  echo vkms | sudo tee /etc/modules-load.d/drawsplay-vkms.conf"
   fi
   echo
 fi
-if [[ "$WAYLAND_CAPTURE" -eq 0 ]] && [[ -z "${DRAWSPLAY_X11_OUTPUT:-}" ]] &&
-  command -v xrandr >/dev/null 2>&1 && [[ -z "$(x11_virtual_output)" ]]; then
-  if [[ -d /sys/module/vkms ]]; then
-    echo "The vkms module is loaded, but the X server shows no virtual output for it,"
-    echo "so the tablet will mirror the desktop. Log out and back in to reload the displays."
-  elif PATH="$PATH:/usr/sbin:/sbin" modinfo vkms >/dev/null 2>&1; then
-    echo "X11 session: the tablet mirrors the desktop unless a virtual display exists."
-    echo "Loading vkms adds one, making the tablet a real second monitor."
-    echo "The X server reconfigures its displays when vkms loads: save your work first."
-    echo "If you agree, DrawSplay will also configure vkms to load automatically at boot."
-    load_vkms=0
-    reply=""
-    if [[ "$SKIP_INSTALL" -eq 0 && -t 0 ]]; then
-      if read -r -p "Load vkms now and at boot (sudo modprobe vkms)? Type 'yes' to confirm [y/N] " reply; then
-        [[ "$reply" =~ ^[Yy]([Ee][Ss])?$ ]] && load_vkms=1
-      fi
-    else
-      echo "To enable it now, run: sudo modprobe vkms"
-      echo "To load it automatically at boot, run:"
-      echo "  echo vkms | sudo tee /etc/modules-load.d/drawsplay-vkms.conf"
+
+# --- X11 extended display ---------------------------------------------------
+# On X11 the host extends the desktop onto a vkms output, falling back to a
+# spare, unplugged HDMI connector of the GPU (forced on at runtime, nothing
+# persists across boots), and mirrors the desktop when there is neither. The
+# host loads vkms itself and guards it; the installer never loads or autoloads
+# it, because on some kernels (for example Linux 7.0 OEM) the X server fails on
+# it, which took the display down.
+if [[ "$WAYLAND_CAPTURE" -eq 0 ]]; then
+  for vkms_conf in /etc/modules-load.d/drawsplay-vkms.conf /etc/modprobe.d/drawsplay-vkms.conf; do
+    if [[ -e "$vkms_conf" ]]; then
+      echo "An earlier DrawSplay install configured vkms to load at boot ($vkms_conf)."
+      echo "That can crash the display on some kernels. To remove it, run:"
+      echo "  sudo rm /etc/modules-load.d/drawsplay-vkms.conf /etc/modprobe.d/drawsplay-vkms.conf && sudo modprobe -r vkms"
+      break
     fi
-    if [[ "$load_vkms" -eq 1 ]]; then
-      # Newer kernels create no virtual device unless create_default_dev=1; older
-      # kernels reject that parameter, so fall back to a plain load.
-      if sudo modprobe vkms create_default_dev=1 2>/dev/null || sudo modprobe vkms; then
-        configure_vkms_autoload
-        vkms_output=""
-        for _ in 1 2 3 4 5 6 7 8 9 10; do
-          vkms_output="$(x11_virtual_output)"
-          [[ -n "$vkms_output" ]] && break
-          sleep 0.5
-        done
-        if [[ -n "$vkms_output" ]]; then
-          # The host switches the output on only while the tablet is connected.
-          sleep 2
-          xrandr --output "$vkms_output" --off 2>/dev/null || true
-          echo "Virtual display $vkms_output is ready."
-        else
-          echo "vkms is loaded, but the X server shows no virtual output yet."
-          echo "If the tablet still mirrors the desktop, log out and back in."
-        fi
-      else
-        echo "Could not load vkms; the tablet will mirror the desktop."
-      fi
-    fi
-  else
-    echo "This kernel has no vkms module; the tablet will mirror the desktop on X11."
-  fi
+  done
   echo
 fi
 

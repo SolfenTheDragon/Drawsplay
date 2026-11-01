@@ -98,9 +98,14 @@ func x11VirtualDisplayWarningFor(st xrandrState, loaded, available bool) string 
 		if strings.HasPrefix(o.Name, "Virtual-") && !o.Connected {
 			continue
 		}
+		if vkmsOutputPattern.MatchString(o.Name) && vkmsBlockedFn() {
+			continue
+		}
 		return ""
 	}
 	switch {
+	case loaded && vkmsBlockedFn():
+		return "The vkms module is loaded, but this kernel failed on it (vkms_prepare_fb), so it is not used and the tablet mirrors the desktop; unload it (sudo modprobe -r vkms) and remove /etc/modules-load.d/drawsplay-vkms.conf to let DrawSplay use a spare HDMI connector instead"
 	case loaded:
 		return "The vkms module is loaded but X11 shows no virtual output; log out and back in so the X server picks it up, or the tablet will mirror the desktop"
 	case available:

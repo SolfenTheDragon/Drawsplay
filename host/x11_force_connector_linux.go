@@ -40,6 +40,20 @@ var sysfsDRMDir = "/sys/class/drm"
 // status file as root. It is a seam for tests.
 var forceConnectorPrivileged = writeConnectorStatusPrivileged
 
+// connectorDirectWrite is a seam for tests.
+var connectorDirectWrite = func(path, value string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	_, werr := f.WriteString(value + "\n")
+	cerr := f.Close()
+	if werr != nil {
+		return werr
+	}
+	return cerr
+}
+
 var drmConnectorDir = regexp.MustCompile(`^card\d+-(HDMI-A-\d+)$`)
 
 type drmHDMIConnector struct {
@@ -135,6 +149,11 @@ func ensureForcedConnectorDisplay(reason string, mayPrompt bool) error {
 func writeConnectorStatusPrivileged(path, value string, mayPrompt bool) error {
 	if !connectorStatusPath.MatchString(path) || (value != "on" && value != "detect") {
 		return fmt.Errorf("refusing to write %q to %q", value, path)
+	}
+	// With the udev rule installed (packaging/linux/70-drawsplay-drm-connector.rules)
+	// the status file is writable by the plugdev group: no root, no prompt.
+	if os.Geteuid() != 0 && connectorDirectWrite(path, value) == nil {
+		return nil
 	}
 	// The path and value are passed as arguments, never interpolated.
 	script := `echo "$2" > "$1"`

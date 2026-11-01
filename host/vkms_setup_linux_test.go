@@ -121,11 +121,32 @@ func TestEnsureX11VirtualDisplayIgnoresNonX11Sessions(t *testing.T) {
 	}
 }
 
-func TestEnsureX11VirtualDisplayIsOptIn(t *testing.T) {
+func TestEnsureX11VirtualDisplayCanBeDisabled(t *testing.T) {
 	_, calls := withVkmsSetupTest(t, false, true, func(*fakeXrandr) error { return nil })
+	t.Setenv(vkmsAutoloadEnv, "0")
+	ensureX11VirtualDisplay("test", true)
+	if calls.Load() != 0 {
+		t.Fatalf("vkms was loaded although it is disabled (%d calls)", calls.Load())
+	}
+}
+
+func TestEnsureX11VirtualDisplayLoadsVkmsByDefault(t *testing.T) {
+	_, calls := withVkmsSetupTest(t, false, true, func(*fakeXrandr) error { return nil })
+	withGuardTest(t)
+	t.Setenv(vkmsAutoloadEnv, "")
+	ensureX11VirtualDisplay("test", true)
+	if calls.Load() != 1 {
+		t.Fatalf("vkms is the primary method; load calls = %d", calls.Load())
+	}
+}
+
+func TestEnsureX11VirtualDisplaySkipsBlockedVkms(t *testing.T) {
+	_, calls := withVkmsSetupTest(t, false, true, func(*fakeXrandr) error { return nil })
+	withGuardTest(t)
+	vkmsKernelLogFn = func() bool { return true }
 	t.Setenv(vkmsAutoloadEnv, "")
 	ensureX11VirtualDisplay("test", true)
 	if calls.Load() != 0 {
-		t.Fatalf("vkms was loaded without opt-in (%d calls)", calls.Load())
+		t.Fatalf("a blocked vkms was loaded (%d calls)", calls.Load())
 	}
 }

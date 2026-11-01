@@ -273,6 +273,11 @@ func pickX11VirtualOutput(st xrandrState, name string) (xrandrOutput, error) {
 			if strings.HasPrefix(o.Name, "Virtual-") && !o.Connected {
 				continue
 			}
+			// A vkms output the kernel has already failed on is never
+			// picked; the spare-connector path takes over instead.
+			if vkmsOutputPattern.MatchString(o.Name) && vkmsBlockedFn() {
+				continue
+			}
 			if o.Primary {
 				primary = o.Name
 				continue
@@ -678,6 +683,7 @@ func configureX11Extended(display, name string, w, h, nativeW, nativeH int) (x11
 	var res x11ConfigureResult
 	hotplugged := false
 	var lastErr error
+	guarded := ""
 	for attempt := 0; attempt < x11ApplyAttempts; attempt++ {
 		st, err := queryXrandr(display)
 		if err != nil {
@@ -688,6 +694,13 @@ func configureX11Extended(display, name string, w, h, nativeW, nativeH int) (x11
 			return res, err
 		}
 		res.output, name = out.Name, out.Name
+		if guard := guardMethodForOutput(out.Name); guard != "" && guarded != guard {
+			// Recorded before the first mode change on the output: if the
+			// display server dies in here, the next start denies the method.
+			displayGuardBegin(guard)
+			guarded = guard
+			defer displayGuardEnd(guard)
+		}
 		mode, added, err := ensureX11Mode(display, out, w, h)
 		if err != nil {
 			return res, fmt.Errorf("adding a %dx%d mode to %s: %w", w, h, out.Name, err)

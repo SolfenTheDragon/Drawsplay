@@ -12,6 +12,7 @@ import (
 func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) error {
 	cfg := store.get()
 	runDependencyPreflight(cfg)
+	recoverDisplayGuard()
 	ensureX11VirtualDisplayAsync("host start", false)
 	ensureVirtualDisplayDriver(cfg.NoDriverInstall)
 
