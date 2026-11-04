@@ -153,6 +153,12 @@ impl TrustStore {
         use std::io::Write;
         let mut f = fs::OpenOptions::new().create(true).append(true).open(&self.path)?;
         let label: String = label.chars().filter(|c| !c.is_control()).take(64).collect();
+        // A hand-edited file may lack a final newline; without one the entry would join the last
+        // line's comment and be lost on the next load.
+        let needs_newline = fs::read(&self.path).map(|b| !b.is_empty() && !b.ends_with(b"\n")).unwrap_or(false);
+        if needs_newline {
+            f.write_all(b"\n")?;
+        }
         writeln!(f, "{} # {}", to_hex(&k), label)?;
         self.keys.push(k);
         Ok(())
@@ -282,6 +288,18 @@ mod tests {
         assert!(!t.contains(&key));
         t.add(key, "laptop\nevil").unwrap();
         assert!(TrustStore::load(p).unwrap().contains(&key));
+        let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn add_survives_a_file_without_final_newline() {
+        let d = tmp("nonl");
+        let p = d.join("t.txt");
+        fs::write(&p, format!("{} # first", "ab".repeat(32))).unwrap();
+        let mut t = TrustStore::load(p.clone()).unwrap();
+        t.add([0xCD; 32], "second").unwrap();
+        let again = TrustStore::load(p).unwrap();
+        assert!(again.contains(&[0xAB; 32]) && again.contains(&[0xCD; 32]));
         let _ = fs::remove_dir_all(d);
     }
 
