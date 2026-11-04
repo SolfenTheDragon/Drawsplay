@@ -415,7 +415,8 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
     let peer = stream.peer_addr().map(|p| p.to_string()).unwrap_or_default();
     // The trust list is re-read per connection; only one pairing question exists at a time.
     let mut trust = TrustStore::load(trust_path.to_path_buf())?;
-    let prompt_guard = if trust.contains(&session.remote_public) || a.trust_all {
+    let trusted_before = trust.contains(&session.remote_public);
+    let prompt_guard = if trusted_before || a.trust_all {
         None
     } else {
         Some(shared.prompt.try_lock().map_err(|_| std::io::Error::other("another pairing is already in progress"))?)
@@ -424,7 +425,9 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
         return Err(std::io::Error::other("pairing declined"));
     }
     // After a first-time pairing the other person may still be reading the code and answering.
-    let hello_wait = if prompt_guard.is_some() { PAIRING_TIMEOUT } else { step_timeout() };
+    // A client that is itself pairing with this host may take as long as a pairing question.
+    let hello_wait =
+        if prompt_guard.is_some() || (!a.trust_all && trusted_before) { PAIRING_TIMEOUT } else { step_timeout() };
     drop(prompt_guard);
     let raw = stream.try_clone()?; // for shutdown and timeouts
     let mut reader = session.reader(stream.try_clone()?);

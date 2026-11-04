@@ -226,7 +226,12 @@ fn session(
     )
     .map_err(e("hello"))?;
     // On a first connection the host's user may still be comparing the pairing code.
-    let config_wait = if first_time { Duration::from_secs(300) } else { Duration::from_secs(30) };
+    // The host's user may be answering a pairing question about this computer, whether or not we
+    // trust the host already (for example after the host forgot us).
+    let config_wait = Duration::from_secs(300);
+    if !first_time && !s.trust_all {
+        eprintln!("Connected. If the host asks to pair this computer, its code should read {}", sess.sas);
+    }
     reader.get_ref().set_read_timeout(Some(config_wait)).map_err(e("socket"))?;
     let (w, h, fps) = match read_message(&mut reader).map_err(e("waiting for host"))? {
         Message::Config { width, height, fps } if width > 0 && height > 0 && width <= 16384 && height <= 16384 => {
