@@ -9,7 +9,8 @@ use std::io::{self, Read, Write};
 pub mod identity;
 pub mod secure;
 
-pub const PROTOCOL_VERSION: u16 = 1;
+/// 2: the pairing code is bound to commit-then-reveal nonces exchanged around the Noise handshake.
+pub const PROTOCOL_VERSION: u16 = 2;
 pub const DEFAULT_PORT: u16 = 47800;
 /// Largest accepted frame (type byte + payload): 16 MiB.
 pub const MAX_FRAME: usize = 16 * 1024 * 1024;

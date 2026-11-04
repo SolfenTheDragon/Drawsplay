@@ -649,6 +649,8 @@ dependencies = [
 name = "dd-proto"
 version = "0.1.0"
 dependencies = [
+ "blake2",
+ "getrandom 0.3.4",
  "snow",
 ]
 
