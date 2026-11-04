@@ -1,0 +1,10 @@
+[package]
+name = "dd-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bytemuck = "1.25.2"
+dd-proto = { path = "../proto" }
+softbuffer = "0.4"
+winit = "0.30"

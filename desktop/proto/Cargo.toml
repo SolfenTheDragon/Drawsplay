@@ -1,0 +1,7 @@
+[package]
+name = "dd-proto"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+snow = "0.10.0"

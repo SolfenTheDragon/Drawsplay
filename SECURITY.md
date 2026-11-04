@@ -15,3 +15,5 @@ Include the affected version, your OS and tablet, steps to reproduce, and the im
 ## Scope
 
 DrawSplay's host listens only on localhost (input, video and the settings page) and reaches the tablet over USB via `adb reverse`. Reports about these listeners, the optional Wi-Fi mode (TLS and token authentication), the installer and the bundled drivers are in scope.
+
+DrawSplay Desktop (`desktop/`) is a separate component with its own listener: `dd-host` accepts connections on TCP port 47800 on all interfaces by default (`--bind` changes it). Connections are encrypted and mutually authenticated (Noise XX); a new device must be confirmed by comparing a ten-digit code on both machines, and a paired client can inject keyboard, mouse, touch and pen input, so it is treated as fully trusted. Reports about its handshake, pairing, trust store or connection handling are in scope. See `desktop/README.md` and `desktop/docs/known-issues.md`.
