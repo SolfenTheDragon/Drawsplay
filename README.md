@@ -198,6 +198,10 @@ repair and is never silently reset. USB remains available.
 
 Developer tools for Wi-Fi testing are in [`tools/wifi_enrollment`](tools/wifi_enrollment/README.md) and [`tools/android_wifi_probe`](tools/android_wifi_probe/README.md).
 
+## DrawSplay Desktop (PC as the second screen)
+
+`desktop/` holds a separate pair of programs, written in Rust, that turn a second Windows or Linux computer into an extra display for the first, with mouse, keyboard, touch and pen sent back. It works over Wi-Fi, Ethernet or any USB network link, and is independent of the Android app and the Go host above. Setup, pairing, limits and the list of open issues are in [`desktop/README.md`](desktop/README.md); the protocol and session lifecycle are in [`desktop/docs/architecture.md`](desktop/docs/architecture.md). Build instructions are in [`BUILD.md`](BUILD.md).
+
 ## Privacy
 
 The host listens only on your computer (localhost) and the settings page is local-only. In Wi-Fi mode (beta) the host connects out to the paired tablet on your local network over encrypted, mutually authenticated TLS. See [PRIVACY.md](PRIVACY.md) for the full privacy policy.

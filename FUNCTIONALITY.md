@@ -620,3 +620,13 @@ When behavior changes:
 1. Update this file in the same change.
 2. Keep protocol examples in sync with code.
 3. Document backward compatibility expectations for packet changes.
+
+### 7.1 Windows IddCx driver: connector slots
+
+Each virtual monitor gets an IddCx connector index from a small pool (`ConnectorPool` in `drivers/windows/idd/Driver.h`): the lowest free slot in `[0, 8)`, returned only when the monitor object is destroyed. Earlier builds used an ever-growing counter as the connector index, so after 8 monitor plugs per driver load the adapter refused new monitors ("The parameter is incorrect"). The monitor id used in shared-surface and cursor names is still unique and increasing. The fix takes effect only after the driver is rebuilt, signed and reinstalled.
+
+## 8. DrawSplay Desktop (separate component)
+
+`desktop/` contains an independent Rust host (`dd-host`) and client (`dd-client`) that make one Windows or Linux PC an extra display for another. It has its own wire protocol (Noise-encrypted TCP, port 47800, H.264 through ffmpeg, HID key codes) and does not use the Android protocol in section 3. Behaviour, protocol, session lifecycle, timeouts and known issues are documented in `desktop/README.md`, `desktop/docs/architecture.md`, `desktop/docs/known-issues.md` and the backlog in `desktop/docs/open-bugs.md`.
+
+Relationship to this document: it reuses the DrawSplay Windows virtual display driver (`drivers/windows/idd`) for its Windows extra monitor, and its Linux X11 virtual-display approach (a spare RandR output) follows the same idea as the Go host. Changes to that driver's IOCTLs or monitor lifecycle must be checked against `desktop/host/src/vdisplay.rs`.

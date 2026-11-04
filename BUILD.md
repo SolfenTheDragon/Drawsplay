@@ -282,6 +282,7 @@ The release workflow builds host + Android release artifacts and attaches:
 
 - `DrawSplay-windows-<tag>.zip`: a folder with `drawsplay_installer_<tag>.exe` and `DrawSplay.APK` (a `resolve-tag` job computes the tag first so the Windows build can name the installer)
 - `DrawSplay-linux-<tag>.tar.gz`: a folder with the Linux host, install/uninstall scripts, tray icon, udev rule and `DrawSplay.APK`
+- `DrawSplayDesktop-windows-x86_64-<tag>.zip` and `DrawSplayDesktop-linux-x86_64-<tag>.tar.gz`: the separate DrawSplay Desktop host and client (built by the `build-desktop-windows` and `build-desktop-linux` jobs, which run `cargo test --release` first and then `desktop/packaging/package-*`; the tag is passed to the scripts as the version)
 - `DrawSplay.APK`
 - `SHA256SUMS.txt`
 
@@ -365,3 +366,20 @@ temporary private signing key. Its network-scoped NSD experiment requires
 API 33+ at runtime; it reports a limitation and exits on older Android.
 See [`tools/android_wifi_probe/README.md`](tools/android_wifi_probe/README.md)
 for installation, testing and cleanup of the distinct test package.
+
+## Build DrawSplay Desktop (Rust)
+
+`desktop/` is a standalone Cargo workspace (`dd-proto`, `dd-host`, `dd-client`) that does not depend on the Go host or the Android app.
+
+Prerequisites: a current stable Rust toolchain (`rustup`), and `ffmpeg` on the PATH at run time. On Linux also install the build libraries: `pkg-config libx11-dev libxkbcommon-dev libwayland-dev libxcursor-dev libxi-dev libxrandr-dev libxdo-dev libxtst-dev libudev-dev`.
+
+```
+cd desktop
+cargo build --release            # target/release/dd-host and dd-client
+cargo test                       # unit tests
+cargo clippy --all-targets       # lint (kept warning-free)
+packaging/package-windows.ps1    # dist/DrawSplayDesktop-windows-x86_64-vX.zip
+packaging/package-linux.sh       # dist/DrawSplayDesktop-linux-x86_64-vX.tar.gz
+```
+
+Linux builds and tests can also be run in a container (for example `rust:1-bookworm` with the packages above); copy the sources in with `docker cp` or `tar` rather than a bind mount if the drive is not shared. Windows virtual-display support needs the DrawSplay IddCx driver from `drivers/windows/idd` to be installed; rebuild and reinstall it to pick up the connector-slot fix described in `desktop/docs/known-issues.md`.
