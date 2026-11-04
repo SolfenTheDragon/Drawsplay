@@ -128,6 +128,9 @@ fn trusted_list(dir: &Path) -> Vec<Value> {
 }
 
 fn write_atomic(dir: &Path, doc: &Value) {
+    // One writer at a time: they share the temporary file name.
+    static WRITE: Mutex<()> = Mutex::new(());
+    let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = dir.join("status.json.tmp");
     if std::fs::write(&tmp, doc.to_string()).is_ok() {
         let _ = std::fs::rename(&tmp, dir.join(STATUS_FILE));
