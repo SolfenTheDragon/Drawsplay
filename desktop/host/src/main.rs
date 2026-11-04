@@ -487,6 +487,7 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
 
     // A hardware encoder that passed the start-up trial can still fail later (session limits, GPU
     // reset). If that happens before any video, retry once in software and remember it.
+    let raw_input = raw.try_clone()?;
     let mut enc = if shared.software_only.load(Ordering::SeqCst) { Encoder::Software } else { a.chosen };
     let (mut ff, mut recorder) = launch(a, &display, enc, fps)?;
     let video = ff.stdout.take().unwrap();
@@ -494,7 +495,6 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
     // Writes from two threads (video + pong) must not interleave.
     let writer = Arc::new(Mutex::new(stream));
     let w2 = writer.clone();
-    let raw_input = raw.try_clone()?;
     let portal = display.portal.clone();
     let input = thread::spawn(move || {
         // Whatever ends the input (disconnect, silence, even a panic), stop streaming to this peer too.
