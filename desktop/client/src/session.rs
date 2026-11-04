@@ -219,7 +219,12 @@ fn session(
     let mut reader = sess.reader(stream.try_clone().map_err(e("socket"))?);
     let writer = Arc::new(Mutex::new(sess.writer(stream)));
 
-    let name = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).unwrap_or_else(|_| "client".into());
+    let name = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .or_else(|_| std::fs::read_to_string("/proc/sys/kernel/hostname").map(|h| h.trim().to_string()))
+        .ok()
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "client".into());
     write_message(
         &mut *writer.lock().unwrap(),
         &Message::Hello { version: PROTOCOL_VERSION, width: s.width, height: s.height, refresh_hz: s.fps, name },
