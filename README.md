@@ -200,7 +200,135 @@ Developer tools for Wi-Fi testing are in [`tools/wifi_enrollment`](tools/wifi_en
 
 ## DrawSplay Desktop (PC as the second screen)
 
-`desktop/` holds a separate pair of programs, written in Rust, that turn a second Windows or Linux computer into an extra display for the first, with mouse, keyboard, touch and pen sent back. It works over Wi-Fi, Ethernet or any USB network link, and is independent of the Android app and the Go host above. Setup, pairing, limits and the list of open issues are in [`desktop/README.md`](desktop/README.md); the protocol and session lifecycle are in [`desktop/docs/architecture.md`](desktop/docs/architecture.md). Build instructions are in [`BUILD.md`](BUILD.md).
+`desktop/` holds a host and a client (both Rust, Windows and Linux) that turn one computer into an extra display for another, with mouse, keyboard, touch and pen sent back. It is separate from the Android DrawSplay app and shares no code with it.
+
+- **`dd-host`** runs on the computer whose desktop you extend. It creates an extra monitor, captures it, encodes H.264 and streams it. It injects the input it receives.
+- **`dd-client`** runs on the computer that becomes the extra display. It decodes the stream, shows it in a window or fullscreen, and sends input back.
+- `desktop/proto/` is the shared wire protocol and the encryption and pairing code.
+
+Any mix works: Windows or Linux host with a Windows or Linux client.
+
+More detail: [`desktop/docs/architecture.md`](desktop/docs/architecture.md) (protocol and session lifecycle) [`desktop/docs/known-issues.md`](desktop/docs/known-issues.md) (limitations and fixed bugs) and [`desktop/docs/open-bugs.md`](desktop/docs/open-bugs.md) (every open bug and unverified item, with locations and suggested fixes).
+
+### Requirements
+
+- `ffmpeg` on the PATH of both computers (capture, encode and decode use it).
+- A network path between them: Wi-Fi, Ethernet, or any USB network link (USB bridge cable, Thunderbolt/USB4 networking, Linux `g_ether`). Two PCs cannot talk over a plain USB cable, because neither can act as a USB device.
+- **Windows host, extra monitor:** the DrawSplay virtual display driver (installed by the DrawSplay installer). See `desktop/docs/known-issues.md`.
+- **Linux host, extra monitor:** an X11 session and a spare RandR output (see "Linux virtual display"), or a Wayland session (see "Wayland"): sway and Hyprland with `wf-recorder`, or GNOME, KDE and others through the desktop portal with `gstreamer1.0-tools` and `gstreamer1.0-pipewire`.
+- **Linux host, touch/pen/full keyboard:** access to `/dev/uinput` (see "Linux input").
+
+### Quick start
+
+```
+# computer to extend (host)
+dd-host
+
+# computer that becomes the display (client)
+dd-client HOST_IP --fullscreen          # or: --size 1920x1080 for a window
+```
+
+The first connection asks both people to compare a 10-digit code (below). Press `Ctrl+Alt+Shift+Q` in the client to close it, which matters in fullscreen.
+
+Useful options (`--help` lists all): `--encoder auto|software|nvenc|qsv|amf|vaapi`, `--bitrate-kbps N`, `--source virtual|desktop|test`, `--require-virtual`, `--no-hwdec` and `--fit` (client; `--fit` scales the picture to the window, keeping its aspect ratio).
+
+### Pairing and encryption
+
+Everything is encrypted and mutually authenticated (Noise XX, X25519 and ChaCha20-Poly1305). Each machine has a long-term key under `%APPDATA%\DrawSplayDesktop\{host,client}` (or `~/.config/drawsplay-desktop/{host,client}`).
+
+The first time a client connects, both screens show the same 10-digit code. Answer `y` on both machines only if the codes match; the keys are then remembered. If the codes differ, answer `n`: someone is in the middle. The code is bound to random values that each side commits to before it can see the code, so an attacker cannot retry keys until the two codes agree. This changed the wire protocol (version 2): update the host and the client together.
+
+Without a terminal (for example the host as a background service), pair by hand:
+
+```
+dd-client --show-key        # on the client: prints its key
+dd-host --trust <that key>  # on the host: trusts it
+dd-host --show-key          # on the host
+dd-client --trust <that key>
+```
+
+List trusted devices with `--list-trusted` and remove one with `--forget KEY_PREFIX` (at least 6 hex characters of the key, as printed by the list); both programs support these. The files `trusted_clients.txt` and `trusted_hosts.txt` in the config folder can still be edited by hand. `--trust-all` skips the check and is for testing only.
+
+### Fake displays and the web UI
+
+`dd-host --remove-fake-displays` (Linux) removes every fake display (a spare HDMI/DP connector forced on without a monitor, an active `Virtual*` output, extra headless Wayland outputs) and leaves your real monitors alone; the host also does this at start-up, when the last session ends and when it is stopped, whoever created the display.
+
+While running, `dd-host` writes `status.json` into its config folder; the DrawSplay web UI (Android host) reads it to show a connected PC client and can end that session through a `disconnect-request` file (the client is told not to reconnect).
+
+### Connections and timeouts
+
+- The host serves one client at a time by default; `--max-clients N` (1-8) serves several at once, each on its own virtual monitor, and further clients are refused immediately. Fake displays are cleared only when the last session ends, so one client leaving never removes another's monitor. Each connection is handled on its own thread, so a silent or slow stranger cannot block a real client.
+- A stranger gets 15 seconds per step. At most 8 unauthenticated connections are in progress at once, and only one pairing question can be on screen.
+- A connected side that hears nothing for 10 seconds ends the session (the client pings every 2 seconds, the host streams continuously). The client then says "host stopped responding". If the connection had been working, the client reconnects by itself (backoff 0.5 s to 5 s, for up to 60 s after the last good connection) and shows the last frame meanwhile; a first connection that fails reports the error at once. Closing the window stops it.
+- On a first pairing the host waits up to 5 minutes for the other person to confirm the code.
+
+### Input
+
+| | Windows host | Linux host |
+|---|---|---|
+| Mouse | yes (moved with `SetCursorPos`, so any monitor placement works) | yes (X11) |
+| Keyboard | physical keys by scancode (any layout) | physical keys through uinput; basic keys through X11 without it |
+| Touch | native multi-touch (up to 10 fingers) | native multi-touch through uinput |
+| Pen | native pen with pressure and tilt | native pen through uinput |
+| Without native support | touch and pen act as a left-button mouse | same |
+
+The client reports a pen when the OS gives it an altitude angle, otherwise a touch. Keys and buttons still held when a session ends are released so nothing sticks.
+
+#### Linux input
+
+Create virtual devices through `/dev/uinput`: run `install-linux.sh --udev` from the release package (or copy `99-drawsplay-desktop.rules` to `/etc/udev/rules.d/`, reload udev, and add yourself to the `input` group, then log in again). Touch and pen devices span the whole X screen, so positions are scaled against the screen size. This is exact on X11; Wayland compositors may map absolute devices differently.
+
+### Linux virtual display
+
+On X11 the host lights up a spare RandR output as an extra monitor (preferring outputs named `VIRTUAL*`, then disconnected ports; it tries each in turn until one accepts). Ctrl+C or SIGTERM switches the output off again. Many GPU drivers refuse to enable a port with nothing plugged in; in that case use an HDMI/DisplayPort dummy plug, the `vkms` kernel module, or force the connector with the `video=` kernel parameter. When no virtual display can be created the host says so and mirrors the primary screen instead (`--require-virtual` makes it fail instead). Wayland sessions are not supported yet.
+
+### Building
+
+Run these from the `desktop/` folder (the repository-wide build notes are in [`BUILD.md`](BUILD.md)).
+
+```
+cargo build --release          # dd-host and dd-client in target/release
+cargo test                     # unit tests
+packaging/package-windows.ps1  # dist/DrawSplayDesktop-windows-x86_64-vX.zip
+packaging/package-linux.sh     # dist/DrawSplayDesktop-linux-x86_64-vX.tar.gz
+```
+
+Both packages include the project README and the `docs/` folder.
+
+#### Wayland
+
+The host picks a backend from the session:
+
+- **sway and Hyprland:** the extra monitor is created through the compositor (sway: `swaymsg create_output`, which sway only allows on its headless or nested backends; Hyprland: `hyprctl output create headless`) and captured with `wf-recorder`. When no virtual output can be made the host mirrors the primary output. Mouse input uses an absolute `uinput` device, so `/dev/uinput` access is required as for touch and pen.
+- **GNOME, KDE and other desktops (xdg-desktop-portal):** the host asks the desktop's ScreenCast and RemoteDesktop portals for a screen. Your desktop shows its own "share your screen" dialog the first time each session starts; accept it on the host. A virtual monitor is requested when the portal offers one (its size is chosen by the compositor and reported to the client), otherwise you pick a monitor in the dialog and it is mirrored. The screen is read with `gst-launch-1.0 pipewiresrc` (packages `gstreamer1.0-tools`, `gstreamer1.0-pipewire`). Keyboard, mouse and touch go through the portal; a pen uses `uinput` when available, else acts as a finger. If the portal has no RemoteDesktop, only the screen is taken and input falls back to `uinput`.
+
+Verified: sway on a headless compositor, the portal protocol against a mock portal, and the capture pipeline against a real PipeWire node. **Not run against a real GNOME or KDE session yet**; expect rough edges (see `desktop/docs/open-bugs.md`, DD-004).
+
+#### ARM
+
+Both programs build for `aarch64-unknown-linux-gnu` (verified: cross-built from x86_64; `dd-proto` and `dd-client` unit tests pass under qemu-user). Cross-build recipe on Debian/Ubuntu: `rustup target add aarch64-unknown-linux-gnu`, install `gcc-aarch64-linux-gnu libc6-dev-arm64-cross`, make the arm64 `libxdo.so` visible to the linker (for example in a private sysroot passed with `-C link-arg=-L...`), then `TARGET=aarch64-unknown-linux-gnu packaging/package-linux.sh`. On a native ARM machine just use the normal build and `package-linux.sh`. Windows on ARM: `packaging/package-windows.ps1 -Target aarch64-pc-windows-msvc` (not built or run yet; the virtual display driver's `build.ps1 -Arch arm64` exists but has not been exercised).
+
+Tests: `cargo test --release` runs unit tests and `desktop/host/tests/loopback.rs`, which starts a real `dd-host --source test` and drives it with a scripted client (needs `ffmpeg`; those tests skip without it). The host honours `DD_IDLE_TIMEOUT_MS` and `DD_STEP_TIMEOUT_MS` to shorten timeouts for testing.
+
+Linux build dependencies: `pkg-config libx11-dev libxkbcommon-dev libwayland-dev libxcursor-dev libxi-dev libxrandr-dev libxdo-dev libxtst-dev libudev-dev`.
+
+From `desktop/`, `cargo run -p dd-client --example send_input -- HOST:PORT` replays a scripted pen stroke, two-finger touch and a modifier key, to test host injection without a touchscreen.
+
+### What has and has not been verified
+
+Verified: protocol, encryption and pairing (unit tests, and live on Windows and in a Linux container, including a slow second person at first pairing); connection handling (a silent stranger does not block a real client, a killed client frees the host, a frozen host is detected by the client after 10 s); streaming and decoding on both OSes (about 60 fps at 1080p, 0.2 ms loopback round trip with NVENC, measured before the latest changes); the Windows virtual monitor (plug, extend, requested size, removal); Windows pen position tracking and touch injection acceptance; Linux fallback paths under Xvfb; Linux `uinput` device creation in the kernel; scancode, CVT mode-line and xrandr parsing tables.
+
+Not verified: the mouse path (`SetCursorPos`) and the driver connector-slot fix on a live Windows virtual monitor; Windows display scaling other than 100% (the host warns at start-up); the Linux virtual display on real hardware (needs a GPU with a spare output; only parsing and mode-line maths are tested); Linux `uinput` event delivery (the test kernel has no evdev handler to read events back); Windows keyboard injection into a real application; Wayland; macOS (not supported); real-network behaviour such as packet loss.
+
+### Known limitations
+
+- Pen tilt is one-dimensional (the OS gives the client only the pen's altitude angle).
+- One client at a time per host unless `--max-clients` is raised (not tried on real hardware; Windows allows at most 8 monitors).
+- The image is shown 1:1 (never scaled); if the client window is resized, the picture is centered.
+- Video is cut into network chunks rather than whole frames, and keyframes cannot be requested. TCP is reliable, and every session starts a fresh encoder, so a client always sees the stream from its first frame.
+- No audio.
+- The pairing prompt reads the terminal (see manual pairing above for services).
+- See `desktop/docs/known-issues.md` for the Windows driver limit and the list of open improvements.
 
 ## Privacy
 

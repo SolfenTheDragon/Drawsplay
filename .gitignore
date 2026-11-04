@@ -89,5 +89,4 @@ native/drawsplay-media-win/out/
 host/mediahelper/obj/
 
 # DrawSplay Desktop documentation (kept local; the packaging scripts include these files only when present)
-desktop/README.md
 desktop/docs/

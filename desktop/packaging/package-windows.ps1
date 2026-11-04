@@ -25,7 +25,7 @@ if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
 New-Item -ItemType Directory -Force $dir | Out-Null
 Copy-Item "$bin\dd-host.exe", "$bin\dd-client.exe" $dir
 # Documentation is optional (it may not be in the checkout).
-if (Test-Path README.md) { Copy-Item README.md $dir }
+if (Test-Path ..\README.md) { Copy-Item ..\README.md $dir }
 if (Test-Path docs) {
     New-Item -ItemType Directory -Force (Join-Path $dir 'docs') | Out-Null
     Copy-Item docs\*.md (Join-Path $dir 'docs')
