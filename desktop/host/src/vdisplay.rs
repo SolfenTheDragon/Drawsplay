@@ -113,9 +113,16 @@ fn set_mode(device: &[u16; 32], w: u32, h: u32, hz: u32) -> bool {
         dm.dmPelsWidth = w;
         dm.dmPelsHeight = h;
         dm.dmDisplayFrequency = hz;
+        let apply = |dm: &DEVMODEW| {
+            ChangeDisplaySettingsExW(PCWSTR(device.as_ptr()), Some(dm), None, CDS_UPDATEREGISTRY, None)
+                == DISP_CHANGE_SUCCESSFUL
+        };
         dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
-        ChangeDisplaySettingsExW(PCWSTR(device.as_ptr()), Some(&dm), None, CDS_UPDATEREGISTRY, None)
-            == DISP_CHANGE_SUCCESSFUL
+        // The driver may not offer this refresh rate; the size matters more, so retry without it.
+        apply(&dm) || {
+            dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
+            apply(&dm)
+        }
     }
 }
 
