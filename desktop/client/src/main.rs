@@ -163,6 +163,8 @@ struct App {
     pressed: HashSet<u16>,
     /// Touch/pen contacts that went down on the video and have not lifted yet.
     touches: HashSet<u64>,
+    /// Last normalized position of each held touch, so a forced lift happens where the finger was.
+    touch_pos: std::collections::HashMap<u64, (f32, f32)>,
     // stats
     shown: u32,
     stats_at: Instant,
@@ -185,6 +187,7 @@ impl App {
             pos: PhysicalPosition::new(0.0, 0.0),
             pressed: HashSet::new(),
             touches: HashSet::new(),
+            touch_pos: std::collections::HashMap::new(),
             shown: 0,
             stats_at: Instant::now(),
             rtt_ms: 0.0,
@@ -251,13 +254,14 @@ impl App {
             self.send(Message::Key { code, down: false });
         }
         for id in self.touches.drain().collect::<Vec<_>>() {
-            // Position is irrelevant for a lift; use the last known cursor spot.
+            // Lift where the finger last was: some hosts (Windows) act on the position of the Up.
+            let (x, y) = self.touch_pos.remove(&id).unwrap_or((0.0, 0.0));
             self.send(Message::Pointer {
                 id: (id & 0xFF) as u8,
                 source: PointerSource::Touch,
                 phase: PointerPhase::Up,
-                x: 0.0,
-                y: 0.0,
+                x,
+                y,
                 pressure: 0.0,
                 buttons: 0,
                 tilt_x: 0,
@@ -536,6 +540,11 @@ impl ApplicationHandler<UiEvent> for App {
                     }
                 }
                 if let Some((x, y)) = self.normalize(t.location) {
+                    if phase == PointerPhase::Up {
+                        self.touch_pos.remove(&t.id);
+                    } else {
+                        self.touch_pos.insert(t.id, (x, y));
+                    }
                     self.send(Message::Pointer {
                         id: (t.id & 0xFF) as u8,
                         source,
