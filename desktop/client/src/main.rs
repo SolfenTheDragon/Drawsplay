@@ -86,7 +86,7 @@ fn parse_args() -> Result<Args, String> {
             o => return Err(format!("unknown argument {o}")),
         }
     }
-    if a.host.is_empty() && !a.show_key && a.trust_key.is_none() {
+    if a.host.is_empty() && !a.show_key && a.trust_key.is_none() && !a.list_trusted && a.forget.is_none() {
         return Err("missing HOST (try --help)".into());
     }
     a.host = with_default_port(&a.host);
