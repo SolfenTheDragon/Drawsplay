@@ -42,6 +42,18 @@ fn whole_steps(rest: &mut f32, delta: f32) -> i32 {
     steps as i32
 }
 
+/// What became of a touch or pen sample offered to the native backend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Native {
+    /// Injected.
+    Handled,
+    /// The backend exists but this sample failed or does not apply (a stale id, no free slot, a
+    /// refused first sample): drop it. Replaying it as a mouse click would be a stray click.
+    Dropped,
+    /// No native device: emulate with the mouse.
+    Unavailable,
+}
+
 pub struct Injector {
     enigo: Option<Enigo>,
     target: Target,
@@ -130,7 +142,9 @@ impl Injector {
                 match source {
                     PointerSource::Mouse => self.mouse(phase, ax, ay, buttons, wheel_x, wheel_y),
                     PointerSource::Touch | PointerSource::Pen => {
-                        if !self.native_pointer(id, source, phase, ax, ay, pressure, buttons, tilt_x, tilt_y) {
+                        if self.native_pointer(id, source, phase, ax, ay, pressure, buttons, tilt_x, tilt_y)
+                            == Native::Unavailable
+                        {
                             self.emulate_with_mouse(id, phase, ax, ay);
                         }
                     }
@@ -206,21 +220,30 @@ impl Injector {
         buttons: u8,
         tilt_x: i8,
         tilt_y: i8,
-    ) -> bool {
+    ) -> Native {
         #[cfg(windows)]
         if let Some(w) = self.win.as_mut() {
-            return match source {
-                PointerSource::Pen => w.pen(phase, ax, ay, pressure, buttons, tilt_x, tilt_y),
-                _ => w.touch(id, phase, ax, ay, pressure),
+            let (present, injected) = match source {
+                PointerSource::Pen => (w.has_pen(), w.pen(phase, ax, ay, pressure, buttons, tilt_x, tilt_y)),
+                _ => (w.has_touch(), w.touch(id, phase, ax, ay, pressure)),
+            };
+            return match (present, injected) {
+                (false, _) => Native::Unavailable,
+                (true, true) => Native::Handled,
+                (true, false) => Native::Dropped,
             };
         }
         #[cfg(target_os = "linux")]
         if let Some(u) = self.uinput.as_mut() {
             let (nx, ny) = linux::to_axis(ax, ay, self.target);
-            return u.pointer(id, source, phase, nx, ny, pressure, buttons, tilt_x, tilt_y);
+            return if u.pointer(id, source, phase, nx, ny, pressure, buttons, tilt_x, tilt_y) {
+                Native::Handled
+            } else {
+                Native::Dropped
+            };
         }
         let _ = (id, source, phase, ax, ay, pressure, buttons, tilt_x, tilt_y);
-        false
+        Native::Unavailable
     }
 
     /// Single-finger fallback: the first contact acts as the left mouse button.
