@@ -140,7 +140,9 @@ impl TrustStore {
             }
         }
         if removed > 0 {
-            fs::write(&self.path, kept)?;
+            let tmp = self.path.with_extension("tmp");
+            fs::write(&tmp, kept)?;
+            fs::rename(&tmp, &self.path)?;
             self.keys = TrustStore::load(self.path.clone())?.keys;
         }
         Ok(removed)
