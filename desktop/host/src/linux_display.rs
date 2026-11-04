@@ -205,6 +205,8 @@ impl VirtualOutput {
                 Err(e) => failures.push(e),
             }
         }
+        // Nothing took the mode: drop it again (fails harmlessly if another session uses the same one).
+        let _ = xrandr(&["--rmmode".into(), ml.name.clone()]);
         Err(failures.join("; "))
     }
 
