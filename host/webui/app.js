@@ -462,6 +462,101 @@ async function loadSettings() {
   $("no-driver-install").checked = !!s.noDriverInstall;
 }
 
+// ---- Connection kind: Android tablet (this host) or PC client (dd-host, read from its status file) ----
+
+function durationText(sinceMs) {
+  const s = Math.max(0, Math.floor((Date.now() - Number(sinceMs || 0)) / 1000));
+  if (!Number.isFinite(s) || !sinceMs) return "";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : (m > 0 ? `${m}m ${s % 60}s` : `${s}s`);
+}
+
+const PC_BACKEND_LABELS = {
+  "x11-virtual": "virtual X11 monitor",
+  "windows-virtual": "virtual Windows monitor",
+  "wayland-virtual": "virtual Wayland monitor",
+  "wayland-portal": "Wayland desktop portal",
+  "wayland-mirror": "Wayland screen mirror",
+  mirror: "screen mirror",
+  test: "test pattern",
+};
+
+function renderDesktopHost(st) {
+  const kind = ["android", "pc", "both"].includes(st.connectionKind) ? st.connectionKind : "none";
+  const pc = st.desktopHost || {};
+  const session = pc.running && pc.session ? pc.session : null;
+  document.body.dataset.kind = kind;
+
+  // Badge and the small caption next to it.
+  const activeClient = st.activeClient || {};
+  const androidName = [activeClient.platform, activeClient.type]
+    .map((x) => String(x || "").trim()).filter((x) => x && x !== "unknown").join(" ");
+  const badge = $("client-badge");
+  badge.dataset.kind = kind;
+  badge.textContent = {
+    android: `Android${androidName ? ` · ${androidName}` : ""}`,
+    pc: `PC${session ? ` · ${session.client}` : ""}`,
+    both: "Android + PC",
+    none: "No client",
+  }[kind];
+  const hosts = ["Android host"];
+  if (pc.running) hosts.push("PC host");
+  $("status-meta").textContent = kind === "pc"
+    ? "PC host session"
+    : (pc.running ? `${hosts.join(" + ")} running` : "USB / LAN stream monitor");
+
+  // Status line: the existing renderer describes the Android pipeline only.
+  if (kind === "pc" && session) {
+    const parts = [`${session.width}x${session.height} @ ${session.fps} fps`];
+    if (session.encoder) parts.push(session.encoder);
+    $("dot").className = "dot on";
+    $("status").textContent = `Streaming to PC "${session.client}" (${parts.join(", ")})`;
+  } else if (kind === "none" && pc.running && !(st.video || {}).streaming) {
+    $("status").textContent = "Idle — waiting for a tablet or a PC client";
+  }
+
+  // PC panel: shown whenever dd-host is running, with the live session when there is one.
+  const panel = $("pc-panel");
+  panel.hidden = !pc.running;
+  $("pc-settings-note").hidden = kind !== "pc";
+  if (!pc.running) return;
+  $("pc-summary").textContent = session
+    ? `Connected for ${durationText(session.sinceUnixMs) || "a moment"}.`
+    : `Waiting for a PC client on ${pc.listen || "the default port"} (dd-host ${pc.version || ""}, ${pc.encoder || "encoder unknown"}).`;
+  const dl = $("pc-session");
+  dl.hidden = !session;
+  dl.replaceChildren();
+  if (session) {
+    const rows = [
+      ["Client", session.client],
+      ["Address", session.peer],
+      ["Stream", `${session.width}x${session.height} @ ${session.fps} fps`],
+      ["Encoder", session.encoder],
+      ["Screen", `${PC_BACKEND_LABELS[session.backend] || session.backend}${session.virtualDisplay ? " (extends your desktop)" : ""}`],
+    ];
+    for (const [k, v] of rows) {
+      const dt = document.createElement("dt");
+      dt.textContent = k;
+      const dd = document.createElement("dd");
+      dd.textContent = v || "—";
+      dl.append(dt, dd);
+    }
+  }
+  $("pc-disconnect-btn").hidden = !session;
+  const trusted = Array.isArray(pc.trusted) ? pc.trusted : [];
+  $("pc-trusted-summary").textContent = `Trusted PC clients (${trusted.length})`;
+  const list = $("pc-trusted-list");
+  list.replaceChildren();
+  for (const t of trusted) {
+    const li = document.createElement("li");
+    const code = document.createElement("code");
+    code.textContent = t.key;
+    li.append(code, document.createTextNode(` ${t.label || ""}`));
+    list.appendChild(li);
+  }
+}
+
 async function refreshStatus() {
   try {
     const st = await api("/api/status");
@@ -521,6 +616,7 @@ async function refreshStatus() {
     targetInfo.textContent = activeClientLabel ? `Target Information: ${activeClientLabel}` : "";
     renderConnectionInfo(st);
     renderMetrics(st.metrics || {}, v, st.clientVideoStats || null);
+    renderDesktopHost(st);
     renderSetupChecklist(st.setup || {});
     const inputLockToggle = $("input-lock-toggle");
     if (!inputLockToggle.disabled) inputLockToggle.checked = !!st.inputLocked;
@@ -539,6 +635,9 @@ async function refreshStatus() {
   } catch (e) {
     $("dot").className = "dot";
     $("status").textContent = "Host unreachable";
+    document.body.dataset.kind = "none";
+    $("client-badge").dataset.kind = "none";
+    $("client-badge").textContent = "No client";
     $("warnings").hidden = true;
     $("connection-info").textContent = "";
     $("metrics-summary").textContent = "";
@@ -817,6 +916,19 @@ $("input-lock-toggle").addEventListener("change", async (ev) => {
     showMsg(e.message, false);
   } finally {
     toggle.disabled = false;
+  }
+});
+
+$("pc-disconnect-btn").addEventListener("click", async () => {
+  const btn = $("pc-disconnect-btn");
+  btn.disabled = true;
+  try {
+    await api("/api/desktop/disconnect", { method: "POST" });
+    showMsg("PC client disconnect requested.", true);
+  } catch (e) {
+    showMsg(e.message, false);
+  } finally {
+    btn.disabled = false;
   }
 });
 

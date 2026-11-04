@@ -29,13 +29,16 @@
         <div class="eyebrow">HOST OVERVIEW</div>
         <div class="status-line"><span id="dot" class="dot"></span><span id="status">Checking status…</span></div>
       </div>
-      <div class="status-meta">USB / LAN stream monitor</div>
+      <div class="status-badges">
+        <span id="client-badge" class="client-badge" data-kind="none">No client</span>
+        <div id="status-meta" class="status-meta">USB / LAN stream monitor</div>
+      </div>
     </div>
-    <div id="connection-info" class="hint"></div>
-    <div id="target-info" class="hint" hidden></div>
-    <button id="switch-aoa-btn" type="button" hidden>Switch to USB accessory mode</button>
+    <div id="connection-info" class="hint" data-android-only></div>
+    <div id="target-info" class="hint" data-android-only hidden></div>
+    <button id="switch-aoa-btn" type="button" data-android-only hidden>Switch to USB accessory mode</button>
     <div id="warnings" class="hint" hidden></div>
-    <div id="wifi-pairing-card" class="wifi-pairing-card" hidden>
+    <div id="wifi-pairing-card" class="wifi-pairing-card" data-android-only hidden>
       <div class="eyebrow">WI-FI PAIRING</div>
       <div id="wifi-pair-code" class="wifi-pair-code" hidden></div>
       <div id="wifi-pair-text" class="hint"></div>
@@ -47,7 +50,7 @@
       </div>
     </div>
     <div class="metrics-row">
-      <div id="metrics-summary" class="hint"></div>
+      <div id="metrics-summary" class="hint" data-android-only></div>
       <label class="autostart-check" title="Start the host automatically at login">
         <input id="autostart-toggle" type="checkbox" disabled>
         <span>Run at login</span>
@@ -62,6 +65,7 @@
         <h2>Host settings</h2>
         <div class="hint">Tune display, input, and connection behavior.</div>
       </div>
+      <div id="pc-settings-note" class="hint pc-settings-note" data-pc-only hidden>A PC client is connected. These settings belong to the Android tablet host and do not change the PC session; the PC host (<code>dd-host</code>) is configured with command-line options (<code>dd-host --help</code>).</div>
       <form id="form" class="configuration-grid">
       <section class="display-settings">
       <div id="resolution-controls">
@@ -104,7 +108,7 @@
       </select>
       <div class="hint">Higher resolutions improve sharpness but may reduce framerate and responsiveness.</div>
       </section>
-      <section class="input-options monitor-input-options">
+      <section class="input-options monitor-input-options" data-android-only>
         <strong>Secondary monitor input</strong>
         <div class="hint">Choose which pointer types the tablet may send to this computer.</div>
         <div class="toggle-row">
@@ -129,7 +133,7 @@
           </label>
         </div>
       </section>
-      <section class="input-options wifi-options" data-feature-wifi hidden>
+      <section class="input-options wifi-options" data-android-only data-feature-wifi hidden>
         <strong>Wi-Fi connection</strong>
         <div class="hint">Use the tablet wirelessly on the same network. USB always takes priority when the tablet is plugged in.</div>
         <div class="toggle-row">
@@ -156,7 +160,7 @@
         <input id="idle-display-timeout" type="number" min="0" max="86400" step="1">
         <label for="ffmpeg">ffmpeg path</label>
         <input id="ffmpeg" type="text" required>
-        <div class="input-options">
+        <div class="input-options" data-android-only>
           <strong>ADB tunnel (legacy)</strong>
           <div class="hint">Connects through <code>adb reverse</code>. Requires Developer options and USB debugging on the tablet. Off by default; USB accessory transport below needs neither. At least one of the two must stay on, so turning this off turns USB accessory on.</div>
           <div class="toggle-row">
@@ -181,7 +185,7 @@
             </div>
           </div>
         </div>
-        <div class="input-options">
+        <div class="input-options" data-android-only>
           <strong>USB accessory transport (no ADB)</strong>
           <div class="hint">Connects the tablet over USB using Android Open Accessory, so Developer options and USB debugging are not needed. On by default; turning it off turns the ADB tunnel on, since one must stay enabled. Changes apply on the next host launch. On Linux the user needs access to the tablet's USB node (see README); on Windows a WinUSB driver must be bound to the tablet.</div>
           <div class="toggle-row">
@@ -200,7 +204,7 @@
             </label>
           </div>
         </div>
-        <div class="input-options">
+        <div class="input-options" data-android-only>
           <strong>Connection & security controls</strong>
           <div class="hint">Control trusted-device behavior, app launch, and whether sessions persist while the Android app is backgrounded.</div>
           <div class="toggle-row">
@@ -283,7 +287,7 @@
         </div>
         <div class="hint" data-windows-only>This is rarely changed. If modified during a run, it applies on next host start.</div>
         <!-- Hidden with the Wi-Fi feature flag while legacy Wi-Fi is its only content. -->
-        <details class="advanced advanced-systems" data-feature-wifi hidden>
+        <details class="advanced advanced-systems" data-android-only data-feature-wifi hidden>
           <summary>Advanced systems</summary>
           <div class="hint">Older transports and low-level options most setups never need.</div>
           <div class="input-options" data-feature-wifi hidden>
@@ -353,7 +357,7 @@
     </div>
     <div class="action-grid">
     <div class="action-stack">
-    <div class="panel dashboard-card setup-card">
+    <div class="panel dashboard-card setup-card" data-android-only>
       <div class="eyebrow">SYSTEM HEALTH</div>
       <h2>Setup checklist</h2>
       <div id="setup-checklist" class="hint">Checking setup…</div>
@@ -362,7 +366,20 @@
     </div>
 
     <div class="action-stack">
-    <div class="panel dashboard-card">
+    <div class="panel dashboard-card pc-panel" id="pc-panel" data-pc-only hidden>
+      <div class="eyebrow">PC CLIENT</div>
+      <h2>Desktop host</h2>
+      <div id="pc-summary" class="hint"></div>
+      <dl id="pc-session" class="pc-session" hidden></dl>
+      <button id="pc-disconnect-btn" type="button" class="danger" hidden>Disconnect PC client</button>
+      <details class="pc-trusted">
+        <summary id="pc-trusted-summary">Trusted PC clients</summary>
+        <ul id="pc-trusted-list" class="pc-trusted-list"></ul>
+        <div class="hint">Remove one by running <code>dd-host --forget KEY</code> on this computer. New clients are paired on the PC host's console.</div>
+      </details>
+    </div>
+
+    <div class="panel dashboard-card" data-android-only>
       <div class="eyebrow">LIVE SESSION</div>
       <h2>Session controls</h2>
       <div class="hint">Manage the active client session without stopping the host.</div>
@@ -377,7 +394,7 @@
       <button id="disconnect-session-btn" type="button">Disconnect client session</button>
     </div>
 
-    <div class="panel dashboard-card tablet-panel">
+    <div class="panel dashboard-card tablet-panel" data-android-only>
       <div class="toggle-row">
         <div>
           <h2>Client display preference</h2>
@@ -397,7 +414,7 @@
     </div>
 
     <div class="action-stack">
-    <div class="panel dashboard-card calibration-panel">
+    <div class="panel dashboard-card calibration-panel" data-android-only>
       <div class="eyebrow">INPUT</div>
       <h2>Pen calibration</h2>
       <div class="hint">Applies only to the currently connected client. Single-client mode is enforced on the host.</div>

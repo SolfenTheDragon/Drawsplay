@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"log"
 	"net/http"
@@ -82,6 +83,7 @@ func (api webUIAPI) register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/wifi/pairing/approve", securePost(api.csrfToken, api.handleWifiPairApprove))
 	mux.HandleFunc("/api/wifi/pairing/deny", securePost(api.csrfToken, api.handleWifiPairDeny))
 	mux.HandleFunc("/api/wifi/pairing/cancel", securePost(api.csrfToken, api.handleWifiPairCancel))
+	mux.HandleFunc("/api/desktop/disconnect", securePost(api.csrfToken, api.handleDesktopDisconnect))
 	mux.HandleFunc("/api/session/reconnect-video", securePost(api.csrfToken, api.handleSessionReconnectVideo))
 }
 
@@ -153,6 +155,7 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 
 func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	enabled, autostartErr := autostartEnabled()
+	desktop := currentDesktopHostStatus()
 	status := map[string]any{
 		"video":                   currentVideoStatus(),
 		"clientVideoStats":        currentClientVideoStats(),
@@ -168,6 +171,8 @@ func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"hostOS":                  runtime.GOOS,
 		"version":                 hostVersion(),
 		"featureFlags":            map[string]bool{"wifi": wifiFeatureEnabled()},
+		"desktopHost":             desktop,
+		"connectionKind":          connectionKind(androidClientConnected(), desktop),
 		"activeTransport":         hostSessionOwnership.currentTransport(),
 		"activeClient":            activeClientIdentity(),
 		"activeInputDevice":       activeInputDevice(),
@@ -177,6 +182,19 @@ func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		status["autostartError"] = autostartErr.Error()
 	}
 	writeJSON(w, status)
+}
+
+// handleDesktopDisconnect ends the PC client session served by dd-host.
+func (api webUIAPI) handleDesktopDisconnect(w http.ResponseWriter, _ *http.Request) {
+	if err := requestDesktopDisconnect(desktopHostDir(), time.Now()); err != nil {
+		if errors.Is(err, errNoDesktopSession) {
+			httpError(w, http.StatusConflict, "%v", err)
+			return
+		}
+		httpError(w, http.StatusInternalServerError, "could not send the disconnect request: %v", err)
+		return
+	}
+	writeJSON(w, map[string]bool{"ok": true})
 }
 
 func (api webUIAPI) handleSetupCheck(w http.ResponseWriter, _ *http.Request) {

@@ -320,3 +320,26 @@ details.advanced.advanced-systems[open] { padding-left: .6rem; border-left: 2px 
 }
 .wifi-pair-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .wifi-pair-actions button { width: auto; margin: 0; }
+
+/* Connection kind: the page body carries data-kind = none | android | pc | both. */
+.status-badges { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.client-badge {
+  padding: 7px 12px; border: 1px solid var(--border); border-radius: 999px;
+  color: var(--muted); font-size: .78rem; font-weight: 650; white-space: nowrap;
+}
+.client-badge[data-kind="android"] { color: var(--ok); border-color: var(--ok); }
+.client-badge[data-kind="pc"] { color: var(--accent); border-color: var(--accent); }
+.client-badge[data-kind="both"] { color: var(--warn); border-color: var(--warn); }
+/* Panels that only make sense for the other kind of client are hidden, not removed, so their
+   scripts keep working. */
+body[data-kind="pc"] [data-android-only] { display: none !important; }
+.pc-panel[hidden], .pc-settings-note[hidden], .pc-session[hidden] { display: none !important; }
+body[data-kind="pc"] #form { opacity: .5; pointer-events: none; filter: grayscale(.4); }
+.pc-session { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 10px 0; font-size: .88rem; }
+.pc-session dt { color: var(--muted); }
+.pc-session dd { margin: 0; overflow-wrap: anywhere; }
+.pc-trusted { margin-top: 12px; }
+.pc-trusted summary { cursor: pointer; color: var(--muted); font-size: .85rem; }
+.pc-trusted-list { margin: 8px 0; padding-left: 18px; font-size: .85rem; }
+.pc-trusted-list code { color: var(--muted); }
+.pc-settings-note { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--warn); border-radius: 8px; }
