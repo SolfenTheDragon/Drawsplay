@@ -951,6 +951,14 @@ NTSTATUS IndirectDeviceContext::AddMonitorLocked(DWORD Width, DWORD Height, DWOR
         NormalizeMode(NativeWidth, NativeHeight, NativeHz);
     }
 
+    // The monitor id stays unique for the life of the driver (it names the
+    // shared surfaces), but the IddCx connector index must stay below
+    // MaxMonitorsSupported, so it comes from a pool of reusable slots.
+    int Slot = m_Connectors->Acquire(DRAWSPLAY_MAX_MONITORS);
+    if (Slot < 0)
+    {
+        return STATUS_QUOTA_EXCEEDED;
+    }
     DWORD MonitorId = m_NextMonitorId++;
 
     WDF_OBJECT_ATTRIBUTES Attr;
@@ -972,7 +980,7 @@ NTSTATUS IndirectDeviceContext::AddMonitorLocked(DWORD Width, DWORD Height, DWOR
     IDDCX_MONITOR_INFO MonitorInfo = {};
     MonitorInfo.Size = sizeof(MonitorInfo);
     MonitorInfo.MonitorType = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_HDMI;
-    MonitorInfo.ConnectorIndex = MonitorId;
+    MonitorInfo.ConnectorIndex = (UINT) Slot;
     MonitorInfo.MonitorDescription.Size = sizeof(MonitorInfo.MonitorDescription);
     MonitorInfo.MonitorDescription.Type = IDDCX_MONITOR_DESCRIPTION_TYPE_EDID;
     MonitorInfo.MonitorDescription.DataSize = 0;
@@ -987,11 +995,17 @@ NTSTATUS IndirectDeviceContext::AddMonitorLocked(DWORD Width, DWORD Height, DWOR
     NTSTATUS Status = IddCxMonitorCreate(m_Adapter, &MonitorCreate, &MonitorCreateOut);
     if (!NT_SUCCESS(Status))
     {
+        m_Connectors->Release(Slot);
         return Status;
     }
 
     auto* pMonitorContextWrapper = WdfObjectGet_IndirectMonitorContextWrapper(MonitorCreateOut.MonitorObject);
     auto* pMonitorContext = new IndirectMonitorContext(MonitorCreateOut.MonitorObject);
+    // From here the context's destructor (run by the WDF cleanup callback)
+    // returns the slot, including on the arrival-failure path below.
+    pMonitorContext->m_Pool = m_Connectors;
+    pMonitorContext->m_ConnectorSlot = Slot;
+    pMonitorContextWrapper->pContext = pMonitorContext;
     pMonitorContext->m_MonitorId = MonitorId;
     pMonitorContext->m_Width = Width;
     pMonitorContext->m_Height = Height;
@@ -999,7 +1013,6 @@ NTSTATUS IndirectDeviceContext::AddMonitorLocked(DWORD Width, DWORD Height, DWOR
     pMonitorContext->m_NativeWidth = NativeWidth;
     pMonitorContext->m_NativeHeight = NativeHeight;
     pMonitorContext->m_Export->OwnerSid = OwnerSid;
-    pMonitorContextWrapper->pContext = pMonitorContext;
 
     IDARG_OUT_MONITORARRIVAL ArrivalOut;
     Status = IddCxMonitorArrival(MonitorCreateOut.MonitorObject, &ArrivalOut);
@@ -1138,6 +1151,10 @@ IndirectMonitorContext::IndirectMonitorContext(_In_ IDDCX_MONITOR Monitor) :
 IndirectMonitorContext::~IndirectMonitorContext()
 {
     m_ProcessingThread.reset();
+    if (m_Pool)
+    {
+        m_Pool->Release(m_ConnectorSlot);
+    }
 }
 
 void IndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN SwapChain, LUID RenderAdapter, HANDLE NewFrameEvent)

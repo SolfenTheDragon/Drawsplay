@@ -160,10 +160,44 @@ namespace Microsoft
         /// <summary>
         /// A single dynamically-plugged virtual monitor and its requested mode.
         /// </summary>
+        /// <summary>
+        /// IddCx connector slots (0 .. MaxMonitorsSupported-1). A slot is taken
+        /// when a monitor is created and given back only once the monitor object
+        /// is destroyed, so unplug/replug cycles reuse slots instead of burning
+        /// a new connector index each time.
+        /// </summary>
+        struct ConnectorPool
+        {
+            volatile LONG Mask = 0;
+
+            // Returns the lowest free slot, or -1 when all are in use.
+            int Acquire(DWORD MaxSlots)
+            {
+                for (;;)
+                {
+                    LONG Old = Mask;
+                    int Slot = -1;
+                    for (DWORD i = 0; i < MaxSlots; ++i)
+                    {
+                        if (!(Old & (1L << i))) { Slot = (int) i; break; }
+                    }
+                    if (Slot < 0) return -1;
+                    if (InterlockedCompareExchange(&Mask, Old | (1L << Slot), Old) == Old) return Slot;
+                }
+            }
+            void Release(int Slot)
+            {
+                if (Slot >= 0) InterlockedAnd(&Mask, ~(1L << Slot));
+            }
+        };
+
         struct IndirectMonitorContext
         {
             IndirectMonitorContext(_In_ IDDCX_MONITOR Monitor);
             ~IndirectMonitorContext();
+
+            std::shared_ptr<ConnectorPool> m_Pool;
+            int m_ConnectorSlot = -1;
 
             void AssignSwapChain(IDDCX_SWAPCHAIN SwapChain, LUID RenderAdapter, HANDLE NewFrameEvent);
             void UnassignSwapChain();
@@ -216,6 +250,7 @@ namespace Microsoft
 
             WDFDEVICE m_WdfDevice;
             DWORD m_NextMonitorId = 1;
+            std::shared_ptr<ConnectorPool> m_Connectors = std::make_shared<ConnectorPool>();
             SRWLOCK m_Lock = SRWLOCK_INIT;
             // Monitors can only be created once IddCx reports the adapter
             // initialized (EvtIddCxAdapterInitFinished); until then the host
