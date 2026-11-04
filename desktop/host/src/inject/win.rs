@@ -307,7 +307,9 @@ impl Pointers {
         let ids: Vec<u8> = self.contacts.keys().copied().collect();
         for id in ids {
             let c = self.contacts[&id];
-            self.touch(id, PointerPhase::Up, c.x, c.y, 0.0);
+            // Contacts are stored relative to the virtual desktop; `touch` takes screen pixels.
+            let (vx, vy) = virtual_origin();
+            self.touch(id, PointerPhase::Up, c.x + vx, c.y + vy, 0.0);
         }
     }
 }
