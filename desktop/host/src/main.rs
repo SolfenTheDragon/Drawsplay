@@ -247,7 +247,8 @@ struct Shared {
     lifecycle: Mutex<()>,
     /// Held while the pairing question is on screen, so strangers cannot queue up prompts.
     prompt: Mutex<()>,
-    /// Connections in progress (handshake, pairing or the active session); bounds the thread count.
+    /// Connections still in handshake or pairing; bounds the threads strangers can occupy. A served
+    /// session stops counting once it holds a session slot.
     pending: AtomicUsize,
     /// Set once a hardware encoder has failed in a session; later sessions go straight to software.
     software_only: AtomicBool,
@@ -403,7 +404,14 @@ fn kill_all(ff: &mut std::process::Child, recorder: &mut Option<std::process::Ch
     }
 }
 
-fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, shared: &Shared) -> std::io::Result<()> {
+fn serve(
+    mut stream: TcpStream,
+    a: &Args,
+    id: &Keypair,
+    trust_path: &Path,
+    shared: &Shared,
+    pending: PendingGuard<'_>,
+) -> std::io::Result<()> {
     stream.set_nodelay(true)?;
     // Never block forever on a peer that stops reading or never speaks.
     stream.set_read_timeout(Some(step_timeout()))?;
@@ -463,6 +471,8 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
     // Keep the display alive for the whole session; dropping it unplugs a virtual monitor.
     let acquired = display::acquire(a.source == Source::Virtual, a.require_virtual, a.origin, rw, rh, fps);
     drop(life);
+    // The connection is a served session now; it no longer takes up a handshake slot.
+    drop(pending);
     let display = acquired?;
     let target = display.target;
     let (w, h) = target.size;
@@ -713,8 +723,8 @@ fn main() {
                 eprintln!("connection from {peer}");
                 let (args, id, shared, trust_path) = (args.clone(), id.clone(), shared.clone(), trust_path.clone());
                 thread::spawn(move || {
-                    let _pending = PendingGuard(&shared.pending);
-                    if let Err(e) = serve(s, &args, &id, &trust_path, &shared) {
+                    let pending = PendingGuard(&shared.pending);
+                    if let Err(e) = serve(s, &args, &id, &trust_path, &shared, pending) {
                         eprintln!("session with {peer} ended: {e}");
                     }
                 });
