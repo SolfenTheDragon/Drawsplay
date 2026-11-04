@@ -517,6 +517,9 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
     let start = Instant::now();
     let mut chunks = spawn_reader(video);
     let mut sent_any = false;
+    // Set when a hardware encoder died before any video; kept only if software then works, so a
+    // capture failure (not the encoder's fault) cannot downgrade every later session.
+    let mut downgrade_pending = false;
     let result = loop {
         // Wake up regularly: when the client is gone (its input thread ended) the session must end
         // and give the monitor back even if the encoder has nothing more to say.
@@ -545,7 +548,7 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
         let data = match chunk {
             Ok(d) if d.is_empty() && !sent_any && enc != Encoder::Software => {
                 eprintln!("encoder {} failed at start; falling back to software encoding", enc.name());
-                shared.software_only.store(true, Ordering::SeqCst);
+                downgrade_pending = true;
                 kill_all(&mut ff, &mut recorder);
                 enc = Encoder::Software;
                 match launch(a, &display, enc, fps) {
@@ -567,6 +570,10 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
             break Err(e);
         }
         sent_any = true;
+        if downgrade_pending {
+            downgrade_pending = false;
+            shared.software_only.store(true, Ordering::SeqCst);
+        }
     };
     kill_all(&mut ff, &mut recorder);
     let _ = raw.shutdown(std::net::Shutdown::Both);
