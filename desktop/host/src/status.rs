@@ -31,6 +31,7 @@ pub struct SessionInfo {
 }
 
 struct Active {
+    id: u64,
     info: SessionInfo,
     since_ms: u64,
     /// Handle used to end the session on request.
@@ -45,7 +46,8 @@ struct State {
     version: &'static str,
     default_encoder: String,
     source: String,
-    session: Option<Active>,
+    sessions: Vec<Active>,
+    next_id: u64,
 }
 
 static STATE: OnceLock<Mutex<State>> = OnceLock::new();
@@ -62,7 +64,8 @@ pub fn init(dir: &Path, listen: &str, encoder: &str, source: &str) {
         version: env!("CARGO_PKG_VERSION"),
         default_encoder: encoder.to_string(),
         source: source.to_string(),
-        session: None,
+        sessions: Vec::new(),
+        next_id: 1,
     };
     if STATE.set(Mutex::new(st)).is_err() {
         return;
@@ -85,7 +88,7 @@ pub fn init(dir: &Path, listen: &str, encoder: &str, source: &str) {
 
 /// Build the document. Separate from the file I/O so it can be tested.
 fn document(st: &State, trusted: Vec<Value>) -> Value {
-    let session = st.session.as_ref().map(|a| {
+    let one = |a: &Active| {
         json!({
             "client": a.info.client,
             "peer": a.info.peer,
@@ -97,7 +100,10 @@ fn document(st: &State, trusted: Vec<Value>) -> Value {
             "encoder": a.info.encoder,
             "sinceUnixMs": a.since_ms,
         })
-    });
+    };
+    // "session" (the oldest) stays for readers that know only one; "sessions" lists them all.
+    let session = st.sessions.first().map(one);
+    let sessions: Vec<Value> = st.sessions.iter().map(one).collect();
     json!({
         "schema": 1,
         "pid": std::process::id(),
@@ -109,6 +115,7 @@ fn document(st: &State, trusted: Vec<Value>) -> Value {
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
         "session": session,
+        "sessions": sessions,
         "trusted": trusted,
     })
 }
@@ -146,8 +153,11 @@ fn check_disconnect_request() {
     let _ = std::fs::remove_file(&req);
     drop(st);
     if let Some(m) = STATE.get() {
-        if let Some(a) = m.lock().unwrap_or_else(|e| e.into_inner()).session.as_mut() {
-            eprintln!("disconnect requested from the web UI");
+        let mut st = m.lock().unwrap_or_else(|e| e.into_inner());
+        if !st.sessions.is_empty() {
+            eprintln!("disconnect requested from the web UI (ends all sessions)");
+        }
+        for a in st.sessions.iter_mut() {
             a.disconnect_since.get_or_insert_with(Instant::now);
         }
     }
@@ -158,7 +168,7 @@ fn check_disconnect_request() {
 fn enforce_disconnect() {
     let Some(m) = STATE.get() else { return };
     let st = m.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(a) = &st.session {
+    for a in &st.sessions {
         if a.disconnect_since.is_some_and(|t| t.elapsed() > Duration::from_secs(3)) {
             if let Some(s) = &a.stream {
                 let _ = s.shutdown(Shutdown::Both);
@@ -167,32 +177,41 @@ fn enforce_disconnect() {
     }
 }
 
-/// Has the web UI asked to end the active session? (Polled by the session loop.)
-pub fn disconnect_requested() -> bool {
+/// Has the web UI asked to end this session? (Polled by the session loop.)
+pub fn disconnect_requested(id: u64) -> bool {
     STATE
         .get()
         .map(|m| {
-            m.lock().unwrap_or_else(|e| e.into_inner()).session.as_ref().is_some_and(|a| a.disconnect_since.is_some())
+            m.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .sessions
+                .iter()
+                .any(|a| a.id == id && a.disconnect_since.is_some())
         })
         .unwrap_or(false)
 }
 
 /// Marks a session as active until dropped.
-pub struct SessionGuard;
+pub struct SessionGuard {
+    pub id: u64,
+}
 
 pub fn session_started(info: SessionInfo, stream: Option<TcpStream>) -> SessionGuard {
+    let mut id = 0;
     if let Some(m) = STATE.get() {
-        m.lock().unwrap_or_else(|e| e.into_inner()).session =
-            Some(Active { info, since_ms: now_ms(), stream, disconnect_since: None });
+        let mut st = m.lock().unwrap_or_else(|e| e.into_inner());
+        id = st.next_id;
+        st.next_id += 1;
+        st.sessions.push(Active { id, info, since_ms: now_ms(), stream, disconnect_since: None });
     }
     publish();
-    SessionGuard
+    SessionGuard { id }
 }
 
 impl Drop for SessionGuard {
     fn drop(&mut self) {
         if let Some(m) = STATE.get() {
-            m.lock().unwrap_or_else(|e| e.into_inner()).session = None;
+            m.lock().unwrap_or_else(|e| e.into_inner()).sessions.retain(|a| a.id != self.id);
         }
         publish();
     }
@@ -218,7 +237,8 @@ mod tests {
             version: "9.9.9",
             default_encoder: "libx264".into(),
             source: "virtual".into(),
-            session: None,
+            sessions: Vec::new(),
+            next_id: 1,
         }
     }
 
@@ -230,8 +250,10 @@ mod tests {
         let idle = document(&st, vec![]);
         assert_eq!(idle["schema"], 1);
         assert!(idle["session"].is_null());
+        assert_eq!(idle["sessions"].as_array().unwrap().len(), 0);
         assert_eq!(idle["listen"], "0.0.0.0:47800");
-        st.session = Some(Active {
+        st.sessions.push(Active {
+            id: 1,
             info: SessionInfo {
                 client: "laptop".into(),
                 peer: "10.0.0.2:5000".into(),
@@ -249,6 +271,7 @@ mod tests {
         let active = document(&st, vec![json!({"key": "ab", "label": "x"})]);
         assert_eq!(active["session"]["client"], "laptop");
         assert_eq!(active["session"]["fps"], 60);
+        assert_eq!(active["sessions"].as_array().unwrap().len(), 1);
         assert_eq!(active["trusted"][0]["label"], "x");
         write_atomic(&d, &active);
         let back: Value = serde_json::from_str(&std::fs::read_to_string(d.join(STATUS_FILE)).unwrap()).unwrap();

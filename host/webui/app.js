@@ -486,6 +486,7 @@ function renderDesktopHost(st) {
   const kind = ["android", "pc", "both"].includes(st.connectionKind) ? st.connectionKind : "none";
   const pc = st.desktopHost || {};
   const session = pc.running && pc.session ? pc.session : null;
+  const sessions = pc.running && Array.isArray(pc.sessions) && pc.sessions.length ? pc.sessions : (session ? [session] : []);
   document.body.dataset.kind = kind;
 
   // Badge and the small caption next to it.
@@ -496,7 +497,7 @@ function renderDesktopHost(st) {
   badge.dataset.kind = kind;
   badge.textContent = {
     android: `Android${androidName ? ` · ${androidName}` : ""}`,
-    pc: `PC${session ? ` · ${session.client}` : ""}`,
+    pc: `PC${session ? ` · ${session.client}${sessions.length > 1 ? ` +${sessions.length - 1}` : ""}` : ""}`,
     both: "Android + PC",
     none: "No client",
   }[kind];
@@ -511,7 +512,9 @@ function renderDesktopHost(st) {
     const parts = [`${session.width}x${session.height} @ ${session.fps} fps`];
     if (session.encoder) parts.push(session.encoder);
     $("dot").className = "dot on";
-    $("status").textContent = `Streaming to PC "${session.client}" (${parts.join(", ")})`;
+    $("status").textContent = sessions.length > 1
+      ? `Streaming to ${sessions.length} PC clients (${sessions.map((x) => x.client).join(", ")})`
+      : `Streaming to PC "${session.client}" (${parts.join(", ")})`;
   } else if (kind === "none" && pc.running && !(st.video || {}).streaming) {
     $("status").textContent = "Idle — waiting for a tablet or a PC client";
   }
@@ -522,19 +525,25 @@ function renderDesktopHost(st) {
   $("pc-settings-note").hidden = kind !== "pc";
   if (!pc.running) return;
   $("pc-summary").textContent = session
-    ? `Connected for ${durationText(session.sinceUnixMs) || "a moment"}.`
+    ? (sessions.length > 1
+      ? `${sessions.length} PC clients connected.`
+      : `Connected for ${durationText(session.sinceUnixMs) || "a moment"}.`)
     : `Waiting for a PC client on ${pc.listen || "the default port"} (dd-host ${pc.version || ""}, ${pc.encoder || "encoder unknown"}).`;
   const dl = $("pc-session");
   dl.hidden = !session;
   dl.replaceChildren();
   if (session) {
-    const rows = [
-      ["Client", session.client],
-      ["Address", session.peer],
-      ["Stream", `${session.width}x${session.height} @ ${session.fps} fps`],
-      ["Encoder", session.encoder],
-      ["Screen", `${PC_BACKEND_LABELS[session.backend] || session.backend}${session.virtualDisplay ? " (extends your desktop)" : ""}`],
-    ];
+    const rows = [];
+    sessions.forEach((x, i) => {
+      const n = sessions.length > 1 ? ` ${i + 1}` : "";
+      rows.push(
+        [`Client${n}`, x.client],
+        [`Address${n}`, x.peer],
+        [`Stream${n}`, `${x.width}x${x.height} @ ${x.fps} fps`],
+        [`Encoder${n}`, x.encoder],
+        [`Screen${n}`, `${PC_BACKEND_LABELS[x.backend] || x.backend}${x.virtualDisplay ? " (extends your desktop)" : ""}`],
+      );
+    });
     for (const [k, v] of rows) {
       const dt = document.createElement("dt");
       dt.textContent = k;

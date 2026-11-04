@@ -179,6 +179,9 @@ pub struct VirtualOutput {
     /// (x, y, width, height) of the output on the X screen.
     pub rect: (i32, i32, u32, u32),
     pub desktop: (u32, u32),
+    /// RandR output and mode this session created; released when it is dropped.
+    name: String,
+    mode: String,
 }
 
 impl VirtualOutput {
@@ -231,13 +234,13 @@ impl VirtualOutput {
         };
         // Record it first: if this process dies from here on, the next start removes the monitor.
         crate::active_record::write("x11", &name, &ml.name);
-        *ACTIVE.lock().unwrap() = Some((name.clone(), ml.name.clone()));
-        Ok(VirtualOutput { rect: (geo.2, geo.3, geo.0, geo.1), desktop: after.screen })
+        ACTIVE.lock().unwrap().push((name.clone(), ml.name.clone()));
+        Ok(VirtualOutput { rect: (geo.2, geo.3, geo.0, geo.1), desktop: after.screen, name, mode: ml.name.clone() })
     }
 }
 
-/// The output currently enabled by this process, so a signal handler can switch it off.
-static ACTIVE: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
+/// The outputs currently enabled by this process (output, mode), so a signal handler can switch them off.
+static ACTIVE: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
 
 /// Is `name` currently without a mode (switched off) on the X screen?
 fn output_is_off(name: &str) -> Option<bool> {
@@ -265,23 +268,29 @@ pub fn release_output(output: &str, mode: &str) -> bool {
     false
 }
 
-/// Switch the virtual output off again if one is active. Safe to call more than once; also used by
-/// the Ctrl+C / SIGTERM handler, because `Drop` does not run when the process is signalled.
+/// Switch one of our outputs off and forget it; on failure the record stays so the next start retries.
+fn release_active(output: &str, mode: &str) {
+    ACTIVE.lock().unwrap_or_else(|e| e.into_inner()).retain(|(o, _)| o != output);
+    if release_output(output, mode) {
+        crate::active_record::clear(output);
+    } else {
+        eprintln!("WARNING: could not switch virtual output {output} off; it will be removed at the next start");
+    }
+}
+
+/// Switch every virtual output of this process off. Safe to call more than once; used by the
+/// Ctrl+C / SIGTERM handler, because `Drop` does not run when the process is signalled.
 pub fn cleanup_active() {
-    let taken = ACTIVE.lock().ok().and_then(|mut a| a.take());
-    if let Some((output, mode)) = taken {
-        if release_output(&output, &mode) {
-            crate::active_record::clear();
-        } else {
-            // Keep the record: the next start of the host tries again.
-            eprintln!("WARNING: could not switch virtual output {output} off; it will be removed at the next start");
-        }
+    let taken = std::mem::take(&mut *ACTIVE.lock().unwrap_or_else(|e| e.into_inner()));
+    for (output, mode) in taken {
+        release_active(&output, &mode);
     }
 }
 
 impl Drop for VirtualOutput {
+    /// Only this session's output goes; other sessions keep theirs.
     fn drop(&mut self) {
-        cleanup_active();
+        release_active(&self.name, &self.mode);
     }
 }
 

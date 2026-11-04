@@ -108,6 +108,47 @@ fn streams_video_after_hello() {
 }
 
 #[test]
+fn max_clients_two_serves_two_and_refuses_a_third() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let host = Host::start_with(true, "", &[], &["--max-clients", "2"]);
+    let (mut a, _wa) = client(host.port, PROTOCOL_VERSION, 320, 240);
+    let (mut b, _wb) = client(host.port, PROTOCOL_VERSION, 640, 360);
+    expect_config(&mut a, 320, 240);
+    expect_config(&mut b, 640, 360);
+    // Both receive video at the same time.
+    for r in [&mut a, &mut b] {
+        let mut bytes = 0;
+        while bytes < 1000 {
+            if let Message::Video { data, .. } = read_message(r).expect("video") {
+                bytes += data.len();
+            }
+        }
+    }
+    let (mut third, _wc) = client(host.port, PROTOCOL_VERSION, 320, 240);
+    assert!(read_message(&mut third).is_err(), "a third client must be refused");
+    // Dropping one frees a slot for a new client while the other keeps streaming.
+    drop((a, _wa));
+    std::thread::sleep(Duration::from_millis(1500));
+    let (mut c, _wc2) = client(host.port, PROTOCOL_VERSION, 320, 240);
+    expect_config(&mut c, 320, 240);
+    assert!(matches!(read_message(&mut b), Ok(Message::Video { .. } | Message::Ping(_))));
+}
+
+#[test]
+fn max_clients_is_validated() {
+    for bad in ["0", "9", "x"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_dd-host"))
+            .args(["--max-clients", bad])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "--max-clients {bad} must be rejected");
+    }
+}
+
+#[test]
 fn second_client_is_refused_while_one_is_active() {
     if !have_ffmpeg() {
         return;

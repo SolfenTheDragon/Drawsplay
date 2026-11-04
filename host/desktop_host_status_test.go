@@ -149,3 +149,27 @@ func TestDesktopDisconnectEndpoint(t *testing.T) {
 		t.Fatalf("request file missing: %v", err)
 	}
 }
+
+func TestReadDesktopHostStatusSessions(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	doc := fmt.Sprintf(`{"updatedUnixMs":%d,"session":{"client":"a","fps":60},"sessions":[{"client":"a","fps":60},{"client":"b","fps":30}]}`, now.UnixMilli())
+	if err := os.WriteFile(filepath.Join(dir, desktopStatusFile), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := readDesktopHostStatus(dir, now)
+	if len(st.Sessions) != 2 || st.Sessions[1].Client != "b" || st.Session == nil || st.Session.Client != "a" {
+		t.Fatalf("two sessions misread: %+v", st)
+	}
+	// An older dd-host publishes only "session"; it still shows up in the list.
+	old := fmt.Sprintf(`{"updatedUnixMs":%d,"session":{"client":"solo"}}`, now.UnixMilli())
+	if err := os.WriteFile(filepath.Join(dir, desktopStatusFile), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if st := readDesktopHostStatus(dir, now); len(st.Sessions) != 1 || st.Sessions[0].Client != "solo" {
+		t.Fatalf("legacy single session not promoted: %+v", st)
+	}
+	if st := readDesktopHostStatus(dir, now.Add(time.Hour)); st.Sessions == nil || len(st.Sessions) != 0 {
+		t.Fatalf("not running must give an empty non-nil list: %+v", st)
+	}
+}

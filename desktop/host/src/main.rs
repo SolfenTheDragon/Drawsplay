@@ -52,6 +52,8 @@ struct Args {
     forget: Option<String>,
     remove_fake: bool,
     trust_key: Option<String>,
+    /// Clients served at the same time (each gets its own virtual monitor).
+    max_clients: usize,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -79,6 +81,7 @@ fn parse_args() -> Result<Args, String> {
         forget: None,
         remove_fake: false,
         trust_key: None,
+        max_clients: 1,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -101,6 +104,12 @@ fn parse_args() -> Result<Args, String> {
             "--remove-fake-displays" => a.remove_fake = true,
             "--forget" => a.forget = Some(val("--forget")?),
             "--trust" => a.trust_key = Some(val("--trust")?),
+            "--max-clients" => {
+                a.max_clients = val("--max-clients")?.parse().map_err(|e| format!("--max-clients: {e}"))?;
+                if !(1..=MAX_CLIENTS).contains(&a.max_clients) {
+                    return Err(format!("--max-clients must be between 1 and {MAX_CLIENTS}"));
+                }
+            }
             "--encoder" => {
                 let v = val("--encoder")?;
                 a.encoder =
@@ -121,7 +130,7 @@ fn parse_args() -> Result<Args, String> {
                 println!(
                     "dd-host [--bind ADDR:PORT] [--source virtual|desktop|test] [--bitrate-kbps N]\n        [--size WxH] [--origin X,Y] [--ffmpeg PATH] [--trust-all] [--require-virtual]
         [--encoder auto|software|nvenc|qsv|amf|vaapi]
-        [--show-key] [--trust CLIENT_KEY]\n        [--list-trusted] [--forget KEY_PREFIX]\n        [--remove-fake-displays]\n\nThe stream size defaults to the client's requested size."
+        [--show-key] [--trust CLIENT_KEY]\n        [--list-trusted] [--forget KEY_PREFIX]\n        [--max-clients N] [--remove-fake-displays]\n\nThe stream size defaults to the client's requested size."
                 );
                 std::process::exit(0);
             }
@@ -226,11 +235,16 @@ const PAIRING_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_DIMENSION: u32 = 16384;
 /// Connections allowed to sit in handshake/pairing at the same time.
 const MAX_PENDING: usize = 8;
+/// Upper bound for `--max-clients` (the Windows virtual display driver has eight monitor slots).
+const MAX_CLIENTS: usize = 8;
 
 /// State shared by the connection threads.
 struct Shared {
-    /// Set while a client is being served (one at a time).
-    busy: AtomicBool,
+    /// Clients being served right now (at most `--max-clients`).
+    sessions: AtomicUsize,
+    /// Held while a session starts (count + monitor creation) and while the last one cleans up, so a
+    /// new session's monitor is never swept away by the one that is leaving.
+    lifecycle: Mutex<()>,
     /// Held while the pairing question is on screen, so strangers cannot queue up prompts.
     prompt: Mutex<()>,
     /// Connections in progress (handshake, pairing or the active session); bounds the thread count.
@@ -239,10 +253,17 @@ struct Shared {
     software_only: AtomicBool,
 }
 
-struct BusyGuard<'a>(&'a AtomicBool);
-impl Drop for BusyGuard<'_> {
+/// One served client. Dropping it frees the slot; when it was the last session, every fake display
+/// still around (whoever made it) is removed, so nothing is left behind on the desktop.
+struct SessionSlot<'a>(&'a Shared);
+impl Drop for SessionSlot<'_> {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
+        self.0.sessions.fetch_sub(1, Ordering::SeqCst);
+        let _life = self.0.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
+        if self.0.sessions.load(Ordering::SeqCst) == 0 {
+            #[cfg(target_os = "linux")]
+            fake_displays::remove_all("last session ended");
+        }
     }
 }
 
@@ -361,14 +382,11 @@ fn kill_tracked_children() {
     }
 }
 
-/// Removes every remaining fake display when a session ends, however it ends.
-#[cfg(target_os = "linux")]
-struct SweepOnDrop;
-
-#[cfg(target_os = "linux")]
-impl Drop for SweepOnDrop {
-    fn drop(&mut self) {
-        fake_displays::remove_all("session ended");
+fn too_many(max: usize) -> String {
+    if max == 1 {
+        "another client is already connected".into()
+    } else {
+        format!("already serving the maximum of {max} clients")
     }
 }
 
@@ -391,8 +409,8 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
     stream.set_read_timeout(Some(step_timeout()))?;
     stream.set_write_timeout(Some(step_timeout()))?;
     let session = handshake(&mut stream, id, false)?;
-    if shared.busy.load(Ordering::SeqCst) {
-        return Err(std::io::Error::other("another client is already connected"));
+    if shared.sessions.load(Ordering::SeqCst) >= a.max_clients {
+        return Err(std::io::Error::other(too_many(a.max_clients)));
     }
     let peer = stream.peer_addr().map(|p| p.to_string()).unwrap_or_default();
     // The trust list is re-read per connection; only one pairing question exists at a time.
@@ -427,19 +445,22 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
             return Err(std::io::Error::other(format!("--size {sw}x{sh} is out of range")));
         }
     }
-    if shared.busy.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
-        return Err(std::io::Error::other("another client is already connected"));
-    }
-    let _busy = BusyGuard(&shared.busy);
-    // Declared before the display so it runs after the display has been released: whatever fake
-    // display is still around by then, whoever made it, goes too.
-    #[cfg(target_os = "linux")]
-    let _sweep = SweepOnDrop;
     let (rw, rh) = a.size.unwrap_or((width, height));
     let fps = refresh_hz.clamp(1, 120);
 
+    // Take a slot and create the monitor under the lifecycle lock, so sessions that start or end at
+    // the same moment cannot remove each other's monitors. The slot is declared before the display so
+    // it is released after it: the last session to leave then clears every fake display.
+    let life = shared.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
+    if shared.sessions.load(Ordering::SeqCst) >= a.max_clients {
+        return Err(std::io::Error::other(too_many(a.max_clients)));
+    }
+    shared.sessions.fetch_add(1, Ordering::SeqCst);
+    let _slot = SessionSlot(shared);
     // Keep the display alive for the whole session; dropping it unplugs a virtual monitor.
-    let display = display::acquire(a.source == Source::Virtual, a.require_virtual, a.origin, rw, rh, fps)?;
+    let acquired = display::acquire(a.source == Source::Virtual, a.require_virtual, a.origin, rw, rh, fps);
+    drop(life);
+    let display = acquired?;
     let target = display.target;
     let (w, h) = target.size;
     let origin = target.origin;
@@ -447,7 +468,7 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
 
     write_message(&mut stream, &Message::Config { width: w, height: h, fps })?;
     // Publish the session for the web UI; the guard clears it however this function ends.
-    let _status = status::session_started(
+    let status = status::session_started(
         status::SessionInfo {
             client: name.clone(),
             peer: peer.clone(),
@@ -460,6 +481,7 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
         },
         raw.try_clone().ok(),
     );
+    let status_id = status.id;
     // From here on the client talks every couple of seconds; silence means it is gone.
     reader.get_ref().set_read_timeout(Some(idle_timeout()))?;
 
@@ -501,7 +523,7 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
         let chunk = match chunks.recv_timeout(Duration::from_millis(250)) {
             Ok(c) => c,
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if status::disconnect_requested() {
+                if status::disconnect_requested(status_id) {
                     let _ = write_message(
                         &mut *writer.lock().unwrap(),
                         &Message::Bye { reason: "ended from the web UI".into() },
@@ -515,7 +537,7 @@ fn serve(mut stream: TcpStream, a: &Args, id: &Keypair, trust_path: &Path, share
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => Ok(Vec::new()),
         };
-        if status::disconnect_requested() {
+        if status::disconnect_requested(status_id) {
             let _ =
                 write_message(&mut *writer.lock().unwrap(), &Message::Bye { reason: "ended from the web UI".into() });
             break Err(std::io::Error::other("disconnected from the web UI"));
@@ -642,7 +664,7 @@ fn main() {
     #[cfg(target_os = "linux")]
     {
         active_record::init(&dir);
-        if let Some(msg) = active_record::sweep_stale() {
+        for msg in active_record::sweep_stale() {
             eprintln!("{msg}");
         }
         fake_displays::remove_all("startup");
@@ -661,13 +683,14 @@ fn main() {
     let args = Arc::new(args);
     let id = Arc::new(id);
     let shared = Arc::new(Shared {
-        busy: AtomicBool::new(false),
+        sessions: AtomicUsize::new(0),
+        lifecycle: Mutex::new(()),
         prompt: Mutex::new(()),
         pending: AtomicUsize::new(0),
         software_only: AtomicBool::new(false),
     });
     // Each connection runs on its own thread, so a silent or slow peer cannot block the others.
-    // Only one of them can become the active session.
+    // At most `--max-clients` of them become active sessions.
     for conn in listener.incoming() {
         match conn {
             Ok(s) => {

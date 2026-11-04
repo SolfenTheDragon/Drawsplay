@@ -121,8 +121,8 @@ pub fn primary(outs: &[Out]) -> Option<&Out> {
     outs.iter().find(|o| (o.x, o.y) == (bx, by)).or(outs.first())
 }
 
-/// The headless output this process created, so a signal handler can remove it.
-static ACTIVE: std::sync::Mutex<Option<(Compositor, String)>> = std::sync::Mutex::new(None);
+/// The headless outputs this process created, so a signal handler can remove them.
+static ACTIVE: std::sync::Mutex<Vec<(Compositor, String)>> = std::sync::Mutex::new(Vec::new());
 
 /// "sway", "hyprland" or "other" for the running session.
 pub fn kind_of_session() -> &'static str {
@@ -170,21 +170,28 @@ pub fn release_named(kind: &str, name: &str) -> bool {
     remove_output(comp, name)
 }
 
-/// Remove the output this process created, if any. Idempotent; used by Drop and the signal handler.
+/// Remove one output this process created. Idempotent.
+fn release_active(comp: Compositor, name: &str) {
+    ACTIVE.lock().unwrap_or_else(|e| e.into_inner()).retain(|(_, n)| n != name);
+    if remove_output(comp, name) {
+        crate::active_record::clear(name);
+    } else {
+        eprintln!("WARNING: could not remove virtual output {name}; it will be removed at the next start");
+    }
+}
+
+/// Remove every output this process created. Used by the signal handler.
 pub fn cleanup_active() {
-    let taken = ACTIVE.lock().ok().and_then(|mut a| a.take());
-    if let Some((comp, name)) = taken {
-        if remove_output(comp, &name) {
-            crate::active_record::clear();
-        } else {
-            eprintln!("WARNING: could not remove virtual output {name}; it will be removed at the next start");
-        }
+    let taken = std::mem::take(&mut *ACTIVE.lock().unwrap_or_else(|e| e.into_inner()));
+    for (comp, name) in taken {
+        release_active(comp, &name);
     }
 }
 
 /// A virtual output that is removed again when dropped.
 pub struct VirtualOutput {
     pub out: Out,
+    comp: Compositor,
 }
 
 impl VirtualOutput {
@@ -220,8 +227,8 @@ impl VirtualOutput {
         };
         // Record the new output before configuring it: from here on a crash is recoverable.
         crate::active_record::write(kind_name(comp), &name, "");
-        *ACTIVE.lock().unwrap() = Some((comp, name.clone()));
-        let mut me = VirtualOutput { out: Out { name: name.clone(), w, h, x: right, y: 0 } };
+        ACTIVE.lock().unwrap().push((comp, name.clone()));
+        let mut me = VirtualOutput { out: Out { name: name.clone(), w, h, x: right, y: 0 }, comp };
         let configured = match comp {
             Compositor::Sway => run(
                 "swaymsg",
@@ -240,7 +247,7 @@ impl VirtualOutput {
 
 impl Drop for VirtualOutput {
     fn drop(&mut self) {
-        cleanup_active();
+        release_active(self.comp, &self.out.name);
     }
 }
 

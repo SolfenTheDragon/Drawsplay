@@ -43,17 +43,19 @@ type desktopTrusted struct {
 // desktopHostStatus is what the web UI sees about dd-host. Running is false when dd-host is absent
 // or its status is stale; the other fields are then zero.
 type desktopHostStatus struct {
-	Running       bool             `json:"running"`
-	PID           int              `json:"pid,omitempty"`
-	Version       string           `json:"version,omitempty"`
-	Listen        string           `json:"listen,omitempty"`
-	Encoder       string           `json:"encoder,omitempty"`
-	Source        string           `json:"source,omitempty"`
-	OS            string           `json:"os,omitempty"`
-	Arch          string           `json:"arch,omitempty"`
-	UpdatedUnixMs int64            `json:"updatedUnixMs,omitempty"`
-	Session       *desktopSession  `json:"session"`
-	Trusted       []desktopTrusted `json:"trusted"`
+	Running       bool            `json:"running"`
+	PID           int             `json:"pid,omitempty"`
+	Version       string          `json:"version,omitempty"`
+	Listen        string          `json:"listen,omitempty"`
+	Encoder       string          `json:"encoder,omitempty"`
+	Source        string          `json:"source,omitempty"`
+	OS            string          `json:"os,omitempty"`
+	Arch          string          `json:"arch,omitempty"`
+	UpdatedUnixMs int64           `json:"updatedUnixMs,omitempty"`
+	Session       *desktopSession `json:"session"`
+	// Sessions lists every connected PC client (dd-host --max-clients > 1). Session is the oldest.
+	Sessions []desktopSession `json:"sessions"`
+	Trusted  []desktopTrusted `json:"trusted"`
 }
 
 // desktopHostDir is dd-host's config folder: %APPDATA%\DrawSplayDesktop\host on Windows,
@@ -76,7 +78,7 @@ func desktopHostDir() string {
 // readDesktopHostStatus parses status.json in dir. Missing, unreadable, malformed or stale files all
 // mean "not running".
 func readDesktopHostStatus(dir string, now time.Time) desktopHostStatus {
-	none := desktopHostStatus{Trusted: []desktopTrusted{}}
+	none := desktopHostStatus{Trusted: []desktopTrusted{}, Sessions: []desktopSession{}}
 	if dir == "" {
 		return none
 	}
@@ -93,6 +95,13 @@ func readDesktopHostStatus(dir string, now time.Time) desktopHostStatus {
 		return none
 	}
 	st.Running = true
+	// Older dd-host builds publish only "session".
+	if len(st.Sessions) == 0 && st.Session != nil {
+		st.Sessions = []desktopSession{*st.Session}
+	}
+	if st.Sessions == nil {
+		st.Sessions = []desktopSession{}
+	}
 	if st.Trusted == nil {
 		st.Trusted = []desktopTrusted{}
 	}
