@@ -122,6 +122,18 @@ fn write_private(path: &Path, text: &str) -> io::Result<()> {
     }
 }
 
+/// The label stored with a trusted key: no control characters, at most 64 characters.
+fn clean_label(label: &str) -> String {
+    label.chars().filter(|c| !c.is_control()).take(64).collect()
+}
+
+/// Is `desc` (how a peer is described: its address) already trusted under a different key? That is what
+/// a reinstalled computer looks like, and also what someone who has taken over its address looks like.
+fn trusted_with_other_key(entries: &[(PublicKey, String)], key: &PublicKey, desc: &str) -> bool {
+    let desc = clean_label(desc);
+    entries.iter().any(|(k, label)| *label == desc.trim() && k != key)
+}
+
 /// Trusted peer keys, stored one hex key per line (`#` starts a comment, e.g. a name).
 pub struct TrustStore {
     path: PathBuf,
@@ -207,7 +219,7 @@ impl TrustStore {
         }
         use std::io::Write;
         let mut f = open_private(&self.path, true)?;
-        let label: String = label.chars().filter(|c| !c.is_control()).take(64).collect();
+        let label = clean_label(label);
         // A hand-edited file may lack a final newline; without one the entry would join the last
         // line's comment and be lost on the next load.
         let needs_newline = fs::read(&self.path).map(|b| !b.is_empty() && !b.ends_with(b"\n")).unwrap_or(false);
@@ -294,6 +306,13 @@ pub fn authorize_with(
     if store.contains(&session.remote_public) {
         return Ok(true);
     }
+    if !trust_all && trusted_with_other_key(&store.entries().unwrap_or_default(), &session.remote_public, peer_desc) {
+        eprintln!(
+            "\nWARNING: {peer_desc} was trusted before with a DIFFERENT key. That is expected if its DrawSplay \
+             Desktop identity was reset or the computer was reinstalled; if not, someone else may be answering at \
+             that address. Accept only if you know why the key changed."
+        );
+    }
     let accept = if trust_all {
         eprintln!("WARNING: trusting new peer {peer_desc} without confirmation (--trust-all)");
         true
@@ -367,6 +386,19 @@ mod tests {
         let again = TrustStore::load(p).unwrap();
         assert!(again.contains(&[0xAB; 32]) && again.contains(&[0xCD; 32]));
         let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn a_new_key_at_a_trusted_address_is_noticed() {
+        let entries =
+            vec![([1u8; 32], "host at 192.168.1.5:47800".to_string()), ([2u8; 32], "client at 10.0.0.2".into())];
+        assert!(trusted_with_other_key(&entries, &[9; 32], "host at 192.168.1.5:47800"));
+        assert!(!trusted_with_other_key(&entries, &[1; 32], "host at 192.168.1.5:47800"), "same key: nothing to say");
+        assert!(!trusted_with_other_key(&entries, &[9; 32], "host at 192.168.1.6:47800"), "a different address");
+        assert!(!trusted_with_other_key(&[], &[9; 32], "host at 192.168.1.5:47800"));
+        // Labels are stored cleaned, so the comparison cleans the description the same way.
+        let entries = vec![([1u8; 32], "host at ab".to_string())];
+        assert!(trusted_with_other_key(&entries, &[9; 32], "host at a\nb"));
     }
 
     #[test]
