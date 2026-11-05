@@ -47,7 +47,7 @@ impl Host {
         for (k, v) in extra_env {
             cmd.env(k, v);
         }
-        cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+        cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::inherit());
         let mut child = cmd.spawn().expect("start dd-host");
         child.stdin.as_mut().unwrap().write_all(stdin_text.as_bytes()).unwrap();
         // Wait until it accepts connections (a bare connect that closes is harmless to the host).
