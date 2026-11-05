@@ -14,7 +14,37 @@ pub const PROTOCOL_VERSION: u16 = 2;
 pub const DEFAULT_PORT: u16 = 47800;
 /// Largest accepted frame (type byte + payload): 16 MiB.
 pub const MAX_FRAME: usize = 16 * 1024 * 1024;
+/// Largest frame the host accepts from a client: Hello, input and pings are all tiny, so a paired
+/// client gets no way to make the host allocate megabytes per message.
+pub const MAX_CONTROL_FRAME: usize = 4096;
+/// Largest video width or height either side accepts.
+pub const MAX_VIDEO_DIMENSION: u32 = 16384;
+/// Largest video area (pixels) either side accepts: 8K UHD is 33 million. Bounds the buffers a peer can
+/// make the other side allocate.
+pub const MAX_VIDEO_PIXELS: u64 = 36_000_000;
 const MAX_NAME: usize = 256;
+
+/// Is a `width` x `height` video acceptable?
+pub fn video_size_ok(width: u32, height: u32) -> bool {
+    (2..=MAX_VIDEO_DIMENSION).contains(&width)
+        && (2..=MAX_VIDEO_DIMENSION).contains(&height)
+        && u64::from(width) * u64::from(height) <= MAX_VIDEO_PIXELS
+}
+
+/// Text from a peer is shown in terminals and web pages: replace control characters (escape
+/// sequences, newlines) and invisible text-direction overrides with `?`.
+fn clean(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            let hidden = matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}');
+            if c.is_control() || hidden {
+                '?'
+            } else {
+                c
+            }
+        })
+        .collect()
+}
 
 /// Where a pointer event came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -219,7 +249,7 @@ impl Message {
                 if n > MAX_NAME {
                     return Err(bad("name too long"));
                 }
-                let name = String::from_utf8_lossy(c.take(n)?).into_owned();
+                let name = clean(&String::from_utf8_lossy(c.take(n)?));
                 Message::Hello { version, width, height, refresh_hz, name }
             }
             T_CONFIG => Message::Config { width: c.u32()?, height: c.u32()?, fps: c.u32()? },
@@ -266,7 +296,7 @@ impl Message {
                 if n > MAX_NAME {
                     return Err(bad("reason too long"));
                 }
-                Message::Bye { reason: String::from_utf8_lossy(c.take(n)?).into_owned() }
+                Message::Bye { reason: clean(&String::from_utf8_lossy(c.take(n)?)) }
             }
             _ => return Err(bad("unknown message type")),
         };
@@ -282,10 +312,15 @@ pub fn write_message<W: Write>(w: &mut W, m: &Message) -> io::Result<()> {
 
 /// Read one message. Returns `UnexpectedEof` when the peer closes cleanly.
 pub fn read_message<R: Read>(r: &mut R) -> io::Result<Message> {
+    read_message_limited(r, MAX_FRAME)
+}
+
+/// Like [`read_message`], but refuses frames larger than `max` bytes before allocating for them.
+pub fn read_message_limited<R: Read>(r: &mut R, max: usize) -> io::Result<Message> {
     let mut len = [0u8; 4];
     r.read_exact(&mut len)?;
     let len = u32::from_be_bytes(len) as usize;
-    if len == 0 || len > MAX_FRAME {
+    if len == 0 || len > max.min(MAX_FRAME) {
         return Err(bad("frame length out of range"));
     }
     let mut body = vec![0u8; len];
@@ -365,5 +400,61 @@ mod tests {
         assert!(read_message(&mut &b[..]).is_err());
         let b = [0, 0, 0, 3, T_POINTER, 0, 9];
         assert!(read_message(&mut &b[..]).is_err());
+    }
+
+    #[test]
+    fn peer_text_cannot_carry_terminal_escapes() {
+        let evil = "pc\x1b]0;owned\x07\r\nroot\u{202e}gnp";
+        let m = Message::Hello { version: PROTOCOL_VERSION, width: 2, height: 2, refresh_hz: 1, name: evil.into() };
+        let got = read_message(&mut &m.encode()[..]).unwrap();
+        let Message::Hello { name, .. } = got else { panic!() };
+        assert!(!name.chars().any(|c| c.is_control() || c == '\u{202e}'), "{name:?}");
+        assert!(name.starts_with("pc") && name.contains("root"));
+        let b = Message::Bye { reason: "bye\x1b[2J".into() };
+        let Message::Bye { reason } = read_message(&mut &b.encode()[..]).unwrap() else { panic!() };
+        assert!(!reason.contains('\x1b'));
+    }
+
+    #[test]
+    fn frame_limit_is_checked_before_allocating() {
+        // A header claiming 1 MiB with no body: the limited reader must refuse on the header alone.
+        let mut b = (1_048_576u32).to_be_bytes().to_vec();
+        b.push(T_PING);
+        let err = read_message_limited(&mut &b[..], MAX_CONTROL_FRAME).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        // Control messages fit comfortably.
+        let ok = Message::Hello { version: 2, width: 1920, height: 1080, refresh_hz: 60, name: "x".repeat(256) };
+        assert_eq!(read_message_limited(&mut &ok.encode()[..], MAX_CONTROL_FRAME).unwrap(), ok);
+    }
+
+    #[test]
+    fn video_size_limits() {
+        assert!(video_size_ok(1920, 1080) && video_size_ok(7680, 4320) && video_size_ok(2, 2));
+        assert!(!video_size_ok(1, 1080) && !video_size_ok(16385, 100));
+        assert!(!video_size_ok(16384, 16384), "268 million pixels must be refused");
+    }
+
+    /// Whatever bytes arrive, decoding must return an error or a message, never panic.
+    #[test]
+    fn random_bytes_never_panic_the_decoder() {
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        for _ in 0..200_000 {
+            let len = (next() % 80) as usize;
+            let mut body: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+            // Bias the type byte towards the real ones so the field parsers get exercised.
+            if let Some(t) = body.first_mut() {
+                *t = (next() % 10) as u8;
+            }
+            let _ = Message::decode(&body);
+            let mut framed = (body.len() as u32).to_be_bytes().to_vec();
+            framed.extend(&body);
+            let _ = read_message_limited(&mut &framed[..], MAX_CONTROL_FRAME);
+        }
     }
 }
