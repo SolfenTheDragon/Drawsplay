@@ -1,6 +1,7 @@
 //! dd-host: captures a screen (or a test pattern), encodes H.264 with ffmpeg and
 //! streams it to one client, while injecting the client's mouse input.
 
+mod access;
 #[cfg(target_os = "linux")]
 mod active_record;
 mod display;
@@ -56,6 +57,9 @@ struct Args {
     trust_key: Option<String>,
     /// Clients served at the same time (each gets its own virtual monitor).
     max_clients: usize,
+    /// Networks served in addition to the private ones, and whether every address is served.
+    allow: Vec<access::Net>,
+    allow_any: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -84,6 +88,8 @@ fn parse_args() -> Result<Args, String> {
         remove_fake: false,
         trust_key: None,
         max_clients: 1,
+        allow: Vec::new(),
+        allow_any: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -106,6 +112,8 @@ fn parse_args() -> Result<Args, String> {
             "--remove-fake-displays" => a.remove_fake = true,
             "--forget" => a.forget = Some(val("--forget")?),
             "--trust" => a.trust_key = Some(val("--trust")?),
+            "--allow" => a.allow.push(access::Net::parse(&val("--allow")?)?),
+            "--allow-any" => a.allow_any = true,
             "--max-clients" => {
                 a.max_clients = val("--max-clients")?.parse().map_err(|e| format!("--max-clients: {e}"))?;
                 if !(1..=MAX_CLIENTS).contains(&a.max_clients) {
@@ -136,7 +144,7 @@ fn parse_args() -> Result<Args, String> {
                 println!(
                     "dd-host [--bind ADDR:PORT] [--source virtual|desktop|test] [--bitrate-kbps N]\n        [--size WxH] [--origin X,Y] [--ffmpeg PATH] [--trust-all] [--require-virtual]
         [--encoder auto|software|nvenc|qsv|amf|vaapi]
-        [--show-key] [--trust CLIENT_KEY]\n        [--list-trusted] [--forget KEY_PREFIX]\n        [--max-clients N] [--remove-fake-displays]\n\nThe stream size defaults to the client's requested size."
+        [--show-key] [--trust CLIENT_KEY]\n        [--list-trusted] [--forget KEY_PREFIX]\n        [--max-clients N] [--remove-fake-displays]\n        [--allow NET]... [--allow-any]\n\nOnly loopback, private, link-local and 100.64.0.0/10 addresses are served; --allow adds a network\n(ADDR/LEN), --allow-any serves everyone. The stream size defaults to the client's requested size."
                 );
                 std::process::exit(0);
             }
@@ -598,6 +606,18 @@ fn serve(
     result
 }
 
+/// Say, at most every 30 seconds, that connections from outside the allowed networks were dropped.
+fn log_refused(ip: &str) {
+    static LAST: Mutex<Option<(Instant, u32)>> = Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let (since, count) = last.get_or_insert((Instant::now() - Duration::from_secs(60), 0));
+    *count += 1;
+    if since.elapsed() >= Duration::from_secs(30) {
+        eprintln!("refused {count} connection(s) from outside the allowed networks (latest: {ip}); see --allow");
+        *last = Some((Instant::now(), 0));
+    }
+}
+
 fn main() {
     #[cfg(windows)]
     vdisplay::set_dpi_aware();
@@ -608,6 +628,17 @@ fn main() {
             std::process::exit(2);
         }
     };
+    // Without the pairing question anyone who can reach the port controls this computer.
+    if args.trust_all
+        && !args.bind.parse::<std::net::SocketAddr>().is_ok_and(|a| a.ip().is_loopback())
+        && std::env::var("DD_INSECURE_TRUST_ALL").as_deref() != Ok("1")
+    {
+        eprintln!(
+            "error: --trust-all is only allowed with a loopback --bind (for example 127.0.0.1:47800): without the \
+             pairing check anyone on the network could type on this computer"
+        );
+        std::process::exit(2);
+    }
     if args.remove_fake {
         #[cfg(target_os = "linux")]
         {
@@ -704,6 +735,7 @@ fn main() {
             Source::Virtual => "virtual",
         },
     );
+    let allow = access::Allow::new(args.allow_any, &args.allow);
     let args = Arc::new(args);
     let id = Arc::new(id);
     let shared = Arc::new(Shared {
@@ -719,6 +751,12 @@ fn main() {
         match conn {
             Ok(s) => {
                 let peer = s.peer_addr().map(|p| p.to_string()).unwrap_or_default();
+                if let Ok(addr) = s.peer_addr() {
+                    if !allow.permits(addr.ip()) {
+                        log_refused(&addr.ip().to_string());
+                        continue;
+                    }
+                }
                 if shared.pending.fetch_add(1, Ordering::SeqCst) >= MAX_PENDING {
                     shared.pending.fetch_sub(1, Ordering::SeqCst);
                     eprintln!("connection from {peer} refused: too many unauthenticated connections");

@@ -148,6 +148,29 @@ fn max_clients_is_validated() {
     }
 }
 
+/// Without the pairing question anyone who can reach the port controls the computer, so --trust-all
+/// is refused unless the host listens on loopback only.
+#[test]
+fn trust_all_is_refused_on_a_public_bind() {
+    for bind in ["0.0.0.0:0", "192.168.1.5:47800", "somehost:47800"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_dd-host"))
+            .args(["--trust-all", "--bind", bind])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "--trust-all with --bind {bind} must be refused");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("loopback"));
+    }
+}
+
+#[test]
+fn allow_options_are_validated() {
+    for bad in [&["--allow", "nonsense"][..], &["--allow", "10.0.0.0/40"], &["--allow"]] {
+        let out = Command::new(env!("CARGO_BIN_EXE_dd-host")).args(bad).stdin(Stdio::null()).output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{bad:?} must be rejected");
+    }
+}
+
 #[test]
 fn second_client_is_refused_while_one_is_active() {
     if !have_ffmpeg() {
