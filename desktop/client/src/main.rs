@@ -61,7 +61,7 @@ fn parse_args() -> Result<Args, String> {
                 let (w, h) = v.split_once('x').ok_or("--size WxH")?;
                 a.width = w.parse().map_err(|e| format!("{e}"))?;
                 a.height = h.parse().map_err(|e| format!("{e}"))?;
-                if a.width < 2 || a.height < 2 || a.width > 16384 || a.height > 16384 {
+                if !dd_proto::video_size_ok(a.width, a.height) {
                     return Err("--size out of range".into());
                 }
                 a.size_given = true;

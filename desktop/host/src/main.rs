@@ -20,7 +20,9 @@ mod wayland_display;
 
 use dd_proto::identity::{authorize, config_dir, load_or_create_identity, TrustStore};
 use dd_proto::secure::{handshake, Keypair};
-use dd_proto::{read_message, write_message, Message, DEFAULT_PORT, PROTOCOL_VERSION};
+use dd_proto::{
+    read_message_limited, video_size_ok, write_message, Message, DEFAULT_PORT, MAX_CONTROL_FRAME, PROTOCOL_VERSION,
+};
 use encoder::Encoder;
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
@@ -124,7 +126,11 @@ fn parse_args() -> Result<Args, String> {
             "--size" => {
                 let v = val("--size")?;
                 let (w, h) = v.split_once('x').ok_or("--size WxH")?;
-                a.size = Some((w.parse().map_err(|e| format!("{e}"))?, h.parse().map_err(|e| format!("{e}"))?));
+                let (w, h) = (w.parse().map_err(|e| format!("{e}"))?, h.parse().map_err(|e| format!("{e}"))?);
+                if !video_size_ok(w, h) {
+                    return Err(format!("--size {w}x{h} is out of range"));
+                }
+                a.size = Some((w, h));
             }
             "-h" | "--help" => {
                 println!(
@@ -231,8 +237,6 @@ fn step_timeout() -> Duration {
 }
 /// How long to wait for the other person to confirm the pairing code on a first connection.
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(300);
-/// Largest video width or height accepted from a client (matches the client's own limit).
-const MAX_DIMENSION: u32 = 16384;
 /// Connections allowed to sit in handshake/pairing at the same time.
 const MAX_PENDING: usize = 8;
 /// Upper bound for `--max-clients` (the Windows virtual display driver has eight monitor slots).
@@ -441,18 +445,18 @@ fn serve(
     let mut reader = session.reader(stream.try_clone()?);
     let mut stream = session.writer(stream);
     reader.get_ref().set_read_timeout(Some(hello_wait))?;
-    let hello = read_message(&mut reader)?;
+    let hello = read_message_limited(&mut reader, MAX_CONTROL_FRAME)?;
     let Message::Hello { version, width, height, refresh_hz, name } = hello else {
         return Err(std::io::Error::other("first message was not Hello"));
     };
     if version != PROTOCOL_VERSION {
         return Err(std::io::Error::other(format!("protocol version {version} unsupported")));
     }
-    if !(2..=MAX_DIMENSION).contains(&width) || !(2..=MAX_DIMENSION).contains(&height) {
+    if !video_size_ok(width, height) {
         return Err(std::io::Error::other(format!("client asked for an unsupported size {width}x{height}")));
     }
     if let Some((sw, sh)) = a.size {
-        if !(2..=MAX_DIMENSION).contains(&sw) || !(2..=MAX_DIMENSION).contains(&sh) {
+        if !video_size_ok(sw, sh) {
             return Err(std::io::Error::other(format!("--size {sw}x{sh} is out of range")));
         }
     }
@@ -514,7 +518,7 @@ fn serve(
         let _stop = ShutdownOnDrop(raw_input);
         let mut inj = inject::Injector::new(target, portal);
         loop {
-            match read_message(&mut reader) {
+            match read_message_limited(&mut reader, MAX_CONTROL_FRAME) {
                 Ok(Message::Ping(v)) => {
                     if write_message(&mut *w2.lock().unwrap(), &Message::Pong(v)).is_err() {
                         break;

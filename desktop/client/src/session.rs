@@ -3,7 +3,7 @@
 
 use dd_proto::identity::{authorize, config_dir, load_or_create_identity, TrustStore};
 use dd_proto::secure::handshake;
-use dd_proto::{read_message, write_message, Message, PointerPhase, PROTOCOL_VERSION};
+use dd_proto::{read_message, video_size_ok, write_message, Message, PointerPhase, PROTOCOL_VERSION};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
@@ -239,7 +239,7 @@ fn session(
     }
     reader.get_ref().set_read_timeout(Some(config_wait)).map_err(e("socket"))?;
     let (w, h, fps) = match read_message(&mut reader).map_err(e("waiting for host"))? {
-        Message::Config { width, height, fps } if width > 0 && height > 0 && width <= 16384 && height <= 16384 => {
+        Message::Config { width, height, fps } if video_size_ok(width, height) => {
             (width as usize, height as usize, fps)
         }
         _ => return Err("host sent an invalid Config".into()),
