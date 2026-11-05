@@ -862,6 +862,13 @@ fn main() {
         fake_displays::remove_all("startup");
     }
     eprintln!("dd-host listening on {} (config: {})", args.bind, dir.display());
+    if args.allow_any {
+        eprintln!("WARNING: --allow-any is set: connections from every address are served");
+    } else if args.allow.is_empty() {
+        eprintln!("serving private networks only (loopback, LAN, link-local, 100.64.0.0/10); --allow NET adds more");
+    } else {
+        eprintln!("serving private networks plus {} extra network(s) given with --allow", args.allow.len());
+    }
     status::init(
         &dir,
         &args.bind,

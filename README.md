@@ -230,7 +230,7 @@ dd-client HOST_IP --fullscreen          # or: --size 1920x1080 for a window
 
 The first connection asks both people to compare a 10-digit code (below). Press `Ctrl+Alt+Shift+Q` in the client to close it, which matters in fullscreen.
 
-Useful options (`--help` lists all): `--encoder auto|software|nvenc|qsv|amf|vaapi`, `--bitrate-kbps N`, `--source virtual|desktop|test`, `--require-virtual`, `--no-hwdec` and `--fit` (client; `--fit` scales the picture to the window, keeping its aspect ratio).
+Useful options (`--help` lists all): `--encoder auto|software|nvenc|qsv|amf|vaapi`, `--bitrate-kbps N`, `--source virtual|desktop|test`, `--require-virtual`, `--allow ADDR/LEN` (host: serve one more network, see Security model), `--no-hwdec` and `--fit` (client; `--fit` scales the picture to the window, keeping its aspect ratio).
 
 ### Pairing and encryption
 
@@ -249,6 +249,17 @@ dd-client --trust <that key>
 
 List trusted devices with `--list-trusted` and remove one with `--forget KEY_PREFIX` (at least 6 hex characters of the key, as printed by the list); both programs support these. The files `trusted_clients.txt` and `trusted_hosts.txt` in the config folder can still be edited by hand. `--trust-all` skips the check and is for testing only.
 
+### Security model
+
+- **Who can connect.** By default only loopback, private (LAN), link-local and `100.64.0.0/10` (Tailscale) addresses are served; anything else is dropped before any handshake. `--allow ADDR/LEN` adds a network, `--allow-any` serves everyone. `--trust-all` is refused unless `--bind` is a loopback address.
+- **What a pairing gives.** A paired client can type, click, touch and draw on the host as you, which is the same as sitting at it. Treat a client's `identity.key` like an SSH private key: it is created readable only by its owner (an older or copied file that is more open is tightened when loaded) and the config folders are restricted to you. Remove a device with `--forget`.
+- **Pairing.** The code can only be matched by chance (about one in 10 billion per attempt) because each side commits to a random value before it can see the other's keys. Keys of small order, which would make the key exchange predictable, are refused. Unknown devices can only be paired from a terminal; a host without one trusts nobody until you use `--trust`.
+- **Mirror fallback.** If no virtual display can be created the host shows your real screen to the client instead (the web UI shows `mirror`). Use `--require-virtual` if a client must never see your own desktop.
+- **Untrusted input.** Everything a peer sends is size-limited (the host accepts 4 KiB messages from a client; video is capped at 36 million pixels), names from a peer have control characters removed before they reach a terminal or web page, and the client's decoder runs with a memory limit and a fixed output size.
+- **Not covered.** Traffic volume and timing are visible to anyone on the network, and an attacker who can already run programs as you can read your key. A host's key is visible to someone who starts a handshake with it, as in any Noise XX connection.
+
+Dependencies are checked against the RustSec advisory database in CI every week (`cargo audit`); the current tree has no known vulnerabilities, only notices that `ttf-parser` and the `zbus` crates are unmaintained. Report vulnerabilities as described in [`SECURITY.md`](SECURITY.md).
+
 ### Fake displays and the web UI
 
 `dd-host --remove-fake-displays` (Linux) removes every fake display (a spare HDMI/DP connector forced on without a monitor, an active `Virtual*` output, extra headless Wayland outputs) and leaves your real monitors alone; the host also does this at start-up, when the last session ends and when it is stopped, whoever created the display.
@@ -258,7 +269,7 @@ While running, `dd-host` writes `status.json` into its config folder; the DrawSp
 ### Connections and timeouts
 
 - The host serves one client at a time by default; `--max-clients N` (1-8) serves several at once, each on its own virtual monitor, and further clients are refused immediately. Fake displays are cleared only when the last session ends, so one client leaving never removes another's monitor. Each connection is handled on its own thread, so a silent or slow stranger cannot block a real client.
-- A stranger gets 15 seconds per step. At most 8 unauthenticated connections are in progress at once, and only one pairing question can be on screen.
+- A stranger has 15 seconds in total for the whole handshake. At most 8 connections (3 from one address) can be unfinished at once, and only one pairing question can be on screen; it is withdrawn after 2 minutes or as soon as the other computer disconnects, and an address whose pairing was declined or abandoned is not asked again for 30 seconds.
 - A connected side that hears nothing for 10 seconds ends the session (the client pings every 2 seconds, the host streams continuously). The client then says "host stopped responding". If the connection had been working, the client reconnects by itself (backoff 0.5 s to 5 s, for up to 60 s after the last good connection) and shows the last frame meanwhile; a first connection that fails reports the error at once. Closing the window stops it.
 - On a first pairing the host waits up to 5 minutes for the other person to confirm the code.
 
