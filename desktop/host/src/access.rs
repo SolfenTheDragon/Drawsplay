@@ -51,6 +51,20 @@ impl Net {
     }
 }
 
+/// The unit a peer is counted and blocked by. An IPv4 address is one machine, but a single IPv6 network
+/// (a /64, what one LAN or one customer gets) holds an unlimited number of addresses, so counting exact
+/// addresses would let one attacker step around every per-address limit. An IPv4-mapped IPv6 address
+/// counts as the IPv4 address it carries.
+pub fn peer_group(ip: IpAddr) -> IpAddr {
+    match ip.to_canonical() {
+        IpAddr::V4(a) => IpAddr::V4(a),
+        IpAddr::V6(a) => {
+            let s = a.segments();
+            IpAddr::V6(std::net::Ipv6Addr::new(s[0], s[1], s[2], s[3], 0, 0, 0, 0))
+        }
+    }
+}
+
 pub struct Allow {
     any: bool,
     nets: Vec<Net>,
@@ -127,6 +141,16 @@ mod tests {
         assert!(a.permits(ip("203.0.113.200")) && a.permits(ip("198.51.100.9")));
         assert!(!a.permits(ip("203.0.114.1")) && !a.permits(ip("198.51.100.10")));
         assert!(Allow::new(true, &[]).permits(ip("8.8.8.8")));
+    }
+
+    #[test]
+    fn ipv6_addresses_of_one_network_count_as_one_peer() {
+        assert_eq!(peer_group(ip("2001:db8:1:2::1")), peer_group(ip("2001:db8:1:2:dead:beef:1:2")));
+        assert_ne!(peer_group(ip("2001:db8:1:2::1")), peer_group(ip("2001:db8:1:3::1")));
+        assert_eq!(peer_group(ip("fe80::1")), peer_group(ip("fe80::abcd:1234")));
+        // IPv4 stays exact, whether or not it arrives IPv4-mapped.
+        assert_ne!(peer_group(ip("192.168.1.5")), peer_group(ip("192.168.1.6")));
+        assert_eq!(peer_group(ip("::ffff:192.168.1.5")), peer_group(ip("192.168.1.5")));
     }
 
     #[test]

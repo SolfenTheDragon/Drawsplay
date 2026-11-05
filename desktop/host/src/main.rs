@@ -244,6 +244,12 @@ fn env_ms(name: &str, default_ms: u64) -> Duration {
 fn step_timeout() -> Duration {
     env_ms("DD_STEP_TIMEOUT_MS", 15_000)
 }
+/// Time a stranger gets to finish the cryptographic handshake. It is three small messages, so a healthy
+/// peer needs a round trip or two; the shorter the limit, the less a flood of silent connections can
+/// keep the few handshake slots busy.
+fn handshake_timeout() -> Duration {
+    step_timeout().min(Duration::from_secs(6))
+}
 /// How long to wait for the other person to confirm the pairing code on a first connection.
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(300);
 /// How long the pairing question stays on this terminal before it is withdrawn.
@@ -321,10 +327,10 @@ struct Shared {
     /// Connections still in handshake or pairing; bounds the threads strangers can occupy. A served
     /// session stops counting once it holds a session slot.
     pending: AtomicUsize,
-    /// Handshake/pairing connections per address (see `MAX_PENDING_PER_IP`).
+    /// Handshake/pairing connections per peer (see `MAX_PENDING_PER_IP` and `access::peer_group`).
     per_ip: Mutex<std::collections::HashMap<std::net::IpAddr, usize>>,
-    /// Addresses whose pairing was declined or abandoned, and until when they get no new question.
-    pair_blocked: Mutex<std::collections::HashMap<std::net::IpAddr, Instant>>,
+    /// Peers whose pairing was declined or abandoned, and until when they get no new question.
+    pair_blocked: Mutex<pairing::Cooldowns>,
     /// Set once a hardware encoder has failed in a session; later sessions go straight to software.
     software_only: AtomicBool,
 }
@@ -543,7 +549,7 @@ fn serve(
     // Never block forever on a peer that stops reading or never speaks.
     stream.set_read_timeout(Some(step_timeout()))?;
     stream.set_write_timeout(Some(step_timeout()))?;
-    let session = handshake(&mut Deadline { stream: &stream, until: Instant::now() + step_timeout() }, id, false)?;
+    let session = handshake(&mut Deadline { stream: &stream, until: Instant::now() + handshake_timeout() }, id, false)?;
     stream.set_read_timeout(Some(step_timeout()))?;
     stream.set_write_timeout(Some(step_timeout()))?;
     if shared.sessions.load(Ordering::SeqCst) >= a.max_clients {
@@ -558,11 +564,10 @@ fn serve(
     } else {
         Some(shared.prompt.try_lock().map_err(|_| std::io::Error::other("another pairing is already in progress"))?)
     };
-    let peer_ip = stream.peer_addr().ok().map(|p| p.ip());
+    let peer_ip = stream.peer_addr().ok().map(|p| access::peer_group(p.ip()));
     if prompt_guard.is_some() {
         if let Some(ip) = peer_ip {
-            let blocked = shared.pair_blocked.lock().unwrap_or_else(|e| e.into_inner()).get(&ip).copied();
-            if blocked.is_some_and(|until| until > Instant::now()) {
+            if shared.pair_blocked.lock().unwrap_or_else(|e| e.into_inner()).blocked(ip, Instant::now()) {
                 return Err(std::io::Error::other(format!("{ip} was refused a moment ago; not asking again yet")));
             }
         }
@@ -571,11 +576,12 @@ fn serve(
     let answer = authorize_with(&session, &mut trust, &format!("client at {peer}"), a.trust_all, &mut |desc, sas| {
         pairing::ask(desc, sas, PROMPT_TIMEOUT, || peer_alive(&stream, &mut ahead))
     });
-    if !matches!(answer, Ok(true)) {
-        if let Some(ip) = peer_ip {
-            let mut blocked = shared.pair_blocked.lock().unwrap_or_else(|e| e.into_inner());
-            blocked.retain(|_, until| *until > Instant::now());
-            blocked.insert(ip, Instant::now() + pair_cooldown());
+    if let Some(ip) = peer_ip.filter(|_| prompt_guard.is_some()) {
+        let mut blocked = shared.pair_blocked.lock().unwrap_or_else(|e| e.into_inner());
+        if matches!(answer, Ok(true)) {
+            blocked.succeeded(ip);
+        } else {
+            blocked.failed(ip, Instant::now(), pair_cooldown());
         }
     }
     if !answer? {
@@ -903,7 +909,8 @@ fn main() {
                         continue;
                     }
                 }
-                let ip = s.peer_addr().map(|a| a.ip()).unwrap_or(std::net::IpAddr::from([0, 0, 0, 0]));
+                let ip =
+                    s.peer_addr().map(|a| access::peer_group(a.ip())).unwrap_or(std::net::IpAddr::from([0, 0, 0, 0]));
                 {
                     let mut m = shared.per_ip.lock().unwrap_or_else(|e| e.into_inner());
                     let held = m.entry(ip).or_insert(0);
