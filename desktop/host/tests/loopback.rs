@@ -426,3 +426,49 @@ fn web_ui_disconnect_request_ends_the_session_with_bye() {
         std::thread::sleep(Duration::from_millis(300));
     }
 }
+
+/// Taking a device off the trusted list ends its running session, not just its next connection.
+#[cfg(unix)]
+#[test]
+fn removing_a_client_from_the_trusted_list_ends_its_session_with_bye() {
+    if !have_ffmpeg() {
+        return;
+    }
+    // Pair it through the question, so its key is on the list while it streams.
+    let host = Host::start(false, "y\n", &[]);
+    let (mut r, _w) = client(host.port, PROTOCOL_VERSION, 320, 240);
+    expect_config(&mut r, 320, 240);
+    let list = host._config.join("drawsplay-desktop/host/trusted_clients.txt");
+    assert!(std::fs::read_to_string(&list).unwrap().lines().any(|l| !l.trim().is_empty()));
+    std::fs::write(&list, "").unwrap(); // what `--forget` ends up doing
+    let started = Instant::now();
+    let mut said_bye = false;
+    while let Ok(m) = read_message(&mut r) {
+        if let Message::Bye { reason } = m {
+            assert!(reason.contains("trusted"), "{reason}");
+            said_bye = true;
+        }
+        assert!(started.elapsed() < Duration::from_secs(10), "the revoked client was still being served");
+    }
+    assert!(said_bye, "the client should be told why it was cut off");
+    assert!(started.elapsed() < Duration::from_secs(8));
+}
+
+/// A client that stays on the list keeps its session across the periodic re-check.
+#[cfg(unix)]
+#[test]
+fn a_trusted_client_keeps_streaming_through_the_trust_rechecks() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let host = Host::start(false, "y\n", &[]);
+    let (mut r, mut w) = client(host.port, PROTOCOL_VERSION, 320, 240);
+    expect_config(&mut r, 320, 240);
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(5) {
+        write_message(&mut w, &Message::Ping(1)).unwrap();
+        if let Message::Bye { reason } = read_message(&mut r).expect("the session must continue") {
+            panic!("trusted client cut off: {reason}");
+        }
+    }
+}

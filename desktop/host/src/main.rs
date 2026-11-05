@@ -260,6 +260,24 @@ fn pair_cooldown() -> Duration {
     env_ms("DD_PAIR_COOLDOWN_MS", 30_000)
 }
 
+/// How often a running session checks that its client is still on the trusted list, so removing a
+/// device (`--forget`, or editing the file) ends its session within seconds instead of at its next connection.
+const TRUST_RECHECK: Duration = Duration::from_secs(2);
+
+/// Has `key` been taken off the trusted list? An unreadable list counts as "not revoked": a momentary
+/// read error must not drop a working session.
+fn trust_revoked(path: &Path, key: &dd_proto::secure::PublicKey) -> bool {
+    TrustStore::load(path.to_path_buf()).is_ok_and(|t| !t.contains(key))
+}
+
+/// Tell a client that was taken off the trusted list why the session ends (it will not reconnect).
+fn revoke(writer: &Mutex<dd_proto::secure::SecureWriter<TcpStream>>) -> std::io::Error {
+    let reason = "this computer was removed from the host's trusted list";
+    let _ =
+        write_message(&mut *writer.lock().unwrap_or_else(|e| e.into_inner()), &Message::Bye { reason: reason.into() });
+    std::io::Error::other("the client was removed from the trusted list")
+}
+
 /// Most bytes read ahead of the session while the pairing question is open.
 const MAX_READ_AHEAD: usize = 64 * 1024;
 
@@ -683,6 +701,8 @@ fn serve(
     });
 
     let start = Instant::now();
+    let client_key = session.remote_public;
+    let mut last_trust_check = Instant::now();
     let mut chunks = spawn_reader(video);
     let mut sent_any = false;
     // Set when a hardware encoder died before any video; kept only if software then works, so a
@@ -704,6 +724,12 @@ fn serve(
                 if input.is_finished() {
                     break Err(std::io::Error::other("client disconnected"));
                 }
+                if !a.trust_all && last_trust_check.elapsed() >= TRUST_RECHECK {
+                    last_trust_check = Instant::now();
+                    if trust_revoked(trust_path, &client_key) {
+                        break Err(revoke(&writer));
+                    }
+                }
                 continue;
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => Ok(Vec::new()),
@@ -712,6 +738,12 @@ fn serve(
             let _ =
                 write_message(&mut *writer.lock().unwrap(), &Message::Bye { reason: "ended from the web UI".into() });
             break Err(std::io::Error::other("disconnected from the web UI"));
+        }
+        if !a.trust_all && last_trust_check.elapsed() >= TRUST_RECHECK {
+            last_trust_check = Instant::now();
+            if trust_revoked(trust_path, &client_key) {
+                break Err(revoke(&writer));
+            }
         }
         let data = match chunk {
             Ok(d) if d.is_empty() && !sent_any && enc != Encoder::Software => {
