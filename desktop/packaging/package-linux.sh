@@ -8,11 +8,11 @@ cd "$(dirname "$0")/.."
 version=${1:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}
 version=${version#v}
 if [ -n "${TARGET:-}" ]; then
-    cargo build --release --target "$TARGET"
+    cargo build --release --locked --target "$TARGET"
     bin="${CARGO_TARGET_DIR:-target}/$TARGET/release"
     case "$TARGET" in aarch64-*) arch=aarch64 ;; x86_64-*) arch=x86_64 ;; *) arch=${TARGET%%-*} ;; esac
 else
-    cargo build --release
+    cargo build --release --locked
     bin="${CARGO_TARGET_DIR:-target}/release"
     arch=$(uname -m)
     [ "$arch" = arm64 ] && arch=aarch64

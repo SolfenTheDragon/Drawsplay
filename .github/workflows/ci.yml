@@ -50,6 +50,30 @@ jobs:
       - name: Build host (linux)
         run: go build -o host .
 
+  desktop:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt
+
+      - name: Install build libraries and ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg pkg-config libx11-dev libxkbcommon-dev \
+            libwayland-dev libxcursor-dev libxi-dev libxrandr-dev libxdo-dev libxtst-dev libudev-dev
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Test DrawSplay Desktop
+        run: cargo test --release --locked
+
   host-windows:
     runs-on: windows-latest
     defaults:

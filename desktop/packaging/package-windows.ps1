@@ -10,11 +10,11 @@ if ($Version) {
     $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
 }
 if ($Target) {
-    cargo build --release --target $Target
+    cargo build --release --locked --target $Target
     $bin = "target\$Target\release"
     $arch = if ($Target -like 'aarch64-*') { 'arm64' } else { 'x86_64' }
 } else {
-    cargo build --release
+    cargo build --release --locked
     $bin = 'target\release'
     $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x86_64' }
 }
