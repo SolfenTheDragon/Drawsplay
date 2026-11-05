@@ -4,6 +4,7 @@ use crate::secure::{generate_keypair, Keypair, PublicKey};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use zeroize::Zeroizing;
 
 /// Directory for keys and trust lists of `role` ("host" or "client"), under e.g. `%APPDATA%\DrawSplayDesktop` or `~/.config/drawsplay-desktop`.
 pub fn config_dir(role: &str) -> io::Result<PathBuf> {
@@ -18,7 +19,46 @@ pub fn config_dir(role: &str) -> io::Result<PathBuf> {
     };
     let dir = dir.join(role);
     fs::create_dir_all(&dir)?;
+    // Keys, the trust list and the live status belong to this user alone.
+    if let Some(parent) = dir.parent() {
+        make_private(parent, 0o700);
+    }
+    make_private(&dir, 0o700);
     Ok(dir)
+}
+
+/// Remove access for everyone but the owner when `path` is more open than `mode` (Unix; elsewhere the
+/// per-user profile folder already is private). Failure is ignored: a folder we do not own is not ours
+/// to change.
+fn make_private(path: &Path, mode: u32) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::metadata(path) {
+            if meta.permissions().mode() & 0o077 != 0 {
+                let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (path, mode);
+}
+
+/// Create (or truncate) a file that only this user can read, for the trust list.
+fn open_private(path: &Path, append: bool) -> io::Result<fs::File> {
+    let mut o = fs::OpenOptions::new();
+    o.write(true).create(true);
+    if append {
+        o.append(true);
+    } else {
+        o.truncate(true);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    o.open(path)
 }
 
 pub fn to_hex(b: &[u8]) -> String {
@@ -40,7 +80,17 @@ pub fn from_hex<const N: usize>(s: &str) -> Option<[u8; N]> {
 /// Load `identity.key` from `dir`, creating it on first use (readable only by the user on Unix).
 pub fn load_or_create_identity(dir: &Path) -> io::Result<Keypair> {
     let path = dir.join("identity.key");
-    if let Ok(text) = fs::read_to_string(&path) {
+    if let Ok(text) = fs::read_to_string(&path).map(Zeroizing::new) {
+        if from_hex::<32>(&text).is_some() && cfg!(unix) {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if fs::metadata(&path).is_ok_and(|m| m.permissions().mode() & 0o077 != 0) {
+                    eprintln!("warning: {} was readable by other users; restricting it to you", path.display());
+                    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+                }
+            }
+        }
         if let Some(private) = from_hex::<32>(&text) {
             // snow cannot derive the public key from the private one, so it is stored alongside.
             let public =
@@ -54,7 +104,7 @@ pub fn load_or_create_identity(dir: &Path) -> io::Result<Keypair> {
     let kp = generate_keypair()?;
     // Public half first: a crash in between leaves no key file, so the next start regenerates both.
     fs::write(dir.join("identity.pub"), to_hex(&kp.public))?;
-    write_private(&path, &to_hex(&kp.private))?;
+    write_private(&path, &Zeroizing::new(to_hex(&kp.private)))?;
     Ok(kp)
 }
 
@@ -141,7 +191,10 @@ impl TrustStore {
         }
         if removed > 0 {
             let tmp = self.path.with_extension("tmp");
-            fs::write(&tmp, kept)?;
+            {
+                use std::io::Write;
+                open_private(&tmp, false)?.write_all(kept.as_bytes())?;
+            }
             fs::rename(&tmp, &self.path)?;
             self.keys = TrustStore::load(self.path.clone())?.keys;
         }
@@ -153,7 +206,7 @@ impl TrustStore {
             return Ok(());
         }
         use std::io::Write;
-        let mut f = fs::OpenOptions::new().create(true).append(true).open(&self.path)?;
+        let mut f = open_private(&self.path, true)?;
         let label: String = label.chars().filter(|c| !c.is_control()).take(64).collect();
         // A hand-edited file may lack a final newline; without one the entry would join the last
         // line's comment and be lost on the next load.
@@ -310,5 +363,30 @@ mod tests {
         assert_eq!(from_hex::<4>("deadbeef"), Some([0xde, 0xad, 0xbe, 0xef]));
         assert_eq!(from_hex::<4>("deadbee"), None);
         assert_eq!(from_hex::<4>("zzzzzzzz"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn secrets_are_private_to_the_user() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let d = tmp("perms");
+        // A too-open folder and key (as an older version or a careless copy would leave them).
+        fs::set_permissions(&d, fs::Permissions::from_mode(0o755)).unwrap();
+        make_private(&d, 0o700);
+        assert_eq!(mode(&d), 0o700);
+        let kp = load_or_create_identity(&d).unwrap();
+        assert_eq!(mode(&d.join("identity.key")), 0o600);
+        fs::set_permissions(d.join("identity.key"), fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(load_or_create_identity(&d).unwrap().public, kp.public);
+        assert_eq!(mode(&d.join("identity.key")), 0o600, "an open key file must be tightened on load");
+        // The trust list is created private too, including after --forget rewrites it.
+        let mut t = TrustStore::load(d.join("trusted.txt")).unwrap();
+        t.add([0xAB; 32], "a").unwrap();
+        t.add([0xCD; 32], "b").unwrap();
+        assert_eq!(mode(&d.join("trusted.txt")), 0o600);
+        t.forget("abababab").unwrap();
+        assert_eq!(mode(&d.join("trusted.txt")), 0o600);
+        let _ = fs::remove_dir_all(d);
     }
 }
