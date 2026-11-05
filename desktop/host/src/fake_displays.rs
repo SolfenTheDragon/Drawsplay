@@ -116,9 +116,16 @@ fn other_host_streaming() -> bool {
     if s.write_all(b"GET /api/status HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").is_err() {
         return false;
     }
-    let mut body = String::new();
-    let _ = s.read_to_string(&mut body);
-    body.replace(' ', "").contains("\"streaming\":true")
+    // Whatever answers on a local port is not trusted to stop: read a bounded amount, for a bounded time.
+    let started = std::time::Instant::now();
+    let (mut body, mut chunk) = (Vec::new(), [0u8; 4096]);
+    while body.len() < 64 * 1024 && started.elapsed() < std::time::Duration::from_millis(1500) {
+        match s.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => body.extend_from_slice(&chunk[..n]),
+        }
+    }
+    String::from_utf8_lossy(&body).replace(' ', "").contains("\"streaming\":true")
 }
 
 /// Remove every fake display. Idempotent and quiet when there is nothing to do.
