@@ -272,6 +272,25 @@ pub fn authorize(
     peer_desc: &str,
     trust_all: bool,
 ) -> io::Result<bool> {
+    authorize_with(session, store, peer_desc, trust_all, &mut |desc, sas| {
+        eprintln!("\nNew device wants to pair: {desc}");
+        eprintln!("Pairing code: {sas}");
+        eprint!("Does the other screen show the same code? Accept? [y/N] ");
+        let mut line = String::new();
+        io::stdin().read_line(&mut line)?;
+        Ok(matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
+    })
+}
+
+/// Like [`authorize`], with the question put by `ask(peer_desc, code)`. A program that needs a time
+/// limit, or must notice that the other side has gone, supplies its own.
+pub fn authorize_with(
+    session: &crate::secure::Session,
+    store: &mut TrustStore,
+    peer_desc: &str,
+    trust_all: bool,
+    ask: &mut dyn FnMut(&str, &str) -> io::Result<bool>,
+) -> io::Result<bool> {
     if store.contains(&session.remote_public) {
         return Ok(true);
     }
@@ -279,15 +298,7 @@ pub fn authorize(
         eprintln!("WARNING: trusting new peer {peer_desc} without confirmation (--trust-all)");
         true
     } else {
-        eprintln!(
-            "
-New device wants to pair: {peer_desc}"
-        );
-        eprintln!("Pairing code: {}", session.sas);
-        eprint!("Does the other screen show the same code? Accept? [y/N] ");
-        let mut line = String::new();
-        io::stdin().read_line(&mut line)?;
-        matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+        ask(peer_desc, &session.sas)?
     };
     if accept {
         store.add(session.remote_public, peer_desc)?;

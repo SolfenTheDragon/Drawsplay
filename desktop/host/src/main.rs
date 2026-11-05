@@ -11,6 +11,7 @@ mod fake_displays;
 mod inject;
 #[cfg(target_os = "linux")]
 mod linux_display;
+mod pairing;
 #[cfg(target_os = "linux")]
 mod portal;
 mod status;
@@ -19,7 +20,7 @@ mod vdisplay;
 #[cfg(target_os = "linux")]
 mod wayland_display;
 
-use dd_proto::identity::{authorize, config_dir, load_or_create_identity, TrustStore};
+use dd_proto::identity::{authorize_with, config_dir, load_or_create_identity, TrustStore};
 use dd_proto::secure::{handshake, Keypair};
 use dd_proto::{
     read_message_limited, video_size_ok, write_message, Message, DEFAULT_PORT, MAX_CONTROL_FRAME, PROTOCOL_VERSION,
@@ -245,6 +246,62 @@ fn step_timeout() -> Duration {
 }
 /// How long to wait for the other person to confirm the pairing code on a first connection.
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(300);
+/// How long the pairing question stays on this terminal before it is withdrawn.
+const PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// After a pairing is declined, abandoned or timed out, the same address gets no new question for this long.
+fn pair_cooldown() -> Duration {
+    env_ms("DD_PAIR_COOLDOWN_MS", 30_000)
+}
+
+/// Most bytes read ahead of the session while the pairing question is open.
+const MAX_READ_AHEAD: usize = 64 * 1024;
+
+/// Is the peer still connected? A closed connection reads as end of file, but only after anything the
+/// peer sent before closing has been read, so whatever arrives is kept in `ahead` and handed back to the
+/// session by [`Replay`].
+fn peer_alive(s: &TcpStream, ahead: &mut Vec<u8>) -> bool {
+    let _ = s.set_read_timeout(Some(Duration::from_millis(20)));
+    let mut tmp = [0u8; 1024];
+    let mut stream = s;
+    let alive = match stream.read(&mut tmp) {
+        Ok(0) => false,
+        Ok(n) if ahead.len() + n <= MAX_READ_AHEAD => {
+            ahead.extend_from_slice(&tmp[..n]);
+            true
+        }
+        Ok(_) => false, // a peer that talks this much before it is allowed to is not worth keeping
+        Err(e) => matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut),
+    };
+    let _ = s.set_read_timeout(Some(step_timeout()));
+    alive
+}
+
+/// The socket, preceded by bytes that were read early (see [`peer_alive`]).
+struct Replay {
+    head: Vec<u8>,
+    pos: usize,
+    inner: TcpStream,
+}
+
+impl Replay {
+    fn set_read_timeout(&self, d: Option<Duration>) -> std::io::Result<()> {
+        self.inner.set_read_timeout(d)
+    }
+}
+
+impl Read for Replay {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.pos < self.head.len() {
+            let n = buf.len().min(self.head.len() - self.pos);
+            buf[..n].copy_from_slice(&self.head[self.pos..self.pos + n]);
+            self.pos += n;
+            return Ok(n);
+        }
+        self.inner.read(buf)
+    }
+}
+
 /// Connections allowed to sit in handshake/pairing at the same time.
 const MAX_PENDING: usize = 8;
 /// ...and how many of those one address may hold, so a single peer cannot lock everyone else out.
@@ -266,6 +323,8 @@ struct Shared {
     pending: AtomicUsize,
     /// Handshake/pairing connections per address (see `MAX_PENDING_PER_IP`).
     per_ip: Mutex<std::collections::HashMap<std::net::IpAddr, usize>>,
+    /// Addresses whose pairing was declined or abandoned, and until when they get no new question.
+    pair_blocked: Mutex<std::collections::HashMap<std::net::IpAddr, Instant>>,
     /// Set once a hardware encoder has failed in a session; later sessions go straight to software.
     software_only: AtomicBool,
 }
@@ -499,7 +558,27 @@ fn serve(
     } else {
         Some(shared.prompt.try_lock().map_err(|_| std::io::Error::other("another pairing is already in progress"))?)
     };
-    if !authorize(&session, &mut trust, &format!("client at {peer}"), a.trust_all)? {
+    let peer_ip = stream.peer_addr().ok().map(|p| p.ip());
+    if prompt_guard.is_some() {
+        if let Some(ip) = peer_ip {
+            let blocked = shared.pair_blocked.lock().unwrap_or_else(|e| e.into_inner()).get(&ip).copied();
+            if blocked.is_some_and(|until| until > Instant::now()) {
+                return Err(std::io::Error::other(format!("{ip} was refused a moment ago; not asking again yet")));
+            }
+        }
+    }
+    let mut ahead: Vec<u8> = Vec::new();
+    let answer = authorize_with(&session, &mut trust, &format!("client at {peer}"), a.trust_all, &mut |desc, sas| {
+        pairing::ask(desc, sas, PROMPT_TIMEOUT, || peer_alive(&stream, &mut ahead))
+    });
+    if !matches!(answer, Ok(true)) {
+        if let Some(ip) = peer_ip {
+            let mut blocked = shared.pair_blocked.lock().unwrap_or_else(|e| e.into_inner());
+            blocked.retain(|_, until| *until > Instant::now());
+            blocked.insert(ip, Instant::now() + pair_cooldown());
+        }
+    }
+    if !answer? {
         return Err(std::io::Error::other("pairing declined"));
     }
     // After a first-time pairing the other person may still be reading the code and answering.
@@ -508,7 +587,7 @@ fn serve(
         if prompt_guard.is_some() || (!a.trust_all && trusted_before) { PAIRING_TIMEOUT } else { step_timeout() };
     drop(prompt_guard);
     let raw = stream.try_clone()?; // for shutdown and timeouts
-    let mut reader = session.reader(stream.try_clone()?);
+    let mut reader = session.reader(Replay { head: ahead, pos: 0, inner: stream.try_clone()? });
     let mut stream = session.writer(stream);
     reader.get_ref().set_read_timeout(Some(hello_wait))?;
     let hello = read_message_limited(&mut reader, MAX_CONTROL_FRAME)?;
@@ -802,6 +881,7 @@ fn main() {
         prompt: Mutex::new(()),
         pending: AtomicUsize::new(0),
         per_ip: Mutex::new(Default::default()),
+        pair_blocked: Mutex::new(Default::default()),
         software_only: AtomicBool::new(false),
     });
     // Each connection runs on its own thread, so a silent or slow peer cannot block the others.

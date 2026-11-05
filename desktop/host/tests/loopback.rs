@@ -290,6 +290,40 @@ fn pairing_accept_and_decline_follow_the_answer() {
     expect_config(&mut r, 320, 240);
 }
 
+/// A declined pairing must not let the same address put the question again at once; with a terminal
+/// that would be a way to flood the operator with prompts.
+#[test]
+fn a_declined_address_is_not_asked_again_at_once() {
+    let host = Host::start(false, "n\n", &[("DD_PAIR_COOLDOWN_MS", "60000")]);
+    let (mut r, _w) = client(host.port, PROTOCOL_VERSION, 320, 240);
+    assert!(read_message(&mut r).is_err(), "declined");
+    // No further line is waiting on stdin: without the cooldown this question would hang for minutes.
+    let started = Instant::now();
+    let (mut r2, _w2) = client(host.port, PROTOCOL_VERSION, 320, 240);
+    assert!(read_message(&mut r2).is_err());
+    assert!(started.elapsed() < Duration::from_secs(5), "second attempt was queued instead of refused");
+}
+
+/// A stranger who connects, makes the host ask, and walks away must not hold the question: the host
+/// notices, withdraws it, and trusts nothing.
+#[test]
+fn a_peer_that_disconnects_mid_question_frees_the_prompt_and_is_not_trusted() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let mut host = Host::start(false, "", &[("DD_PAIR_COOLDOWN_MS", "1")]);
+    let (r, w) = client(host.port, PROTOCOL_VERSION, 320, 240);
+    std::thread::sleep(Duration::from_millis(300)); // the host is now waiting for an answer
+    drop((r, w));
+    std::thread::sleep(Duration::from_millis(1800)); // it notices within a second or so
+                                                     // The operator's late "y" must not trust the peer that left, and must not be eaten by its question.
+    host.child.stdin.as_mut().unwrap().write_all(b"y\n").unwrap();
+    let (mut r2, _w2) = client(host.port, PROTOCOL_VERSION, 320, 240);
+    expect_config(&mut r2, 320, 240); // the new peer got the question and the "y"
+    let trusted = std::fs::read_to_string(host._config.join("drawsplay-desktop/host/trusted_clients.txt")).unwrap();
+    assert_eq!(trusted.lines().filter(|l| !l.trim().is_empty()).count(), 1, "only the peer that stayed: {trusted}");
+}
+
 /// A hardware encoder that passes the start-up trial but dies in the real session must not end the
 /// session: the host retries in software.
 #[cfg(unix)]
