@@ -109,14 +109,18 @@ fn now_us(epoch: Instant) -> u64 {
     epoch.elapsed().as_micros() as u64
 }
 
-pub fn spawn_decoder(ffmpeg: &str, hwdec: bool) -> std::io::Result<Child> {
+/// Start the decoder for a `width` x `height` stream. The video comes from another computer, so the
+/// decoder is held to what was agreed: a single allocation cannot exceed 256 MiB (an oversized picture
+/// declared in the stream fails instead of eating memory), and every frame leaves at exactly the agreed
+/// size, so a stream that disagrees with its Config is scaled rather than misread as garbage.
+pub fn spawn_decoder(ffmpeg: &str, hwdec: bool, width: u32, height: u32) -> std::io::Result<Child> {
     let mut c = Command::new(ffmpeg);
-    c.args(["-hide_banner", "-loglevel", "error"]);
+    c.args(["-hide_banner", "-loglevel", "error", "-max_alloc", "268435456"]);
     if hwdec {
         c.args(["-hwaccel", "auto"]);
     }
     c.args(["-fflags", "nobuffer", "-flags", "low_delay", "-probesize", "32", "-analyzeduration", "0"])
-        .args(["-f", "h264", "-i", "-", "-f", "rawvideo", "-pix_fmt", "bgra", "-"])
+        .args(["-f", "h264", "-i", "-", "-s", &format!("{width}x{height}"), "-f", "rawvideo", "-pix_fmt", "bgra", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
@@ -248,7 +252,8 @@ fn session(
     reader.get_ref().set_read_timeout(Some(IDLE_TIMEOUT)).map_err(e("socket"))?;
     ui(UiEvent::Connected { width: w as u32, height: h as u32, fps });
 
-    let mut dec = spawn_decoder(&s.ffmpeg, s.hwdec).map_err(|x| format!("cannot start ffmpeg ({}): {x}", s.ffmpeg))?;
+    let mut dec = spawn_decoder(&s.ffmpeg, s.hwdec, w as u32, h as u32)
+        .map_err(|x| format!("cannot start ffmpeg ({}): {x}", s.ffmpeg))?;
     let mut dec_in = dec.stdin.take().unwrap();
     let mut dec_out = dec.stdout.take().unwrap();
     let epoch = Instant::now();
@@ -388,5 +393,47 @@ mod tests {
             ptr(1, PointerPhase::Move, 0.5),
         ]);
         assert_eq!(out.len(), 5);
+    }
+
+    fn have_ffmpeg() -> bool {
+        Command::new("ffmpeg").arg("-version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok()
+    }
+
+    /// Decode `frames` frames of a live 320x240 test stream (rate-limited, like a real host) with a
+    /// decoder told to expect `w`x`h`.
+    fn decode_test_stream(w: u32, h: u32, frames: usize) -> Vec<u8> {
+        let mut enc = Command::new("ffmpeg")
+            .args(["-v", "error", "-fflags", "nobuffer", "-re", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30"])
+            .args(["-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency"])
+            .args(["-g", "30", "-bf", "0", "-f", "h264", "-"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut dec = spawn_decoder("ffmpeg", false, w, h).unwrap();
+        let (mut from_enc, mut to_dec) = (enc.stdout.take().unwrap(), dec.stdin.take().unwrap());
+        let feeder = thread::spawn(move || {
+            let _ = std::io::copy(&mut from_enc, &mut to_dec);
+        });
+        let mut out = vec![0u8; (w * h * 4) as usize * frames];
+        let got = dec.stdout.take().unwrap().read_exact(&mut out);
+        let _ = enc.kill();
+        let _ = dec.kill();
+        let _ = enc.wait();
+        let _ = dec.wait();
+        let _ = feeder.join();
+        got.expect("decoded frames");
+        out
+    }
+
+    #[test]
+    fn decoder_yields_frames_of_the_agreed_size_even_if_the_stream_differs() {
+        if !have_ffmpeg() {
+            return;
+        }
+        // Matching size: real picture content, not a black frame.
+        assert!(decode_test_stream(320, 240, 3).iter().any(|&b| b != 0));
+        // The stream is 320x240 but 160x120 was agreed: frames are scaled to the agreed size, so
+        // reading whole frames of that size stays in step.
+        assert!(decode_test_stream(160, 120, 5).iter().any(|&b| b != 0));
     }
 }
