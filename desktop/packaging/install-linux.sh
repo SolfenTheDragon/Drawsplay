@@ -13,8 +13,8 @@ if [ "${1:-}" = "--udev" ]; then
     sudo cp "$here/99-drawsplay-desktop.rules" /etc/udev/rules.d/
     sudo udevadm control --reload
     sudo udevadm trigger
-    sudo usermod -aG input "$USER"
-    echo "udev rule installed. Log out and back in for the group change to apply."
+    echo "udev rule installed. It gives the user logged in at this computer access to /dev/uinput;"
+    echo "if input does not work right away, log out and back in."
 else
     echo "For touch, pen and full keyboard input on a Linux host, re-run with --udev."
 fi

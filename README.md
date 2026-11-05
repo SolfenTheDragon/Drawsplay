@@ -276,7 +276,7 @@ The client reports a pen when the OS gives it an altitude angle, otherwise a tou
 
 #### Linux input
 
-Create virtual devices through `/dev/uinput`: run `install-linux.sh --udev` from the release package (or copy `99-drawsplay-desktop.rules` to `/etc/udev/rules.d/`, reload udev, and add yourself to the `input` group, then log in again). Touch and pen devices span the whole X screen, so positions are scaled against the screen size. This is exact on X11; Wayland compositors may map absolute devices differently.
+Create virtual devices through `/dev/uinput`: run `install-linux.sh --udev` from the release package (or copy `99-drawsplay-desktop.rules` to `/etc/udev/rules.d/`, reload udev; if input does not work at once, log out and back in). The rule uses `uaccess`, which gives the user logged in at the console access to `/dev/uinput` and nothing else; you do not need to join the `input` group, which would also let your programs read every keystroke on the machine. A host that runs without a local login (over ssh, as a system service) needs a group of its own instead; see the comments in the rule file. Touch and pen devices span the whole X screen, so positions are scaled against the screen size. This is exact on X11; Wayland compositors may map absolute devices differently.
 
 ### Linux virtual display
 
