@@ -69,13 +69,24 @@ pub fn clear(output: &str) {
     save(&all);
 }
 
+/// Output and mode names go straight onto the command line of `xrandr`, `swaymsg` and `hyprctl`. A name
+/// that starts with `-` would be read as an option, and nothing real is long or holds odd characters, so
+/// anything else in the file is ignored rather than passed on.
+fn safe_name(s: &str) -> bool {
+    s.len() <= 64
+        && !s.starts_with('-')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+' | ':'))
+}
+
 fn parse_record(v: &Value) -> Option<Record> {
-    Some(Record {
+    let r = Record {
         kind: v.get("kind")?.as_str()?.to_string(),
         output: v.get("output")?.as_str()?.to_string(),
         mode: v.get("mode").and_then(|m| m.as_str()).unwrap_or("").to_string(),
         pid: v.get("pid")?.as_u64()? as u32,
-    })
+    };
+    let ok = !r.output.is_empty() && safe_name(&r.output) && (r.mode.is_empty() || safe_name(&r.mode));
+    ok.then_some(r)
 }
 
 /// Every recorded monitor. Accepts the older single-object file as well as the current list.
@@ -155,5 +166,16 @@ mod tests {
         clear("HEADLESS-2");
         assert!(!is_running_host(4_000_000)); // no such pid
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn names_that_could_act_as_options_are_ignored() {
+        let rec = |out: &str, mode: &str| json!({"kind": "x11", "output": out, "mode": mode, "pid": 1});
+        assert!(parse_record(&rec("HDMI-A-1", "dd_1920x1080_60")).is_some());
+        assert!(parse_record(&rec("Virtual-1-1", "")).is_some());
+        for bad in ["--primary", "-x", "", "a b", "out;rm", "x\ny", &"a".repeat(65)] {
+            assert!(parse_record(&rec(bad, "")).is_none(), "output {bad:?}");
+        }
+        assert!(parse_record(&rec("HDMI-1", "--rmmode")).is_none());
     }
 }
