@@ -90,7 +90,23 @@ fn parse_args() -> Result<Args, String> {
         return Err("missing HOST (try --help)".into());
     }
     a.host = with_default_port(&a.host);
+    // Without the pairing check anyone who answers at that address is taken for the host: it sees every
+    // key typed into this window and shows whatever it likes. Same rule as `dd-host --trust-all`.
+    if a.trust_all && !is_loopback_target(&a.host) && std::env::var("DD_INSECURE_TRUST_ALL").as_deref() != Ok("1") {
+        return Err("--trust-all is only allowed for a loopback HOST (for example 127.0.0.1): without the pairing \
+                    check anyone on the network could pose as the host"
+            .into());
+    }
     Ok(a)
+}
+
+/// Is `host` (`ADDR:PORT` or `name:PORT`) this computer itself?
+fn is_loopback_target(host: &str) -> bool {
+    use std::net::SocketAddr;
+    match host.parse::<SocketAddr>() {
+        Ok(a) => a.ip().is_loopback(),
+        Err(_) => host.rsplit_once(':').is_some_and(|(name, _)| name.eq_ignore_ascii_case("localhost")),
+    }
 }
 
 /// `host`, `1.2.3.4`, `::1` and `[::1]` get the default port; anything that already has one is kept.
@@ -592,6 +608,18 @@ impl ApplicationHandler<UiEvent> for App {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn trust_all_is_only_for_this_computer() {
+        for ok in ["127.0.0.1:47800", "[::1]:47800", "localhost:47800", "LOCALHOST:1"] {
+            assert!(super::is_loopback_target(ok), "{ok}");
+        }
+        for bad in
+            ["192.168.1.5:47800", "example.com:47800", "[2001:db8::1]:47800", "localhost.evil.com:47800", "10.0.0.1:1"]
+        {
+            assert!(!super::is_loopback_target(bad), "{bad}");
+        }
+    }
+
     #[test]
     fn fit_keeps_aspect_and_fills_one_axis() {
         assert_eq!(super::fit_size((1280, 720), (1920, 1080)), (1920, 1080));
