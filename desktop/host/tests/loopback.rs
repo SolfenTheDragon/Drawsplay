@@ -214,6 +214,51 @@ fn silent_stranger_neither_blocks_others_nor_lives_forever() {
     assert!(matches!(n, Ok(0) | Err(_)) && started.elapsed() < Duration::from_secs(8));
 }
 
+/// A peer that dribbles one byte at a time never trips a per-read timeout, so the handshake as a
+/// whole has a deadline.
+#[test]
+fn a_trickling_stranger_is_cut_off_by_the_handshake_deadline() {
+    use std::io::Write;
+    let host = Host::start(true, "", &[("DD_STEP_TIMEOUT_MS", "1500")]);
+    let mut s = TcpStream::connect(("127.0.0.1", host.port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+    let started = Instant::now();
+    let mut buf = [0u8; 8];
+    let ended = loop {
+        // A length header that promises a long handshake message, then one byte every 300 ms.
+        if s.write_all(&[0]).is_err() {
+            break started.elapsed();
+        }
+        match std::io::Read::read(&mut s, &mut buf) {
+            Ok(0) => break started.elapsed(),
+            Err(e) if !matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                break started.elapsed()
+            }
+            _ => {}
+        }
+        assert!(started.elapsed() < Duration::from_secs(8), "the trickling peer was never cut off");
+        std::thread::sleep(Duration::from_millis(300));
+    };
+    assert!(ended < Duration::from_millis(4000), "cut off after {ended:?}, expected about 1.5 s");
+}
+
+/// One address may hold only a few unfinished connections, so it cannot lock everyone else out.
+#[test]
+fn one_address_cannot_fill_the_handshake_slots() {
+    let host = Host::start(true, "", &[("DD_STEP_TIMEOUT_MS", "8000")]);
+    // Start-up probes with a bare connect; let its slot be released before counting.
+    std::thread::sleep(Duration::from_millis(500));
+    let held: Vec<TcpStream> = (0..3).map(|_| TcpStream::connect(("127.0.0.1", host.port)).unwrap()).collect();
+    std::thread::sleep(Duration::from_millis(300));
+    let mut fourth = TcpStream::connect(("127.0.0.1", host.port)).unwrap();
+    fourth.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let mut buf = [0u8; 1];
+    let started = Instant::now();
+    let r = std::io::Read::read(&mut fourth, &mut buf);
+    assert!(matches!(r, Ok(0) | Err(_)) && started.elapsed() < Duration::from_secs(3), "fourth connection stayed open");
+    drop(held);
+}
+
 #[test]
 fn a_client_that_goes_quiet_is_dropped() {
     if !have_ffmpeg() {

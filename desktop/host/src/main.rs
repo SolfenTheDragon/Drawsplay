@@ -247,6 +247,8 @@ fn step_timeout() -> Duration {
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(300);
 /// Connections allowed to sit in handshake/pairing at the same time.
 const MAX_PENDING: usize = 8;
+/// ...and how many of those one address may hold, so a single peer cannot lock everyone else out.
+const MAX_PENDING_PER_IP: usize = 3;
 /// Upper bound for `--max-clients` (the Windows virtual display driver has eight monitor slots).
 const MAX_CLIENTS: usize = 8;
 
@@ -262,6 +264,8 @@ struct Shared {
     /// Connections still in handshake or pairing; bounds the threads strangers can occupy. A served
     /// session stops counting once it holds a session slot.
     pending: AtomicUsize,
+    /// Handshake/pairing connections per address (see `MAX_PENDING_PER_IP`).
+    per_ip: Mutex<std::collections::HashMap<std::net::IpAddr, usize>>,
     /// Set once a hardware encoder has failed in a session; later sessions go straight to software.
     software_only: AtomicBool,
 }
@@ -288,10 +292,62 @@ impl Drop for ShutdownOnDrop {
     }
 }
 
-struct PendingGuard<'a>(&'a AtomicUsize);
+/// One connection that has not become a served session yet. Dropping it frees its slots.
+struct PendingGuard<'a> {
+    shared: &'a Shared,
+    ip: std::net::IpAddr,
+}
 impl Drop for PendingGuard<'_> {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
+        self.shared.pending.fetch_sub(1, Ordering::SeqCst);
+        release_ip(self.shared, self.ip);
+    }
+}
+
+fn release_ip(shared: &Shared, ip: std::net::IpAddr) {
+    let mut m = shared.per_ip.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(c) = m.get_mut(&ip) {
+        *c = c.saturating_sub(1);
+        if *c == 0 {
+            m.remove(&ip);
+        }
+    }
+}
+
+/// Gives the whole handshake one deadline. A per-read timeout alone lets a peer that sends a byte
+/// every few seconds hold a slot for minutes.
+struct Deadline<'a> {
+    stream: &'a TcpStream,
+    until: Instant,
+}
+
+impl Deadline<'_> {
+    fn left(&self) -> std::io::Result<Duration> {
+        let left = self.until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "the handshake took too long"));
+        }
+        Ok(left)
+    }
+}
+
+impl Read for Deadline<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.stream.set_read_timeout(Some(self.left()?))?;
+        let mut s = self.stream;
+        s.read(buf)
+    }
+}
+
+impl std::io::Write for Deadline<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.stream.set_write_timeout(Some(self.left()?))?;
+        let mut s = self.stream;
+        s.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut s = self.stream;
+        s.flush()
     }
 }
 
@@ -417,7 +473,7 @@ fn kill_all(ff: &mut std::process::Child, recorder: &mut Option<std::process::Ch
 }
 
 fn serve(
-    mut stream: TcpStream,
+    stream: TcpStream,
     a: &Args,
     id: &Keypair,
     trust_path: &Path,
@@ -428,7 +484,9 @@ fn serve(
     // Never block forever on a peer that stops reading or never speaks.
     stream.set_read_timeout(Some(step_timeout()))?;
     stream.set_write_timeout(Some(step_timeout()))?;
-    let session = handshake(&mut stream, id, false)?;
+    let session = handshake(&mut Deadline { stream: &stream, until: Instant::now() + step_timeout() }, id, false)?;
+    stream.set_read_timeout(Some(step_timeout()))?;
+    stream.set_write_timeout(Some(step_timeout()))?;
     if shared.sessions.load(Ordering::SeqCst) >= a.max_clients {
         return Err(std::io::Error::other(too_many(a.max_clients)));
     }
@@ -743,6 +801,7 @@ fn main() {
         lifecycle: Mutex::new(()),
         prompt: Mutex::new(()),
         pending: AtomicUsize::new(0),
+        per_ip: Mutex::new(Default::default()),
         software_only: AtomicBool::new(false),
     });
     // Each connection runs on its own thread, so a silent or slow peer cannot block the others.
@@ -757,15 +816,27 @@ fn main() {
                         continue;
                     }
                 }
+                let ip = s.peer_addr().map(|a| a.ip()).unwrap_or(std::net::IpAddr::from([0, 0, 0, 0]));
+                {
+                    let mut m = shared.per_ip.lock().unwrap_or_else(|e| e.into_inner());
+                    let held = m.entry(ip).or_insert(0);
+                    if *held >= MAX_PENDING_PER_IP {
+                        drop(m);
+                        eprintln!("connection from {peer} refused: {ip} already has {MAX_PENDING_PER_IP} unfinished connections");
+                        continue;
+                    }
+                    *held += 1;
+                }
                 if shared.pending.fetch_add(1, Ordering::SeqCst) >= MAX_PENDING {
                     shared.pending.fetch_sub(1, Ordering::SeqCst);
+                    release_ip(&shared, ip);
                     eprintln!("connection from {peer} refused: too many unauthenticated connections");
                     continue;
                 }
                 eprintln!("connection from {peer}");
                 let (args, id, shared, trust_path) = (args.clone(), id.clone(), shared.clone(), trust_path.clone());
                 thread::spawn(move || {
-                    let pending = PendingGuard(&shared.pending);
+                    let pending = PendingGuard { shared: &shared, ip };
                     if let Err(e) = serve(s, &args, &id, &trust_path, &shared, pending) {
                         eprintln!("session with {peer} ended: {e}");
                     }
