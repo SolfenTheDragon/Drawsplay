@@ -19,6 +19,7 @@ use blake2::{Blake2s256, Digest};
 use snow::{Builder, StatelessTransportState};
 use std::io::{self, Read, Write};
 use std::sync::Arc;
+use zeroize::Zeroize;
 
 const PARAMS: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";
 /// Plaintext bytes per record (Noise limits a record to 65535 including the 16-byte tag).
@@ -33,17 +34,70 @@ pub struct Keypair {
     pub public: PublicKey,
 }
 
+impl Drop for Keypair {
+    fn drop(&mut self) {
+        self.private.zeroize();
+    }
+}
+
+/// X25519 inputs of small order: the Diffie-Hellman result with any such key is a known constant, so
+/// a peer presenting one proves nothing. (The Noise library does not reject them.) The top bit of the
+/// last byte is ignored by X25519, so it is cleared before comparing.
+fn is_low_order(key: &PublicKey) -> bool {
+    const BAD: [[u8; 32]; 7] = [
+        [0; 32],
+        {
+            let mut k = [0u8; 32];
+            k[0] = 1;
+            k
+        },
+        [
+            0xe0, 0xeb, 0x7a, 0x7c, 0x3b, 0x41, 0xb8, 0xae, 0x16, 0x56, 0xe3, 0xfa, 0xf1, 0x9f, 0xc4, 0x6a, 0xda, 0x09,
+            0x8d, 0xeb, 0x9c, 0x32, 0xb1, 0xfd, 0x86, 0x62, 0x05, 0x16, 0x5f, 0x49, 0xb8, 0x00,
+        ],
+        [
+            0x5f, 0x9c, 0x95, 0xbc, 0xa3, 0x50, 0x8c, 0x24, 0xb1, 0xd0, 0xb1, 0x55, 0x9c, 0x83, 0xef, 0x5b, 0x04, 0x44,
+            0x5c, 0xc4, 0x58, 0x1c, 0x8e, 0x86, 0xd8, 0x22, 0x4e, 0xdd, 0xd0, 0x9f, 0x11, 0x57,
+        ],
+        {
+            let mut k = [0xffu8; 32];
+            k[0] = 0xec;
+            k[31] = 0x7f;
+            k
+        },
+        {
+            let mut k = [0xffu8; 32];
+            k[0] = 0xed;
+            k[31] = 0x7f;
+            k
+        },
+        {
+            let mut k = [0xffu8; 32];
+            k[0] = 0xee;
+            k[31] = 0x7f;
+            k
+        },
+    ];
+    let mut k = *key;
+    k[31] &= 0x7f;
+    BAD.contains(&k)
+}
+
 fn other<E: std::fmt::Display>(e: E) -> io::Error {
     io::Error::other(e.to_string())
 }
 
 pub fn generate_keypair() -> io::Result<Keypair> {
     let b = Builder::new(PARAMS.parse().map_err(other)?);
-    let kp = b.generate_keypair().map_err(other)?;
-    Ok(Keypair {
-        private: kp.private.try_into().map_err(|_| other("bad private key length"))?,
-        public: kp.public.try_into().map_err(|_| other("bad public key length"))?,
-    })
+    let mut kp = b.generate_keypair().map_err(other)?;
+    let pair = (|| -> io::Result<Keypair> {
+        Ok(Keypair {
+            private: kp.private.as_slice().try_into().map_err(|_| other("bad private key length"))?,
+            public: kp.public.as_slice().try_into().map_err(|_| other("bad public key length"))?,
+        })
+    })();
+    kp.private.zeroize();
+    pair
 }
 
 const NONCE_LEN: usize = 16;
@@ -138,6 +192,9 @@ pub fn handshake<S: Read + Write>(s: &mut S, local: &Keypair, initiator: bool) -
         .ok_or_else(|| other("peer sent no static key"))?
         .try_into()
         .map_err(|_| other("bad peer key length"))?;
+    if is_low_order(&remote_public) {
+        return Err(other("the other side presented an unusable key"));
+    }
     let handshake_hash = hs.get_handshake_hash().to_vec();
     let state = Arc::new(hs.into_stateless_transport_mode().map_err(other)?);
 
@@ -366,5 +423,18 @@ mod tests {
         let n = [1u8; NONCE_LEN];
         assert_ne!(commitment("client", &n), commitment("host", &n));
         assert_eq!(commitment("host", &n), commitment("host", &n));
+    }
+
+    #[test]
+    fn low_order_keys_are_unusable_and_real_ones_are_not() {
+        assert!(is_low_order(&[0; 32]));
+        let mut one = [0u8; 32];
+        one[0] = 1;
+        assert!(is_low_order(&one));
+        one[31] = 0x80; // the top bit is ignored by X25519
+        assert!(is_low_order(&one));
+        for _ in 0..20 {
+            assert!(!is_low_order(&generate_keypair().unwrap().public));
+        }
     }
 }
