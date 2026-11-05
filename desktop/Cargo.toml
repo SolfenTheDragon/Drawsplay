@@ -10,5 +10,14 @@ license = "GPL-3.0-only"
 [profile.release]
 lto = "thin"
 codegen-units = 1
-# Integer overflow panics (that thread only) instead of wrapping silently: sizes and counts come from the network.
+
+# Integer overflow panics (that thread only) instead of wrapping silently in our own code, where sizes and
+# counts come from the network. Dependencies keep the normal release behaviour.
+[profile.release.package.dd-proto]
+overflow-checks = true
+
+[profile.release.package.dd-host]
+overflow-checks = true
+
+[profile.release.package.dd-client]
 overflow-checks = true
