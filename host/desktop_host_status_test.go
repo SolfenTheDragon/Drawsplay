@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -171,5 +175,75 @@ func TestReadDesktopHostStatusSessions(t *testing.T) {
 	}
 	if st := readDesktopHostStatus(dir, now.Add(time.Hour)); st.Sessions == nil || len(st.Sessions) != 0 {
 		t.Fatalf("not running must give an empty non-nil list: %+v", st)
+	}
+}
+
+// fakeDesktopControl serves dd-host's control protocol from a test listener.
+func fakeDesktopControl(t *testing.T, dir string, answer func(cmd string) string) func() []string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	token := strings.Repeat("ab", 16)
+	ctl := fmt.Sprintf(`{"port":%d,"token":"%s"}`, ln.Addr().(*net.TCPAddr).Port, token)
+	if err := os.WriteFile(filepath.Join(dir, desktopControlFile), []byte(ctl), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var (
+		mu   sync.Mutex
+		seen []string
+	)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			line, _ := bufio.NewReader(c).ReadString('\n')
+			tok, cmd, _ := strings.Cut(strings.TrimSpace(line), " ")
+			if tok != token {
+				fmt.Fprintln(c, `{"error":"bad token"}`)
+			} else {
+				mu.Lock()
+				seen = append(seen, cmd)
+				mu.Unlock()
+				fmt.Fprintln(c, answer(cmd))
+			}
+			c.Close()
+		}
+	}()
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), seen...)
+	}
+}
+
+func TestDesktopControlEndpointIsPreferred(t *testing.T) {
+	dir := t.TempDir()
+	// A stale status file that alone would read as "not running".
+	if err := os.WriteFile(filepath.Join(dir, desktopStatusFile), []byte(`{"updatedUnixMs":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seen := fakeDesktopControl(t, dir, func(cmd string) string {
+		if cmd == "status" {
+			return `{"version":"9.9","session":{"client":"laptop","width":1920,"height":1080,"fps":60},"sessions":[]}`
+		}
+		return `{"ok":true,"sessions":1}`
+	})
+	st := readDesktopHostStatus(dir, time.Now())
+	if !st.Running || st.Session == nil || st.Session.Client != "laptop" || len(st.Sessions) != 1 {
+		t.Fatalf("live status not used: %+v", st)
+	}
+	if err := requestDesktopDisconnect(dir, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, desktopDisconnectReq)); !os.IsNotExist(err) {
+		t.Fatal("the request file must not be needed when the control endpoint answers")
+	}
+	if got := seen(); len(got) != 3 || got[2] != "disconnect" {
+		t.Fatalf("commands = %v", got)
 	}
 }

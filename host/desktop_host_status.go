@@ -6,11 +6,16 @@ package main
 // an Android tablet session from a PC client session. Nothing here talks to the network.
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -77,22 +82,70 @@ func desktopHostDir() string {
 
 // readDesktopHostStatus parses status.json in dir. Missing, unreadable, malformed or stale files all
 // mean "not running".
+// desktopControlFile names dd-host's control endpoint: a loopback port and a
+// secret token, readable only by this user (see desktop/host/src/status.rs).
+const desktopControlFile = "control.json"
+
+// desktopControl sends one command to a running dd-host's control endpoint
+// and returns its one-line JSON answer.
+func desktopControl(dir, command string) ([]byte, error) {
+	data, err := os.ReadFile(filepath.Join(dir, desktopControlFile))
+	if err != nil {
+		return nil, err
+	}
+	var c struct {
+		Port  int    `json:"port"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(data, &c); err != nil || c.Port <= 0 || c.Port > 65535 || len(c.Token) != 32 ||
+		strings.ContainsAny(c.Token, " \r\n") {
+		return nil, errors.New("dd-host control file is invalid")
+	}
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", c.Port), 500*time.Millisecond)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(1500 * time.Millisecond))
+	if _, err := fmt.Fprintf(conn, "%s %s\n", c.Token, command); err != nil {
+		return nil, err
+	}
+	line, err := bufio.NewReader(io.LimitReader(conn, 1<<20)).ReadBytes('\n')
+	if err != nil {
+		return nil, err
+	}
+	var e struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(line, &e) == nil && e.Error != "" {
+		return nil, errors.New("dd-host: " + e.Error)
+	}
+	return line, nil
+}
+
 func readDesktopHostStatus(dir string, now time.Time) desktopHostStatus {
 	none := desktopHostStatus{Trusted: []desktopTrusted{}, Sessions: []desktopSession{}}
 	if dir == "" {
 		return none
 	}
-	data, err := os.ReadFile(filepath.Join(dir, desktopStatusFile))
-	if err != nil {
-		return none
-	}
 	var st desktopHostStatus
-	if err := json.Unmarshal(data, &st); err != nil {
-		return none
-	}
-	age := now.Sub(time.UnixMilli(st.UpdatedUnixMs))
-	if st.UpdatedUnixMs <= 0 || age > desktopStatusStale || age < -desktopStatusStale {
-		return none
+	// Ask the running host first; status.json (rewritten every 2 s) serves
+	// older hosts and is checked for staleness.
+	if live, err := desktopControl(dir, "status"); err == nil && json.Unmarshal(live, &st) == nil {
+		st.UpdatedUnixMs = now.UnixMilli()
+	} else {
+		data, err := os.ReadFile(filepath.Join(dir, desktopStatusFile))
+		if err != nil {
+			return none
+		}
+		st = desktopHostStatus{}
+		if err := json.Unmarshal(data, &st); err != nil {
+			return none
+		}
+		age := now.Sub(time.UnixMilli(st.UpdatedUnixMs))
+		if st.UpdatedUnixMs <= 0 || age > desktopStatusStale || age < -desktopStatusStale {
+			return none
+		}
 	}
 	st.Running = true
 	// Older dd-host builds publish only "session".
@@ -148,5 +201,9 @@ func requestDesktopDisconnect(dir string, now time.Time) error {
 	if !st.Running || st.Session == nil {
 		return errNoDesktopSession
 	}
+	if _, err := desktopControl(dir, "disconnect"); err == nil {
+		return nil // ends the session at once
+	}
+	// Older hosts poll for this file every half second.
 	return os.WriteFile(filepath.Join(dir, desktopDisconnectReq), []byte("disconnect\n"), 0o600)
 }

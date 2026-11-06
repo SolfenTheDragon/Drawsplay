@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 dd-proto = { path = "../proto" }
 enigo = "0.3"
+getrandom = "0.3"
 serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]

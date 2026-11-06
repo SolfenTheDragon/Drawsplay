@@ -4,6 +4,11 @@
 //!
 //! The file is rewritten about every 2 seconds while the host runs, so a reader treats one older than
 //! a few seconds as "not running". Writes are atomic (temporary file, then rename).
+//!
+//! Faster and race-free: a control endpoint on a random loopback port, announced with a secret token
+//! in `control.json` (readable only by this user, like the rest of the folder). A client connects,
+//! sends one line `TOKEN status` or `TOKEN disconnect`, and gets one JSON line back: the status
+//! document, or `{"ok":true,"sessions":N}`. The files remain for older readers.
 
 use dd_proto::identity::{to_hex, TrustStore};
 use serde_json::{json, Value};
@@ -15,6 +20,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const STATUS_FILE: &str = "status.json";
 pub const DISCONNECT_FILE: &str = "disconnect-request";
+pub const CONTROL_FILE: &str = "control.json";
 const BEAT: Duration = Duration::from_secs(2);
 const POLL: Duration = Duration::from_millis(500);
 
@@ -71,6 +77,7 @@ pub fn init(dir: &Path, listen: &str, encoder: &str, source: &str) {
         return;
     }
     publish();
+    start_control(dir);
     std::thread::spawn(|| {
         let mut since_write = Duration::ZERO;
         loop {
@@ -146,6 +153,88 @@ fn publish() {
     write_atomic(&dir, &doc);
 }
 
+/// Mark every session for disconnection (the session loops say goodbye and close). Returns how many.
+fn request_disconnect_all() -> usize {
+    let Some(m) = STATE.get() else { return 0 };
+    let mut st = m.lock().unwrap_or_else(|e| e.into_inner());
+    if !st.sessions.is_empty() {
+        eprintln!("disconnect requested from the web UI (ends all sessions)");
+    }
+    for a in st.sessions.iter_mut() {
+        a.disconnect_since.get_or_insert_with(Instant::now);
+    }
+    st.sessions.len()
+}
+
+fn random_token() -> Option<String> {
+    let mut b = [0u8; 16];
+    getrandom::fill(&mut b).ok()?;
+    Some(to_hex(&b))
+}
+
+/// Compare without stopping at the first difference, so timing reveals nothing about the token.
+fn same_secret(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Write `control.json` readable by this user only.
+fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let tmp = path.with_extension("json.tmp");
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    o.open(&tmp)?.write_all(text.as_bytes())?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Serve the control endpoint (see the module docs) on its own thread.
+fn start_control(dir: &Path) {
+    let Ok(listener) = std::net::TcpListener::bind("127.0.0.1:0") else { return };
+    let (Ok(addr), Some(token)) = (listener.local_addr(), random_token()) else { return };
+    let doc = json!({"port": addr.port(), "token": token});
+    if let Err(e) = write_private(&dir.join(CONTROL_FILE), &doc.to_string()) {
+        eprintln!("warning: cannot write {CONTROL_FILE}: {e}");
+        return;
+    }
+    std::thread::spawn(move || {
+        // One request at a time, each with short timeouts: a stuck client cannot hold it for long.
+        for conn in listener.incoming().flatten() {
+            let _ = handle_control(conn, &token);
+        }
+    });
+}
+
+fn handle_control(conn: TcpStream, token: &str) -> std::io::Result<()> {
+    use std::io::{BufRead, BufReader, Read, Write};
+    conn.set_read_timeout(Some(Duration::from_secs(2)))?;
+    conn.set_write_timeout(Some(Duration::from_secs(2)))?;
+    let mut line = String::new();
+    BufReader::new((&conn).take(256)).read_line(&mut line)?;
+    let (given, cmd) = line.trim_end().split_once(' ').unwrap_or(("", ""));
+    let reply = if !same_secret(given.as_bytes(), token.as_bytes()) {
+        json!({"error": "bad token"})
+    } else {
+        match cmd {
+            "status" => match STATE.get() {
+                Some(m) => {
+                    let st = m.lock().unwrap_or_else(|e| e.into_inner());
+                    document(&st, trusted_list(&st.dir))
+                }
+                None => json!({"error": "not ready"}),
+            },
+            "disconnect" => json!({"ok": true, "sessions": request_disconnect_all()}),
+            _ => json!({"error": "unknown command"}),
+        }
+    };
+    let mut w = &conn;
+    w.write_all(format!("{reply}\n").as_bytes())
+}
+
 fn check_disconnect_request() {
     let Some(m) = STATE.get() else { return };
     let st = m.lock().unwrap_or_else(|e| e.into_inner());
@@ -155,15 +244,7 @@ fn check_disconnect_request() {
     }
     let _ = std::fs::remove_file(&req);
     drop(st);
-    if let Some(m) = STATE.get() {
-        let mut st = m.lock().unwrap_or_else(|e| e.into_inner());
-        if !st.sessions.is_empty() {
-            eprintln!("disconnect requested from the web UI (ends all sessions)");
-        }
-        for a in st.sessions.iter_mut() {
-            a.disconnect_since.get_or_insert_with(Instant::now);
-        }
-    }
+    request_disconnect_all();
 }
 
 /// Backstop: if the session loop has not reacted to a disconnect request within a few seconds (it is
@@ -226,6 +307,7 @@ pub fn shutdown() {
     if let Some(m) = STATE.get() {
         let dir = m.lock().unwrap_or_else(|e| e.into_inner()).dir.clone();
         let _ = std::fs::remove_file(dir.join(STATUS_FILE));
+        let _ = std::fs::remove_file(dir.join(CONTROL_FILE));
     }
 }
 
@@ -292,6 +374,35 @@ mod tests {
         assert_eq!(l.len(), 1);
         assert_eq!(l[0]["key"].as_str().unwrap().len(), 12);
         assert_eq!(l[0]["label"], "tablet");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn control_endpoint_needs_the_token() {
+        use std::io::{BufRead, BufReader, Write};
+        let d = std::env::temp_dir().join(format!("dd-status-ctl-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        start_control(&d);
+        let c: Value = serde_json::from_str(&std::fs::read_to_string(d.join(CONTROL_FILE)).unwrap()).unwrap();
+        let port = c["port"].as_u64().unwrap() as u16;
+        let token = c["token"].as_str().unwrap().to_string();
+        assert_eq!(token.len(), 32);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(d.join(CONTROL_FILE)).unwrap().permissions().mode();
+            assert_eq!(mode & 0o077, 0, "control.json must be private");
+        }
+        let ask = |line: &str| -> Value {
+            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            s.write_all(line.as_bytes()).unwrap();
+            let mut out = String::new();
+            BufReader::new(s).read_line(&mut out).unwrap();
+            serde_json::from_str(&out).unwrap()
+        };
+        assert_eq!(ask("wrong disconnect\n")["error"], "bad token");
+        assert_eq!(ask(&format!("{token} disconnect\n"))["ok"], true);
+        assert_eq!(ask(&format!("{token} reboot\n"))["error"], "unknown command");
         let _ = std::fs::remove_dir_all(&d);
     }
 }
