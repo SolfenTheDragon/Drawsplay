@@ -9,8 +9,6 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/grandcat/zeroconf"
 )
 
 const TabletService = "_drawsplay-tablet._tcp"
@@ -25,7 +23,7 @@ type Candidate struct {
 	Pairing bool `json:"pairing"`
 }
 
-func ParseCandidate(entry *zeroconf.ServiceEntry, prefixes []netip.Prefix) (Candidate, error) {
+func ParseCandidate(entry *ServiceEntry, prefixes []netip.Prefix) (Candidate, error) {
 	if entry == nil {
 		return Candidate{}, fmt.Errorf("missing tablet advertisement")
 	}

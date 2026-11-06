@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"drawsplay/host/internal/wifilan"
-	"github.com/grandcat/zeroconf"
 )
 
 func main() {
@@ -38,7 +37,7 @@ func run() error {
 	if address == nil || address.To4() == nil {
 		return fmt.Errorf("require a numeric tablet IPv4 address")
 	}
-	entry := zeroconf.NewServiceEntry("Synthetic Wi-Fi frame probe", wifilan.TabletService, "local.")
+	entry := wifilan.NewServiceEntry("Synthetic Wi-Fi frame probe", wifilan.TabletService, "local.")
 	entry.Port, entry.TTL = *port, 1
 	videoPort := 37184
 	if *port == videoPort {

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/grandcat/zeroconf"
 	"github.com/miekg/dns"
 )
 
@@ -190,7 +189,7 @@ func (c *packetCache) consume(data []byte, now time.Time, prefixes []netip.Prefi
 		if host == nil {
 			continue
 		}
-		entry := zeroconf.NewServiceEntry(service.name, TabletService, "local.")
+		entry := NewServiceEntry(service.name, TabletService, "local.")
 		entry.Port, entry.Text, entry.TTL = service.port, service.text, 1
 		for address, until := range host.addresses {
 			if until.After(now) {

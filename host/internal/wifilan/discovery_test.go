@@ -6,12 +6,10 @@ import (
 	"net"
 	"net/netip"
 	"testing"
-
-	"github.com/grandcat/zeroconf"
 )
 
-func tabletEntry() *zeroconf.ServiceEntry {
-	entry := zeroconf.NewServiceEntry("Test tablet", "_drawsplay-tablet._tcp", "local.")
+func tabletEntry() *ServiceEntry {
+	entry := NewServiceEntry("Test tablet", "_drawsplay-tablet._tcp", "local.")
 	entry.Port = 37183
 	entry.TTL = 120
 	entry.Text = []string{"v=2", "videoPort=37184"}
@@ -38,19 +36,19 @@ func TestTabletCandidateUsesOnlySelectedOnLinkAddresses(t *testing.T) {
 }
 
 func TestTabletCandidateRejectsUnusableOrAmbiguousAdvertisements(t *testing.T) {
-	tests := map[string]func(*zeroconf.ServiceEntry){
-		"old host service": func(e *zeroconf.ServiceEntry) { e.Service = "_drawsplay._tcp" },
-		"wrong domain":     func(e *zeroconf.ServiceEntry) { e.Domain = "example.org" },
-		"old protocol":     func(e *zeroconf.ServiceEntry) { e.Text[0] = "v=1" },
-		"missing version":  func(e *zeroconf.ServiceEntry) { e.Text = []string{"videoPort=37184"} },
-		"duplicate key":    func(e *zeroconf.ServiceEntry) { e.Text = append(e.Text, "v=2") },
-		"bad video port":   func(e *zeroconf.ServiceEntry) { e.Text[1] = "videoPort=65536" },
-		"same ports":       func(e *zeroconf.ServiceEntry) { e.Text[1] = "videoPort=37183" },
-		"privileged port":  func(e *zeroconf.ServiceEntry) { e.Port = 22 },
-		"expired":          func(e *zeroconf.ServiceEntry) { e.TTL = 0 },
-		"unsafe name":      func(e *zeroconf.ServiceEntry) { e.Instance = "tablet\nforged log" },
-		"no address":       func(e *zeroconf.ServiceEntry) { e.AddrIPv4 = nil },
-		"off link":         func(e *zeroconf.ServiceEntry) { e.AddrIPv4 = []net.IP{net.ParseIP("198.51.100.2")} },
+	tests := map[string]func(*ServiceEntry){
+		"old host service": func(e *ServiceEntry) { e.Service = "_drawsplay._tcp" },
+		"wrong domain":     func(e *ServiceEntry) { e.Domain = "example.org" },
+		"old protocol":     func(e *ServiceEntry) { e.Text[0] = "v=1" },
+		"missing version":  func(e *ServiceEntry) { e.Text = []string{"videoPort=37184"} },
+		"duplicate key":    func(e *ServiceEntry) { e.Text = append(e.Text, "v=2") },
+		"bad video port":   func(e *ServiceEntry) { e.Text[1] = "videoPort=65536" },
+		"same ports":       func(e *ServiceEntry) { e.Text[1] = "videoPort=37183" },
+		"privileged port":  func(e *ServiceEntry) { e.Port = 22 },
+		"expired":          func(e *ServiceEntry) { e.TTL = 0 },
+		"unsafe name":      func(e *ServiceEntry) { e.Instance = "tablet\nforged log" },
+		"no address":       func(e *ServiceEntry) { e.AddrIPv4 = nil },
+		"off link":         func(e *ServiceEntry) { e.AddrIPv4 = []net.IP{net.ParseIP("198.51.100.2")} },
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
