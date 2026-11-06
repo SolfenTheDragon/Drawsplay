@@ -189,14 +189,14 @@ var vkmsLoadCommands = [][]string{
 	{"modprobe", "vkms"},
 }
 
-// vkmsLoadAndPersistScript loads vkms (opt-in only, see vkmsAutoloadEnv).
+// vkmsLoadScript loads vkms (opt-in only, see vkmsAutoloadEnv).
 // It deliberately does not persist anything: loading vkms at boot would
 // expose every login to the kernel issue described at vkmsAutoloadEnv.
-const vkmsLoadAndPersistScript = `modprobe vkms create_default_dev=1 || modprobe vkms`
+const vkmsLoadScript = `modprobe vkms create_default_dev=1 || modprobe vkms`
 
 // loadVkmsPrivileged loads vkms as root: directly, through passwordless sudo,
-// or, when mayPrompt is set, through one polkit (pkexec) password prompt that
-// also makes vkms load at boot. Without mayPrompt it never prompts.
+// or, when mayPrompt is set, through one polkit (pkexec) password prompt.
+// Nothing is made to load at boot. Without mayPrompt it never prompts.
 func loadVkmsPrivileged(mayPrompt bool) error {
 	env := append(os.Environ(), "PATH="+os.Getenv("PATH")+":/usr/sbin:/sbin")
 	run := func(argv ...string) error {
@@ -210,7 +210,7 @@ func loadVkmsPrivileged(mayPrompt bool) error {
 		return nil
 	}
 	if os.Geteuid() == 0 {
-		return run("sh", "-c", vkmsLoadAndPersistScript)
+		return run("sh", "-c", vkmsLoadScript)
 	}
 	if sudo, err := exec.LookPath("sudo"); err == nil {
 		for _, argv := range vkmsLoadCommands {
@@ -224,12 +224,12 @@ func loadVkmsPrivileged(mayPrompt bool) error {
 	}
 	pkexec, err := exec.LookPath("pkexec")
 	if err != nil {
-		return errors.New("pkexec is not available; run \"sudo modprobe vkms create_default_dev=1\" and configure vkms to load at boot")
+		return errors.New("pkexec is not available; run \"sudo modprobe vkms create_default_dev=1\" (vkms is not loaded at boot; it is loaded when needed)")
 	}
 	if helper, ok := displayHelper(); ok {
 		err = run(pkexec, helper, "vkms-load")
 	} else {
-		err = run(pkexec, "sh", "-c", vkmsLoadAndPersistScript)
+		err = run(pkexec, "sh", "-c", vkmsLoadScript)
 	}
 	var ee *exec.ExitError
 	// 126: the user dismissed the prompt or is not authorized.
