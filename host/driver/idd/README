@@ -1,0 +1,10 @@
+Generated files: do not edit them here.
+
+This folder holds the built DrawSplay virtual display driver (DrawSplayIdd.dll,
+.inf and .cat) that the Windows host embeds with go:embed and installs at run
+time. The .inf here is the stamped build output of
+drivers/windows/idd/DrawSplayIdd.inf (DriverVer and the architecture filled in).
+
+To change the driver, edit drivers/windows/idd/ and run
+scripts/build-idd-driver.ps1, which builds it and copies the result here.
+The .dll is not committed (see .gitignore); release builds produce it.

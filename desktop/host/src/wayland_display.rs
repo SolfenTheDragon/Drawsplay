@@ -2,8 +2,8 @@
 //! `wf-recorder` (wlroots compositors: sway, Hyprland, river, labwc...).
 //!
 //! Virtual outputs: sway (`swaymsg create_output`, only on its headless/nested backends) and
-//! Hyprland (`hyprctl output create headless`). GNOME and KDE need the xdg-desktop-portal
-//! ScreenCast API and are not supported yet; there the host reports why and mirrors nothing.
+//! Hyprland (`hyprctl output create headless`). GNOME, KDE and other compositors go through the
+//! xdg-desktop-portal instead (`portal.rs`, chosen in `display.rs`).
 
 use std::process::{Child, Command, Stdio};
 
