@@ -167,10 +167,71 @@ enum Piped {
     Raw,
 }
 
-fn ffmpeg_command(a: &Args, enc: Encoder, origin: (i32, i32), w: u32, h: u32, fps: u32, piped: Piped) -> Command {
+/// A DXGI output: adapter and output index (as `ddagrab` counts them) and its desktop rectangle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub struct DxgiOutput {
+    pub adapter: u32,
+    pub output: u32,
+    pub rect: (i32, i32, u32, u32),
+}
+
+/// Set once `ddagrab` has failed and `gdigrab` then worked: later sessions skip `ddagrab`.
+#[cfg_attr(not(windows), allow(dead_code))]
+static GDI_ONLY: AtomicBool = AtomicBool::new(false);
+
+/// Windows capture input. `ddagrab` (DXGI Desktop Duplication) works in physical pixels, so it is right
+/// at any display scaling, and is far cheaper than `gdigrab`, which copies through GDI and is not
+/// DPI-aware (the cause of the offset/cropped capture at scaling above 100%). `gdigrab` is the fallback
+/// for ffmpeg builds without `ddagrab` (before 6.0) or when duplication is refused.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_capture_args(origin: (i32, i32), w: u32, h: u32, fps: u32, dxgi: Option<DxgiOutput>) -> Vec<String> {
+    let mut v: Vec<String> = Vec::new();
+    match dxgi {
+        Some(o) => {
+            // ddagrab makes its own D3D11 device on adapter 0; another adapter needs an explicit one
+            // (an explicit device on adapter 0 breaks duplication on some Intel drivers).
+            if o.adapter != 0 {
+                v.extend(["-init_hw_device".into(), format!("d3d11va:{}", o.adapter)]);
+            }
+            let mut f = format!("ddagrab=output_idx={}:framerate={fps}:draw_mouse=0", o.output);
+            let (ox, oy) = (origin.0 - o.rect.0, origin.1 - o.rect.1);
+            if (ox, oy) != (0, 0) || (w, h) != (o.rect.2, o.rect.3) {
+                f += &format!(":video_size={w}x{h}:offset_x={ox}:offset_y={oy}");
+            }
+            f += ",hwdownload,format=bgra";
+            v.extend(["-filter_complex".into(), f]);
+        }
+        None => {
+            v.extend(["-fflags", "nobuffer", "-f", "gdigrab", "-framerate"].map(String::from));
+            v.push(fps.to_string());
+            v.extend(["-offset_x".into(), origin.0.to_string(), "-offset_y".into(), origin.1.to_string()]);
+            v.extend(["-video_size".into(), format!("{w}x{h}"), "-draw_mouse".into(), "0".into()]);
+            v.extend(["-i".into(), "desktop".into()]);
+        }
+    }
+    v
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ffmpeg_command(
+    a: &Args,
+    enc: Encoder,
+    origin: (i32, i32),
+    w: u32,
+    h: u32,
+    fps: u32,
+    piped: Piped,
+    gdi: bool,
+) -> Command {
+    let _ = gdi;
     let piped_nut = piped == Piped::Nut;
     let mut c = Command::new(&a.ffmpeg);
-    c.args(["-hide_banner", "-loglevel", "error", "-fflags", "nobuffer"]);
+    c.args(["-hide_banner", "-loglevel", "error"]);
+    // An input option: the Windows ddagrab source is a filter graph, not an input.
+    if !(cfg!(windows) && matches!(a.source, Source::Desktop | Source::Virtual) && piped == Piped::No) {
+        c.args(["-fflags", "nobuffer"]);
+    }
     c.args(enc.input_args());
     match a.source {
         Source::Test => {
@@ -188,9 +249,8 @@ fn ffmpeg_command(a: &Args, enc: Encoder, origin: (i32, i32), w: u32, h: u32, fp
         Source::Desktop | Source::Virtual => {
             #[cfg(windows)]
             {
-                c.args(["-f", "gdigrab", "-framerate", &fps.to_string()]);
-                c.args(["-offset_x", &origin.0.to_string(), "-offset_y", &origin.1.to_string()]);
-                c.args(["-video_size", &format!("{w}x{h}"), "-draw_mouse", "0", "-i", "desktop"]);
+                let dxgi = if gdi { None } else { vdisplay::dxgi_output_containing(origin.0, origin.1) };
+                c.args(windows_capture_args(origin, w, h, fps, dxgi));
             }
             #[cfg(not(windows))]
             {
@@ -442,6 +502,7 @@ fn launch(
     display: &display::Display,
     enc: Encoder,
     fps: u32,
+    gdi: bool,
 ) -> std::io::Result<(std::process::Child, Option<std::process::Child>)> {
     let (w, h) = display.target.size;
     let mut recorder: Option<std::process::Child> = None;
@@ -462,7 +523,7 @@ fn launch(
         (true, true) => Piped::Raw,
         (true, false) => Piped::Nut,
     };
-    let mut cmd = ffmpeg_command(a, enc, display.target.origin, w, h, fps, piped);
+    let mut cmd = ffmpeg_command(a, enc, display.target.origin, w, h, fps, piped, gdi);
     if let Some(r) = recorder.as_mut() {
         cmd.stdin(Stdio::from(r.stdout.take().unwrap()));
     }
@@ -688,7 +749,10 @@ fn serve(
     // reset). If that happens before any video, retry once in software and remember it.
     let raw_input = raw.try_clone()?;
     let mut enc = if shared.software_only.load(Ordering::SeqCst) { Encoder::Software } else { a.chosen };
-    let (mut ff, mut recorder) = launch(a, &display, enc, fps)?;
+    // Windows: ddagrab first, gdigrab once ddagrab has been seen to fail (see windows_capture_args).
+    let mut gdi = GDI_ONLY.load(Ordering::SeqCst);
+    let uses_ddagrab = cfg!(windows) && a.source != Source::Test;
+    let (mut ff, mut recorder) = launch(a, &display, enc, fps, gdi)?;
     let video = ff.stdout.take().unwrap();
 
     // Writes from two threads (video + pong) must not interleave.
@@ -721,6 +785,8 @@ fn serve(
     // Set when a hardware encoder died before any video; kept only if software then works, so a
     // capture failure (not the encoder's fault) cannot downgrade every later session.
     let mut downgrade_pending = false;
+    // Likewise for ddagrab -> gdigrab: remembered only once gdigrab has produced video.
+    let mut gdi_pending = false;
     let result = loop {
         // Wake up regularly: when the client is gone (its input thread ended) the session must end
         // and give the monitor back even if the encoder has nothing more to say.
@@ -759,12 +825,27 @@ fn serve(
             }
         }
         let data = match chunk {
+            Ok(d) if d.is_empty() && !sent_any && uses_ddagrab && !gdi => {
+                eprintln!("ddagrab capture failed at start (ffmpeg older than 6.0?); falling back to gdigrab");
+                gdi_pending = true;
+                gdi = true;
+                kill_all(&mut ff, &mut recorder);
+                match launch(a, &display, enc, fps, gdi) {
+                    Ok((f, r)) => {
+                        ff = f;
+                        recorder = r;
+                        chunks = spawn_reader(ff.stdout.take().unwrap());
+                        continue;
+                    }
+                    Err(e) => break Err(e),
+                }
+            }
             Ok(d) if d.is_empty() && !sent_any && enc != Encoder::Software => {
                 eprintln!("encoder {} failed at start; falling back to software encoding", enc.name());
                 downgrade_pending = true;
                 kill_all(&mut ff, &mut recorder);
                 enc = Encoder::Software;
-                match launch(a, &display, enc, fps) {
+                match launch(a, &display, enc, fps, gdi) {
                     Ok((f, r)) => {
                         ff = f;
                         recorder = r;
@@ -786,6 +867,10 @@ fn serve(
         if downgrade_pending {
             downgrade_pending = false;
             shared.software_only.store(true, Ordering::SeqCst);
+        }
+        if gdi_pending {
+            gdi_pending = false;
+            GDI_ONLY.store(true, Ordering::SeqCst);
         }
     };
     kill_all(&mut ff, &mut recorder);
@@ -983,5 +1068,30 @@ fn main() {
             }
             Err(e) => eprintln!("accept failed: {e}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ddagrab_captures_a_whole_output_or_a_region_of_it() {
+        let out = DxgiOutput { adapter: 0, output: 1, rect: (1920, 0, 2560, 1600) };
+        let whole = windows_capture_args((1920, 0), 2560, 1600, 60, Some(out)).join(" ");
+        assert_eq!(whole, "-filter_complex ddagrab=output_idx=1:framerate=60:draw_mouse=0,hwdownload,format=bgra");
+        let part = windows_capture_args((2020, 50), 800, 600, 30, Some(DxgiOutput { adapter: 2, ..out })).join(" ");
+        assert!(part.starts_with("-init_hw_device d3d11va:2 -filter_complex"), "{part}");
+        assert!(part.contains(":video_size=800x600:offset_x=100:offset_y=50"), "{part}");
+    }
+
+    #[test]
+    fn gdigrab_is_the_fallback() {
+        let v = windows_capture_args((10, 20), 640, 480, 30, None).join(" ");
+        assert!(
+            v.contains("-f gdigrab") && v.contains("-offset_x 10 -offset_y 20") && v.ends_with("-i desktop"),
+            "{v}"
+        );
+        assert!(v.starts_with("-fflags nobuffer"), "{v}");
     }
 }

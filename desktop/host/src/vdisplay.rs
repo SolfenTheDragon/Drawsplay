@@ -226,14 +226,16 @@ pub fn set_dpi_aware() {
     }
 }
 
-/// A warning to show when Windows display scaling is not 100%: `ffmpeg.exe` (gdigrab) is not
-/// DPI-aware, so capture offsets and sizes may be interpreted in scaled units. See docs/known-issues.md.
+/// A warning to show when Windows display scaling is not 100%. Capture uses `ddagrab`, which works
+/// in physical pixels; only the `gdigrab` fallback (ffmpeg older than 6.0) is not DPI-aware and may
+/// capture an offset or cropped picture.
 pub fn scaling_warning() -> Option<String> {
     use windows::Win32::UI::HiDpi::GetDpiForSystem;
     let dpi = unsafe { GetDpiForSystem() };
     (dpi != 0 && dpi != 96).then(|| {
         format!(
-            "WARNING: Windows display scaling is {}%. Screen capture through ffmpeg may be offset or cropped;              if the picture is wrong, set scaling to 100% (see docs/known-issues.md).",
+            "note: Windows display scaling is {}%. This is fine with ffmpeg 6.0 or newer; with an older ffmpeg \
+             (gdigrab capture) the picture may be offset or cropped: update ffmpeg or set scaling to 100%.",
             dpi * 100 / 96
         )
     })
@@ -243,4 +245,30 @@ pub fn scaling_warning() -> Option<String> {
 pub fn primary_size() -> (u32, u32) {
     use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
     unsafe { (GetSystemMetrics(SM_CXSCREEN).max(2) as u32, GetSystemMetrics(SM_CYSCREEN).max(2) as u32) }
+}
+
+/// The DXGI output (adapter and output index, as ffmpeg's `ddagrab` counts them) whose desktop
+/// rectangle contains the point `(x, y)`, in physical pixels (the process is DPI-aware).
+pub fn dxgi_output_containing(x: i32, y: i32) -> Option<crate::DxgiOutput> {
+    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
+    // SAFETY: plain COM calls on interfaces this function owns.
+    unsafe {
+        let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
+        let mut a = 0;
+        while let Ok(adapter) = factory.EnumAdapters1(a) {
+            let mut o = 0;
+            while let Ok(output) = adapter.EnumOutputs(o) {
+                if let Ok(desc) = output.GetDesc() {
+                    let r = desc.DesktopCoordinates;
+                    if x >= r.left && x < r.right && y >= r.top && y < r.bottom {
+                        let rect = (r.left, r.top, (r.right - r.left) as u32, (r.bottom - r.top) as u32);
+                        return Some(crate::DxgiOutput { adapter: a, output: o, rect });
+                    }
+                }
+                o += 1;
+            }
+            a += 1;
+        }
+    }
+    None
 }
