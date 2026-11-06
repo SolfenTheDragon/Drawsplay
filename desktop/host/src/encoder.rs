@@ -62,11 +62,13 @@ impl Encoder {
     }
 
     /// Low-latency encoder options. `gop` is the keyframe interval in frames.
-    pub fn codec_args(self, kbps: u32, fps: u32, gop: u32) -> Vec<String> {
+    pub fn codec_args(self, kbps: u32, gop: u32) -> Vec<String> {
         let rate = |extra: &[&str]| -> Vec<String> {
             let mut v: Vec<String> = extra.iter().map(|s| s.to_string()).collect();
             v.extend(["-b:v".into(), format!("{kbps}k"), "-maxrate".into(), format!("{kbps}k")]);
-            v.extend(["-bufsize".into(), format!("{}k", (kbps / fps.max(1)).max(1) * 2)]);
+            // A 125 ms buffer (bitrate / 8). Two frames' worth starved keyframes at high frame rates,
+            // so every keyframe came out blocky; the Go host measured and fixed the same problem.
+            v.extend(["-bufsize".into(), format!("{}k", vbv_kbits(kbps))]);
             v.extend(["-g".into(), gop.to_string(), "-bf".into(), "0".into()]);
             v
         };
@@ -80,6 +82,11 @@ impl Encoder {
         });
         a
     }
+}
+
+/// Video buffer size in kbit for `kbps`: 125 ms of data, at least 100 kbit.
+fn vbv_kbits(kbps: u32) -> u32 {
+    (kbps / 8).max(100)
 }
 
 fn vaapi_device() -> String {
@@ -111,7 +118,7 @@ fn works(ffmpeg: &str, e: Encoder) -> bool {
     if let Some(p) = e.pix_fmt() {
         c.args(["-pix_fmt", p]);
     }
-    c.args(e.codec_args(2000, 30, 30));
+    c.args(e.codec_args(2000, 30));
     c.args(["-frames:v", "5", "-f", "null", "-"]);
     c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     #[cfg(windows)]
@@ -152,17 +159,18 @@ mod tests {
 
     #[test]
     fn low_latency_args() {
-        let a = Encoder::Software.codec_args(12000, 60, 120);
+        let a = Encoder::Software.codec_args(12000, 120);
         let joined = a.join(" ");
         assert!(joined.contains("-c:v libx264"));
         assert!(joined.contains("-tune zerolatency"));
         assert!(joined.contains("-b:v 12000k"));
         assert!(joined.contains("-bf 0")); // no B-frames: they add latency
         assert!(joined.contains("-g 120"));
-        // bufsize is about two frames of data
-        assert!(joined.contains("-bufsize 400k"));
-        assert!(Encoder::Nvenc.codec_args(5000, 60, 60).join(" ").contains("-tune ull"));
-        assert!(Encoder::Amf.codec_args(5000, 60, 60).join(" ").contains("ultralowlatency"));
+        // bufsize holds 125 ms of data, so keyframes are not starved
+        assert!(joined.contains("-bufsize 1500k"));
+        assert!(Encoder::Software.codec_args(400, 120).join(" ").contains("-bufsize 100k"));
+        assert!(Encoder::Nvenc.codec_args(5000, 60).join(" ").contains("-tune ull"));
+        assert!(Encoder::Amf.codec_args(5000, 60).join(" ").contains("ultralowlatency"));
     }
 
     #[test]

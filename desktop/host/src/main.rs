@@ -218,7 +218,7 @@ fn ffmpeg_command(a: &Args, enc: Encoder, origin: (i32, i32), w: u32, h: u32, fp
     if let Some(p) = enc.pix_fmt() {
         c.args(["-pix_fmt", p]);
     }
-    c.args(enc.codec_args(a.bitrate_kbps, fps, fps * 2));
+    c.args(enc.codec_args(a.bitrate_kbps, fps * 2));
     c.args(["-f", "h264", "-"]);
     #[cfg(windows)]
     {
