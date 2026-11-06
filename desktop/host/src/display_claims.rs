@@ -166,4 +166,34 @@ mod tests {
         let text = std::fs::read_to_string(d.join("display-claims.json")).unwrap();
         assert!(!text.contains("test-HDMI-1") && !text.contains("test-HDMI-2"), "{text}");
     }
+
+    /// The file format shared with the Go host (testdata/protocols/display-claims.json).
+    #[test]
+    fn reads_and_writes_the_shared_golden_file() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/protocols/display-claims.json");
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let claims: Vec<Claim> = doc["claims"].as_array().unwrap().iter().filter_map(Claim::parse).collect();
+        assert_eq!(
+            claims,
+            vec![
+                Claim {
+                    owner: "android-host".into(),
+                    pid: 1234,
+                    comm: "drawsplay-host".into(),
+                    kind: "connector".into(),
+                    name: "HDMI-A-1".into()
+                },
+                Claim {
+                    owner: "desktop-host".into(),
+                    pid: 5678,
+                    comm: "dd-host".into(),
+                    kind: OUTPUT.into(),
+                    name: "Virtual-1-1".into()
+                },
+            ]
+        );
+        for (c, v) in claims.iter().zip(doc["claims"].as_array().unwrap()) {
+            assert_eq!(&c.to_json(), v);
+        }
+    }
 }

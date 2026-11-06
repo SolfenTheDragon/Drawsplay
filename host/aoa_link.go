@@ -109,16 +109,22 @@ func (l *aoaLink) writeFrame(typ byte, id uint16, payload []byte, deadline time.
 	}
 	defer func() { <-l.writeSem }()
 
+	if _, err := l.pipe.Write(encodeAOAFrame(typ, id, payload)); err != nil {
+		l.shutdown(err)
+		return err
+	}
+	return nil
+}
+
+// encodeAOAFrame lays out one link frame: [type][channel id:2][length:2]
+// [payload], big-endian (testdata/protocols/aoa-frames.vectors).
+func encodeAOAFrame(typ byte, id uint16, payload []byte) []byte {
 	buf := make([]byte, aoaFrameHeader+len(payload))
 	buf[0] = typ
 	binary.BigEndian.PutUint16(buf[1:3], id)
 	binary.BigEndian.PutUint16(buf[3:5], uint16(len(payload)))
 	copy(buf[aoaFrameHeader:], payload)
-	if _, err := l.pipe.Write(buf); err != nil {
-		l.shutdown(err)
-		return err
-	}
-	return nil
+	return buf
 }
 
 func readAOAFrame(r io.Reader) (typ byte, id uint16, payload []byte, err error) {

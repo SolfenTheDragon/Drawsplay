@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -41,5 +42,23 @@ func TestDisplayClaimsSeeOtherLiveOwnersOnly(t *testing.T) {
 		if c.Name == "HDMI-1" || c.Name == "HDMI-2" {
 			t.Fatalf("claim %q should be gone: %+v", c.Name, f.Claims)
 		}
+	}
+}
+
+func TestDisplayClaimsGoldenFileReads(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "testdata", "protocols", "display-claims.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f displayClaimFile
+	if err := json.Unmarshal(data, &f); err != nil {
+		t.Fatal(err)
+	}
+	want := []displayClaim{
+		{Owner: "android-host", PID: 1234, Comm: "drawsplay-host", Kind: displayClaimConnector, Name: "HDMI-A-1"},
+		{Owner: "desktop-host", PID: 5678, Comm: "dd-host", Kind: displayClaimOutput, Name: "Virtual-1-1"},
+	}
+	if !reflect.DeepEqual(f.Claims, want) {
+		t.Fatalf("claims = %+v", f.Claims)
 	}
 }

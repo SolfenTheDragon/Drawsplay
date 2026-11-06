@@ -55,7 +55,9 @@ const (
 
 var errNativeBadFirstFrame = errors.New("native helper first frame is not a decodable keyframe")
 
-// nativeFrameHeader is the 16-byte header preceding every helper frame.
+// nativeFrameHeader is the 16-byte header preceding every helper frame. The
+// helper protocol is specified in FUNCTIONALITY.md §3.5; both helpers
+// (native/drawsplay-media, native/drawsplay-media-win) implement it.
 type nativeFrameHeader struct {
 	PayloadLen uint32
 	Kind       uint8

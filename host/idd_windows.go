@@ -39,19 +39,11 @@ import (
 )
 
 const (
-	// CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800+n, METHOD_BUFFERED, FILE_ANY_ACCESS).
-	iddIoctlAddMonitor    = 0x00222000
-	iddIoctlRemoveMonitor = 0x00222004
-	iddIoctlRemoveAll     = 0x00222008
-
-	// How long AddMonitor keeps retrying while the driver reports its
-	// adapter as not yet initialized, and how often.
 	iddNotReadyWait = 5 * time.Second
 	iddNotReadyPoll = 100 * time.Millisecond
 )
 
-// iddInterfaceGUID is the device interface GUID of the DrawSplay IddCx control
-// device: {4f73af95-3814-4206-a651-125dfbb5e8f5}.
+// iddInterfaceGUID is iddInterfaceGUIDString as a windows.GUID.
 var iddInterfaceGUID = windows.GUID{
 	Data1: 0x4f73af95,
 	Data2: 0x3814,
@@ -156,18 +148,6 @@ func (d *iddDevice) AddMonitor(width, height, refreshHz, nativeWidth, nativeHeig
 		return -1, fmt.Errorf("IDD add monitor: short response (%d bytes)", returned)
 	}
 	return int(binary.LittleEndian.Uint32(out[:])), nil
-}
-
-// encodeIDDAddMonitor packs the v2 ADD_MONITOR request. Drivers that only
-// know the v1 layout read the first 12 bytes and ignore the native size.
-func encodeIDDAddMonitor(width, height, refreshHz, nativeWidth, nativeHeight int) [20]byte {
-	var in [20]byte
-	binary.LittleEndian.PutUint32(in[0:], uint32(width))
-	binary.LittleEndian.PutUint32(in[4:], uint32(height))
-	binary.LittleEndian.PutUint32(in[8:], uint32(refreshHz))
-	binary.LittleEndian.PutUint32(in[12:], uint32(max(nativeWidth, 0)))
-	binary.LittleEndian.PutUint32(in[16:], uint32(max(nativeHeight, 0)))
-	return in
 }
 
 // RemoveMonitor unplugs the virtual monitor with the given id.

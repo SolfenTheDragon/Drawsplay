@@ -37,19 +37,7 @@ object UsbMuxFrameCodec {
     }
 
     fun writeFrame(out: OutputStream, frame: Frame) {
-        require(frame.payload.size <= MAX_PAYLOAD) { "payload too large: ${frame.payload.size}" }
-        val header = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.BIG_ENDIAN).apply {
-            putShort(MAGIC)
-            put(VERSION)
-            put(frame.streamId)
-            put(frame.flags)
-            putInt(frame.seq.toInt())
-            putInt(frame.payload.size)
-        }.array()
-        out.write(header)
-        if (frame.payload.isNotEmpty()) {
-            out.write(frame.payload)
-        }
+        out.write(encode(frame))
     }
 
     fun encode(frame: Frame): ByteArray {

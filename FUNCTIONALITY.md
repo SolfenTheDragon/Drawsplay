@@ -154,6 +154,8 @@ Target profile for pen/touch interactions:
 
 ## 3. Protocol Reference (Current)
 
+Formats that more than one program implements are pinned by shared test vectors in `testdata/protocols/` (see its README): the USB accessory and mux framings (host and app), the virtual display driver's control interface (host and dd-host), and the display claims and dd-host status files (host and dd-host). Change the vectors together with the format.
+
 ### 3.0 Channels
 
 | Port  | Direction     | Framing                          | Content            |
@@ -303,7 +305,10 @@ Field notes:
 * Hello gains `videoFeatures` (`tile1`, `meta1`); input packets gain `sq` (sequence). Host only sends the new video packets to clients that advertised them:
   * type 2 TILE (lossless zlib sparse tiles), type 3 MODE (0 video, 1 tile), type 4 FRAME_META (`u32 inputSeq`, `u32 pipeUs`, big-endian).
   * Stats gain `echoMs` (input send to the frame carrying it); logged in the session summary.
-* Helper wire format: see the comments in `native/drawsplay-media/main.c` and `common.h`.
+* Helper wire format, the same for the Linux (`native/drawsplay-media/main.c`) and Windows (`native/drawsplay-media-win/main.cpp`) helpers and read by `host/native_media.go`:
+  * stdout: frames, each a 16-byte little-endian header `u32 payload length, u8 kind, u8 flags, u16 reserved (0), u32 input sequence, u32 pipeline µs` and the payload. Kinds: 1 H.264 access unit (Annex-B), 2 tile, 3 mode (1-byte payload: 0 video, 1 tile), 4 cursor. Flags: 1 keyframe. Payloads are at most 8 MiB.
+  * stdin: newline-terminated commands: `K <seq>` input kick, `A <n>` frames acknowledged by the tablet since the helper started, `I` force a keyframe, `B <kbps>` retune the bitrate, `Q` quit.
+  * stderr is a free-form log. Exit codes: 0 quit or stdin closed, 1 error, 3 display mode changed (the host restarts the pipeline).
 
 ### 3.6 Wi-Fi major-2 envelope component (not yet a product session)
 

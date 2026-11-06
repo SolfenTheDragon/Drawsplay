@@ -10,6 +10,7 @@ mod display_claims;
 mod encoder;
 #[cfg(target_os = "linux")]
 mod fake_displays;
+mod idd_protocol;
 mod inject;
 #[cfg(target_os = "linux")]
 mod linux_display;

@@ -21,11 +21,9 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::Win32::System::IO::DeviceIoControl;
 
-// {4f73af95-3814-4206-a651-125dfbb5e8f5}
-const IDD_GUID: GUID = GUID::from_u128(0x4f73af95_3814_4206_a651_125dfbb5e8f5);
-// CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800+n, METHOD_BUFFERED, FILE_ANY_ACCESS)
-const IOCTL_ADD_MONITOR: u32 = 0x0022_2000;
-const IOCTL_REMOVE_MONITOR: u32 = 0x0022_2004;
+use crate::idd_protocol::{add_monitor_request, INTERFACE_GUID, IOCTL_ADD_MONITOR, IOCTL_REMOVE_MONITOR};
+
+const IDD_GUID: GUID = GUID::from_u128(INTERFACE_GUID);
 
 pub struct VirtualDisplay {
     handle: HANDLE,
@@ -145,11 +143,8 @@ impl VirtualDisplay {
 
         let before: Vec<isize> = monitors().iter().map(|m| m.id).collect();
 
-        // {Width, Height, RefreshHz, NativeWidth, NativeHeight}, little-endian u32.
-        let mut req = Vec::with_capacity(20);
-        for v in [w, h, hz, w, h] {
-            req.extend(v.to_le_bytes());
-        }
+        // The monitor's native size is the size asked for.
+        let req = add_monitor_request(w, h, hz, w, h);
         let mut out = [0u8; 4];
         let mut got = 0u32;
         // The driver reports "not ready" until IddCx has initialised its adapter: retry briefly.

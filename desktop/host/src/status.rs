@@ -405,4 +405,40 @@ mod tests {
         assert_eq!(ask(&format!("{token} reboot\n"))["error"], "unknown command");
         let _ = std::fs::remove_dir_all(&d);
     }
+
+    /// The Go host reads status.json; testdata/protocols/desktop-status.json is the shape it is
+    /// tested with. The document must have exactly those keys.
+    #[test]
+    fn document_has_the_keys_of_the_shared_golden_file() {
+        fn keys(v: &Value) -> Vec<String> {
+            let mut k: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
+            k.sort();
+            k
+        }
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/protocols/desktop-status.json");
+        let golden: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let d = std::env::temp_dir().join(format!("dd-status-golden-{}", std::process::id()));
+        let mut st = state(&d);
+        st.sessions.push(Active {
+            id: 1,
+            info: SessionInfo {
+                client: "laptop".into(),
+                peer: "10.0.0.2:5000".into(),
+                width: 1920,
+                height: 1080,
+                fps: 60,
+                virtual_display: true,
+                backend: "x11-virtual".into(),
+                encoder: "libx264".into(),
+            },
+            since_ms: 1,
+            stream: None,
+            disconnect_since: None,
+        });
+        let doc = document(&st, vec![json!({"key": "0123456789ab", "label": "laptop"})]);
+        assert_eq!(keys(&doc), keys(&golden));
+        assert_eq!(keys(&doc["session"]), keys(&golden["session"]));
+        assert_eq!(keys(&doc["sessions"][0]), keys(&golden["sessions"][0]));
+        assert_eq!(keys(&doc["trusted"][0]), keys(&golden["trusted"][0]));
+    }
 }

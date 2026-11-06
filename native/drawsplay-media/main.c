@@ -161,7 +161,9 @@ static void put32(uint8_t *p, uint32_t v)
     p[3] = (uint8_t)(v >> 24);
 }
 
-/* payload must have 16 writable bytes in front of it. */
+/* Frame header and stdin commands: FUNCTIONALITY.md section 3.5 (shared with
+ * the Windows helper and read by host/native_media.go).
+ * payload must have 16 writable bytes in front of it. */
 static void send_frame(uint8_t *payload, size_t len, int kind, int flags, uint32_t seq, uint64_t t0)
 {
     uint8_t *h = payload - 16;

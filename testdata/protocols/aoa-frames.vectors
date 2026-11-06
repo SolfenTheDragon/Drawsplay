@@ -1,0 +1,8 @@
+# AOA link frames (USB accessory transport): [type:1][channel id:2][payload length:2][payload], big-endian.
+# Types: 1 hello, 2 open, 3 data, 4 close. Implementations: host/aoa_link.go, android/.../transport/AccessoryFraming.kt.
+# Format of this file: one frame per line, name then key=value pairs; hex is lowercase, "-" is empty.
+hello type=1 id=0 payload=4453414f4101 wire=01000000064453414f4101
+open-input type=2 id=1 payload=01 wire=020001000101
+data type=3 id=258 payload=090807 wire=0301020003090807
+close-empty type=4 id=7 payload=- wire=0400070000
+data-max-id type=3 id=65535 payload=000102030405060708090a0b0c0d0e0f wire=03ffff0010000102030405060708090a0b0c0d0e0f

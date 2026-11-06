@@ -28,7 +28,8 @@
 //     forwarded as small cursor frames (kind 4) for the tablet to draw, so
 //     cursor motion costs no encode and never waits behind a video frame.
 //
-// Output and control protocol are those of native/drawsplay-media (Linux):
+// Output and control protocol are those of native/drawsplay-media (Linux),
+// specified in FUNCTIONALITY.md section 3.5:
 // stdout carries frames with a 16-byte little-endian header
 //   u32 payload length, u8 kind (1 = H.264 access unit), u8 flags
 //   (1 = keyframe), u16 reserved, u32 input sequence, u32 pipeline us
