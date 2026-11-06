@@ -89,16 +89,6 @@ type videoOptions struct {
 	WiFiBaseline bool
 }
 
-// runVideoListener accepts video sessions until ctx is cancelled. If the
-// port is unavailable the video feature is disabled but input keeps working.
-// Each session takes a fresh settings snapshot from the store, so web UI
-// changes apply to the next connection (and the UI restarts the active
-// session on save via restartActiveVideoSession).
-func runVideoListener(ctx context.Context, store *settingsStore) {
-	addr := fmt.Sprintf("127.0.0.1:%d", videoPort)
-	runVideoListenerAt(ctx, store, addr, "usb", nil)
-}
-
 func runVideoListenerAt(ctx context.Context, store *settingsStore, addr string, transport string, listenerFactory func(string) (net.Listener, error)) {
 	var (
 		ln  net.Listener

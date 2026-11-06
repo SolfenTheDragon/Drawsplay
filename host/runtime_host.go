@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net"
 )
 
 // runHostRuntime starts all host listeners and blocks until the runtime
 // stops. The stop callback is wired into the Web UI /api/stop endpoint.
 func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) error {
+	if ok, err := acquireInstanceLock(); !ok {
+		return fmt.Errorf("another DrawSplay host is already running (settings UI at http://127.0.0.1:%d)", webuiPort)
+	} else if err != nil {
+		log.Printf("Single-instance lock unavailable (%v); continuing", err)
+	}
 	cfg := store.get()
 	runDependencyPreflight(cfg)
 	recoverDisplayGuard()
@@ -26,10 +30,6 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	go releaseStaleVirtualDisplays()
 	startDisplayWatchdog(ctx, store)
 
-	// Video channel (best-effort: logs and disables itself if ffmpeg or the
-	// port is unavailable; input continues to work regardless).
-	go runVideoListener(ctx, store)
-
 	removeLegacyWiFiFiles()
 	// Paired mutual-TLS Wi-Fi: inert unless DRAWSPLAY_FEATURE_WIFI, an
 	// explicit interface and an existing pairing are all present.
@@ -39,24 +39,11 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	// Default USB transport: Android Open Accessory, without ADB or debugging.
 	startAOATransport(ctx, store)
 
-	// Input channel (blocking; owns process lifetime).
-	addr := fmt.Sprintf("127.0.0.1:%d", inputPort)
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		if anotherInstanceRunning() {
-			return fmt.Errorf("another DrawSplay host is already running (settings UI at http://127.0.0.1:%d)", webuiPort)
-		}
-		return fmt.Errorf("failed to listen on %s: %w", addr, err)
-	}
-	defer ln.Close()
-	log.Printf("Input listener on %s", addr)
+	// Loopback listeners for the optional adb reverse tunnel: open only while
+	// that setting is on (see adb_loopback.go).
+	go runADBLoopbackListeners(ctx, store)
 	log.Printf("Waiting for client (USB accessory; ADB reverse is opt-in)")
 
-	go func() {
-		<-ctx.Done()
-		_ = ln.Close()
-	}()
-
-	runInputListener(ctx, ln, store, "usb")
+	<-ctx.Done()
 	return nil
 }
