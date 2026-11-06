@@ -24,6 +24,10 @@ const ABS_Y: u16 = 0x01;
 const ABS_PRESSURE: u16 = 0x18;
 const ABS_TILT_X: u16 = 0x1a;
 const ABS_TILT_Y: u16 = 0x1b;
+/// Tilt resolution in units per radian, so 1 unit is 1 degree (180/pi = 57.3). libinput reads a
+/// tilt axis without a resolution as Wacom's physical +/-64 degrees, which squeezed our +/-90
+/// degree range to 71% (a 45 degree lean reached apps as 32 degrees).
+const TILT_UNITS_PER_RADIAN: i32 = 57;
 const ABS_MT_SLOT: u16 = 0x2f;
 const ABS_MT_POSITION_X: u16 = 0x35;
 const ABS_MT_POSITION_Y: u16 = 0x36;
@@ -127,8 +131,8 @@ impl Uinput {
             .with_absolute_axis(&abs(ABS_X, 0, AXIS_MAX, 100))?
             .with_absolute_axis(&abs(ABS_Y, 0, AXIS_MAX, 100))?
             .with_absolute_axis(&abs(ABS_PRESSURE, 0, PRESSURE_MAX, 0))?
-            .with_absolute_axis(&abs(ABS_TILT_X, -90, 90, 0))?
-            .with_absolute_axis(&abs(ABS_TILT_Y, -90, 90, 0))?
+            .with_absolute_axis(&abs(ABS_TILT_X, -90, 90, TILT_UNITS_PER_RADIAN))?
+            .with_absolute_axis(&abs(ABS_TILT_Y, -90, 90, TILT_UNITS_PER_RADIAN))?
             .build()?;
 
         let mouse = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
@@ -339,6 +343,15 @@ impl Uinput {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tilt_units_are_degrees_for_libinput() {
+        // libinput: degrees = value / resolution (radians) converted to degrees.
+        for deg in [1, 30, 45, 60, 90] {
+            let seen = (deg as f64 / TILT_UNITS_PER_RADIAN as f64).to_degrees();
+            assert!((seen - deg as f64).abs() < 0.6, "{deg} degrees arrive as {seen}");
+        }
+    }
 
     fn t(origin: (i32, i32), size: (u32, u32), desktop: (u32, u32)) -> Target {
         Target { origin, size, desktop }
