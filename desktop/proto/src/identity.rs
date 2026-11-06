@@ -130,8 +130,19 @@ fn clean_label(label: &str) -> String {
 /// Is `desc` (how a peer is described: its address) already trusted under a different key? That is what
 /// a reinstalled computer looks like, and also what someone who has taken over its address looks like.
 fn trusted_with_other_key(entries: &[(PublicKey, String)], key: &PublicKey, desc: &str) -> bool {
-    let desc = clean_label(desc);
-    entries.iter().any(|(k, label)| *label == desc.trim() && k != key)
+    let desc = without_port(clean_label(desc).trim());
+    entries.iter().any(|(k, label)| without_port(label) == desc && k != key)
+}
+
+/// Older hosts labelled clients `client at IP:PORT`, with the client's changing source port; compare
+/// such labels by address only.
+fn without_port(label: &str) -> String {
+    if let Some(rest) = label.strip_prefix("client at ") {
+        if let Ok(a) = rest.parse::<std::net::SocketAddr>() {
+            return format!("client at {}", a.ip().to_canonical());
+        }
+    }
+    label.to_string()
 }
 
 /// Trusted peer keys, stored one hex key per line (`#` starts a comment, e.g. a name).
@@ -328,6 +339,16 @@ pub fn authorize_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_port_labels_match_the_address_only() {
+        let other = [9u8; 32];
+        let entries = vec![(other, "client at 192.168.1.20:51234".to_string())];
+        assert!(trusted_with_other_key(&entries, &[1u8; 32], "client at 192.168.1.20"));
+        assert!(!trusted_with_other_key(&entries, &other, "client at 192.168.1.20"));
+        assert!(!trusted_with_other_key(&entries, &[1u8; 32], "client at 192.168.1.21"));
+        assert_eq!(without_port("host at 10.0.0.5:47800"), "host at 10.0.0.5:47800", "host labels keep their port");
+    }
 
     fn tmp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("dd-test-{name}-{}", std::process::id()));

@@ -593,9 +593,13 @@ fn serve(
         }
     }
     let mut ahead: Vec<u8> = Vec::new();
-    let answer = authorize_with(&session, &mut trust, &format!("client at {peer}"), a.trust_all, &mut |desc, sas| {
-        pairing::ask(desc, sas, PROMPT_TIMEOUT, || peer_alive(&stream, &mut ahead))
-    });
+    // The label is how the trust list names the client, and what the "trusted before with a different
+    // key" warning compares: the address only, since the source port changes on every connection.
+    let peer_label = stream.peer_addr().map(|p| p.ip().to_canonical().to_string()).unwrap_or_else(|_| peer.clone());
+    let answer =
+        authorize_with(&session, &mut trust, &format!("client at {peer_label}"), a.trust_all, &mut |desc, sas| {
+            pairing::ask(desc, sas, PROMPT_TIMEOUT, || peer_alive(&stream, &mut ahead))
+        });
     if let Some(ip) = peer_ip.filter(|_| prompt_guard.is_some()) {
         let mut blocked = shared.pair_blocked.lock().unwrap_or_else(|e| e.into_inner());
         if matches!(answer, Ok(true)) {
