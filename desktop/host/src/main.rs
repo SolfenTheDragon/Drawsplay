@@ -16,6 +16,7 @@ mod linux_display;
 mod pairing;
 #[cfg(target_os = "linux")]
 mod portal;
+mod ratecontrol;
 mod status;
 #[cfg(windows)]
 mod vdisplay;
@@ -223,6 +224,7 @@ fn ffmpeg_command(
     fps: u32,
     piped: Piped,
     gdi: bool,
+    kbps: u32,
 ) -> Command {
     let _ = gdi;
     let piped_nut = piped == Piped::Nut;
@@ -278,7 +280,7 @@ fn ffmpeg_command(
     if let Some(p) = enc.pix_fmt() {
         c.args(["-pix_fmt", p]);
     }
-    c.args(enc.codec_args(a.bitrate_kbps, fps * 2));
+    c.args(enc.codec_args(kbps, fps * 2));
     c.args(["-f", "h264", "-"]);
     #[cfg(windows)]
     {
@@ -503,6 +505,7 @@ fn launch(
     enc: Encoder,
     fps: u32,
     gdi: bool,
+    kbps: u32,
 ) -> std::io::Result<(std::process::Child, Option<std::process::Child>)> {
     let (w, h) = display.target.size;
     let mut recorder: Option<std::process::Child> = None;
@@ -523,7 +526,7 @@ fn launch(
         (true, true) => Piped::Raw,
         (true, false) => Piped::Nut,
     };
-    let mut cmd = ffmpeg_command(a, enc, display.target.origin, w, h, fps, piped, gdi);
+    let mut cmd = ffmpeg_command(a, enc, display.target.origin, w, h, fps, piped, gdi, kbps);
     if let Some(r) = recorder.as_mut() {
         cmd.stdin(Stdio::from(r.stdout.take().unwrap()));
     }
@@ -752,7 +755,10 @@ fn serve(
     // Windows: ddagrab first, gdigrab once ddagrab has been seen to fail (see windows_capture_args).
     let mut gdi = GDI_ONLY.load(Ordering::SeqCst);
     let uses_ddagrab = cfg!(windows) && a.source != Source::Test;
-    let (mut ff, mut recorder) = launch(a, &display, enc, fps, gdi)?;
+    // Bitrate ladder (see ratecontrol.rs); the small send buffer makes a slow link show up as slow writes.
+    let mut rate = ratecontrol::RateController::new(a.bitrate_kbps, Instant::now());
+    set_send_buffer(&raw, ratecontrol::send_buffer_bytes(rate.kbps()));
+    let (mut ff, mut recorder) = launch(a, &display, enc, fps, gdi, rate.kbps())?;
     let video = ff.stdout.take().unwrap();
 
     // Writes from two threads (video + pong) must not interleave.
@@ -830,7 +836,7 @@ fn serve(
                 gdi_pending = true;
                 gdi = true;
                 kill_all(&mut ff, &mut recorder);
-                match launch(a, &display, enc, fps, gdi) {
+                match launch(a, &display, enc, fps, gdi, rate.kbps()) {
                     Ok((f, r)) => {
                         ff = f;
                         recorder = r;
@@ -845,7 +851,7 @@ fn serve(
                 downgrade_pending = true;
                 kill_all(&mut ff, &mut recorder);
                 enc = Encoder::Software;
-                match launch(a, &display, enc, fps, gdi) {
+                match launch(a, &display, enc, fps, gdi, rate.kbps()) {
                     Ok((f, r)) => {
                         ff = f;
                         recorder = r;
@@ -860,10 +866,30 @@ fn serve(
             Err(e) => break Err(e),
         };
         let msg = Message::Video { pts_us: start.elapsed().as_micros() as u64, key: false, data };
+        let began = Instant::now();
         if let Err(e) = write_message(&mut *writer.lock().unwrap(), &msg) {
             break Err(e);
         }
         sent_any = true;
+        let now = Instant::now();
+        if rate.on_write(now.duration_since(began), now) || rate.maybe_step_up(now) {
+            eprintln!(
+                "link {}: restarting the encoder at {} kbit/s",
+                if rate.kbps() < a.bitrate_kbps { "congested or recovering" } else { "clear" },
+                rate.kbps()
+            );
+            kill_all(&mut ff, &mut recorder);
+            set_send_buffer(&raw, ratecontrol::send_buffer_bytes(rate.kbps()));
+            match launch(a, &display, enc, fps, gdi, rate.kbps()) {
+                Ok((f, r)) => {
+                    ff = f;
+                    recorder = r;
+                    chunks = spawn_reader(ff.stdout.take().unwrap());
+                    rate.restarted(Instant::now());
+                }
+                Err(e) => break Err(e),
+            }
+        }
         if downgrade_pending {
             downgrade_pending = false;
             shared.software_only.store(true, Ordering::SeqCst);
@@ -877,6 +903,36 @@ fn serve(
     let _ = raw.shutdown(std::net::Shutdown::Both);
     let _ = input.join();
     result
+}
+
+/// Size the socket's kernel send buffer (best effort).
+fn set_send_buffer(s: &TcpStream, bytes: usize) {
+    let v = i32::try_from(bytes).unwrap_or(i32::MAX);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        // SAFETY: setsockopt with a pointer to a live i32 and its size.
+        unsafe {
+            libc::setsockopt(
+                s.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                &v as *const i32 as *const libc::c_void,
+                std::mem::size_of::<i32>() as libc::socklen_t,
+            );
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawSocket;
+        use windows::Win32::Networking::WinSock::{setsockopt, SOCKET, SOL_SOCKET, SO_SNDBUF};
+        // SAFETY: setsockopt on a socket we own, with a 4-byte value.
+        unsafe {
+            setsockopt(SOCKET(s.as_raw_socket() as usize), SOL_SOCKET, SO_SNDBUF, Some(&v.to_ne_bytes()));
+        }
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    let _ = (s, v);
 }
 
 /// Say, at most every 30 seconds, that connections from outside the allowed networks were dropped.
