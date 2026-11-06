@@ -288,7 +288,8 @@ pub fn key_commands(
 
 /// Decide whether to accept `session`'s peer. Known keys pass silently. Unknown keys need both
 /// people to see the same code and answer yes on this machine; accepted keys are remembered.
-/// `trust_all` skips the question (testing only; it defeats man-in-the-middle protection).
+/// `trust_all` accepts an unknown peer for this connection only, without asking and without
+/// remembering it (testing only; it defeats man-in-the-middle protection).
 pub fn authorize(
     session: &crate::secure::Session,
     store: &mut TrustStore,
@@ -324,12 +325,12 @@ pub fn authorize_with(
              that address. Accept only if you know why the key changed."
         );
     }
-    let accept = if trust_all {
-        eprintln!("WARNING: trusting new peer {peer_desc} without confirmation (--trust-all)");
-        true
-    } else {
-        ask(peer_desc, &session.sas)?
-    };
+    if trust_all {
+        // For this connection only: a testing flag must not leave lasting trust behind.
+        eprintln!("WARNING: accepting unknown peer {peer_desc} for this session without confirmation (--trust-all)");
+        return Ok(true);
+    }
+    let accept = ask(peer_desc, &session.sas)?;
     if accept {
         store.add(session.remote_public, peer_desc)?;
     }
