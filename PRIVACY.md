@@ -25,8 +25,8 @@ On the computer, DrawSplay stores settings (bitrate, resolution, input toggles, 
 
 ## Network access
 
-- The host listens only on localhost (`127.0.0.1`) for the tablet channels and the settings web page. The tablet reaches them over USB.
-- **Wi-Fi mode is off by default.** If you enable it, the host listens on your local network, protected by TLS and a pairing token, and advertises itself via DNS-SD (`_drawsplay._tcp`). Traffic stays on your local network.
+- The settings web page listens only on localhost (`127.0.0.1`). The tablet reaches the host over USB (USB accessory mode, no network port); only the optional ADB tunnel opens two localhost ports, and only while it is enabled.
+- **Wi-Fi mode is off by default.** If you enable it and pair a tablet with the code shown on the computer, the tablet advertises itself on your local network via DNS-SD (`_drawsplay-tablet._tcp`) and the host connects to it over mutually authenticated TLS, using the keys exchanged during pairing. Traffic stays on your local network.
 - On Windows only, the installer downloads the newest ffmpeg release compatible with your Windows version and CPU architecture from GitHub (gyan.dev essentials builds, or BtbN builds as a fallback / for ARM64), verifying the SHA-256 published with the release. The host does the same at runtime if ffmpeg is missing and automatic tool download is enabled. adb is never downloaded. Your IP address is visible to those servers as with any download; no DrawSplay data is sent. You can disable automatic downloads in the settings page.
 - On Linux, the install script may use your package manager (`apt`) to install dependencies.
 

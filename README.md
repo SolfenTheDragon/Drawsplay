@@ -135,7 +135,7 @@ On Linux the frame rate is limited to 60, except on X11 hosts with VA-API (Intel
 
 **Linux shows a mirror instead of an extra display.**
 - Wayland: use GNOME, KDE Plasma 6, sway or Hyprland. Other Wayland desktops can't extend and show only X11 apps.
-- X11: the GPU needs an unplugged HDMI port (`ls /sys/class/drm | grep HDMI`); DrawSplay forces it on when the tablet connects and asks for your password once (`pkexec`), or run the host with passwordless `sudo`. Without a spare HDMI port, set `DRAWSPLAY_X11_VKMS_AUTOLOAD=1` to let DrawSplay load `vkms`, or load it yourself with `sudo modprobe vkms`. vkms can crash the X session on some kernels (seen on Linux 7.0 OEM with the `modesetting` driver), which is why DrawSplay guards it and falls back to the HDMI port. The installer adds a udev rule (`70-drawsplay-drm-connector.rules`) so members of `plugdev` can force the HDMI port without a password; without it you get one prompt per boot. `DRAWSPLAY_X11_VKMS_AUTOLOAD=0` turns vkms off, `=1` overrides the guard. If the host or X server dies while a virtual display is being set up, DrawSplay remembers it (`display-guard.json` in its config folder), stops using that method for a week and falls back to the next one, or to mirroring. It also ignores vkms outputs once the kernel log shows the failure. When the tablet disconnects the display is switched off, but the port stays forced until you reboot or run `echo detect | sudo tee /sys/class/drm/card0-HDMI-A-1/status` (use your card and port); nothing is kept across reboots.
+- X11: the GPU needs an unplugged HDMI port (`ls /sys/class/drm | grep HDMI`); DrawSplay forces it on when the tablet connects and asks for your password once (`pkexec`; with the helper the installer adds, the prompt names DrawSplay instead of asking to run a shell as root), or run the host with passwordless `sudo`. Without a spare HDMI port, set `DRAWSPLAY_X11_VKMS_AUTOLOAD=1` to let DrawSplay load `vkms`, or load it yourself with `sudo modprobe vkms`. vkms can crash the X session on some kernels (seen on Linux 7.0 OEM with the `modesetting` driver), which is why DrawSplay guards it and falls back to the HDMI port. The installer adds a udev rule (`70-drawsplay-drm-connector.rules`) so members of `plugdev` can force the HDMI port without a password; without it you get one prompt per boot. `DRAWSPLAY_X11_VKMS_AUTOLOAD=0` turns vkms off, `=1` overrides the guard. If the host or X server dies while a virtual display is being set up, DrawSplay remembers it (`display-guard.json` in its config folder), stops using that method for a week and falls back to the next one, or to mirroring. It also ignores vkms outputs once the kernel log shows the failure. When the tablet disconnects the display is switched off, but the port stays forced while the host runs (so reconnecting needs no new prompt); it is released when the host exits, or run `echo detect | sudo tee /sys/class/drm/card0-HDMI-A-1/status` (use your card and port); nothing is kept across reboots.
 - The host log states the reason, and the settings page shows warnings.
 
 **Multi-touch gestures don't work in an X11 app.** Some apps need touch enabled; for Firefox start it with `MOZ_USE_XINPUT2=1 firefox`.
@@ -208,13 +208,13 @@ Developer tools for Wi-Fi testing are in [`tools/wifi_enrollment`](tools/wifi_en
 
 Any mix works: Windows or Linux host with a Windows or Linux client.
 
-More detail: [`desktop/docs/architecture.md`](desktop/docs/architecture.md) (protocol and session lifecycle) [`desktop/docs/known-issues.md`](desktop/docs/known-issues.md) (limitations and fixed bugs) and [`desktop/docs/open-bugs.md`](desktop/docs/open-bugs.md) (every open bug and unverified item, with locations and suggested fixes).
+The protocol, session lifecycle and limits are described in the sections below.
 
 ### Requirements
 
 - `ffmpeg` on the PATH of both computers (capture, encode and decode use it).
 - A network path between them: Wi-Fi, Ethernet, or any USB network link (USB bridge cable, Thunderbolt/USB4 networking, Linux `g_ether`). Two PCs cannot talk over a plain USB cable, because neither can act as a USB device.
-- **Windows host, extra monitor:** the DrawSplay virtual display driver (installed by the DrawSplay installer). See `desktop/docs/known-issues.md`.
+- **Windows host, extra monitor:** the DrawSplay virtual display driver (installed by the DrawSplay installer). Capture uses ffmpeg's `ddagrab` (ffmpeg 6.0 or newer); older ffmpeg builds fall back to `gdigrab`, which can be offset or cropped at display scaling above 100%.
 - **Linux host, extra monitor:** an X11 session and a spare RandR output (see "Linux virtual display"), or a Wayland session (see "Wayland"): sway and Hyprland with `wf-recorder`, or GNOME, KDE and others through the desktop portal with `gstreamer1.0-tools` and `gstreamer1.0-pipewire`.
 - **Linux host, touch/pen/full keyboard:** access to `/dev/uinput` (see "Linux input").
 
@@ -262,14 +262,14 @@ Dependencies are checked against the RustSec advisory database in CI every week 
 
 ### Fake displays and the web UI
 
-`dd-host --remove-fake-displays` (Linux) removes every fake display (a spare HDMI/DP connector forced on without a monitor, an active `Virtual*` output, extra headless Wayland outputs) and leaves your real monitors alone; the host also does this at start-up, when the last session ends and when it is stopped, whoever created the display.
+`dd-host --remove-fake-displays` (Linux) removes every fake display (a spare HDMI/DP connector forced on without a monitor, an active `Virtual*` output, extra headless Wayland outputs) and leaves your real monitors alone; the host also does this at start-up, when the last session ends and when it is stopped, whoever created the display. Displays another running DrawSplay program is using are left alone: both hosts record what they use in `$XDG_RUNTIME_DIR/drawsplay/display-claims.json`. Intel `VIRTUAL*` outputs are also left alone while `intel-virtual-output` runs, because they carry real monitors.
 
-While running, `dd-host` writes `status.json` into its config folder; the DrawSplay web UI (Android host) reads it to show a connected PC client and can end that session through a `disconnect-request` file (the client is told not to reconnect).
+While running, `dd-host` serves a small control endpoint on a random loopback port, announced with a secret token in `control.json` in its config folder; the DrawSplay web UI (Android host) uses it to show a connected PC client and to end that session (the client is told not to reconnect). `dd-host` also still writes `status.json` and watches for a `disconnect-request` file, for older web UIs. One `dd-host` runs per config folder; `DRAWSPLAY_DESKTOP_CONFIG` moves the host's folder for both programs.
 
 ### Connections and timeouts
 
 - The host serves one client at a time by default; `--max-clients N` (1-8) serves several at once, each on its own virtual monitor, and further clients are refused immediately. Fake displays are cleared only when the last session ends, so one client leaving never removes another's monitor. Each connection is handled on its own thread, so a silent or slow stranger cannot block a real client.
-- A stranger has 15 seconds in total for the whole handshake. At most 8 connections (3 from one address) can be unfinished at once, and only one pairing question can be on screen; it is withdrawn after 2 minutes or as soon as the other computer disconnects, and an address whose pairing was declined or abandoned is not asked again for 30 seconds.
+- A stranger has 6 seconds for the cryptographic handshake, and 15 seconds for each step after it. At most 8 connections (3 from one address) can be unfinished at once, and only one pairing question can be on screen; it is withdrawn after 2 minutes or as soon as the other computer disconnects, and an address whose pairing was declined or abandoned is not asked again for 30 seconds.
 - A connected side that hears nothing for 10 seconds ends the session (the client pings every 2 seconds, the host streams continuously). The client then says "host stopped responding". If the connection had been working, the client reconnects by itself (backoff 0.5 s to 5 s, for up to 60 s after the last good connection) and shows the last frame meanwhile; a first connection that fails reports the error at once. Closing the window stops it.
 - On a first pairing the host waits up to 5 minutes for the other person to confirm the code.
 
@@ -291,7 +291,7 @@ Create virtual devices through `/dev/uinput`: run `install-linux.sh --udev` from
 
 ### Linux virtual display
 
-On X11 the host lights up a spare RandR output as an extra monitor (preferring outputs named `VIRTUAL*`, then disconnected ports; it tries each in turn until one accepts). Ctrl+C or SIGTERM switches the output off again. Many GPU drivers refuse to enable a port with nothing plugged in; in that case use an HDMI/DisplayPort dummy plug, the `vkms` kernel module, or force the connector with the `video=` kernel parameter. When no virtual display can be created the host says so and mirrors the primary screen instead (`--require-virtual` makes it fail instead). Wayland sessions are not supported yet.
+On X11 the host lights up a spare RandR output as an extra monitor (preferring outputs named `VIRTUAL*`, then disconnected ports; it tries each in turn until one accepts). Ctrl+C or SIGTERM switches the output off again. Many GPU drivers refuse to enable a port with nothing plugged in; in that case use an HDMI/DisplayPort dummy plug, the `vkms` kernel module, or force the connector with the `video=` kernel parameter. When no virtual display can be created the host says so and mirrors the primary screen instead (`--require-virtual` makes it fail instead). Wayland sessions are covered under "Wayland" below.
 
 ### Building
 
@@ -304,7 +304,7 @@ packaging/package-windows.ps1  # dist/DrawSplayDesktop-windows-x86_64-vX.zip
 packaging/package-linux.sh     # dist/DrawSplayDesktop-linux-x86_64-vX.tar.gz
 ```
 
-Both packages include the project README and the `docs/` folder.
+Both packages include the project README (and the `docs/` folder when it is present in the source tree; it is not part of the public repository).
 
 #### Wayland
 
@@ -313,7 +313,7 @@ The host picks a backend from the session:
 - **sway and Hyprland:** the extra monitor is created through the compositor (sway: `swaymsg create_output`, which sway only allows on its headless or nested backends; Hyprland: `hyprctl output create headless`) and captured with `wf-recorder`. When no virtual output can be made the host mirrors the primary output. Mouse input uses an absolute `uinput` device, so `/dev/uinput` access is required as for touch and pen.
 - **GNOME, KDE and other desktops (xdg-desktop-portal):** the host asks the desktop's ScreenCast and RemoteDesktop portals for a screen. Your desktop shows its own "share your screen" dialog the first time each session starts; accept it on the host. A virtual monitor is requested when the portal offers one (its size is chosen by the compositor and reported to the client), otherwise you pick a monitor in the dialog and it is mirrored. The screen is read with `gst-launch-1.0 pipewiresrc` (packages `gstreamer1.0-tools`, `gstreamer1.0-pipewire`). Keyboard, mouse and touch go through the portal; a pen uses `uinput` when available, else acts as a finger. If the portal has no RemoteDesktop, only the screen is taken and input falls back to `uinput`.
 
-Verified: sway on a headless compositor, the portal protocol against a mock portal, and the capture pipeline against a real PipeWire node. **Not run against a real GNOME or KDE session yet**; expect rough edges (see `desktop/docs/open-bugs.md`, DD-004).
+Verified: sway on a headless compositor, the portal protocol against a mock portal, and the capture pipeline against a real PipeWire node. **Not run against a real GNOME or KDE session yet**; expect rough edges.
 
 #### ARM
 
@@ -329,17 +329,17 @@ From `desktop/`, `cargo run -p dd-client --example send_input -- HOST:PORT` repl
 
 Verified: protocol, encryption and pairing (unit tests, and live on Windows and in a Linux container, including a slow second person at first pairing); connection handling (a silent stranger does not block a real client, a killed client frees the host, a frozen host is detected by the client after 10 s); streaming and decoding on both OSes (about 60 fps at 1080p, 0.2 ms loopback round trip with NVENC, measured before the latest changes); the Windows virtual monitor (plug, extend, requested size, removal); Windows pen position tracking and touch injection acceptance; Linux fallback paths under Xvfb; Linux `uinput` device creation in the kernel; scancode, CVT mode-line and xrandr parsing tables.
 
-Not verified: the mouse path (`SetCursorPos`) and the driver connector-slot fix on a live Windows virtual monitor; Windows display scaling other than 100% (the host warns at start-up); the Linux virtual display on real hardware (needs a GPU with a spare output; only parsing and mode-line maths are tested); Linux `uinput` event delivery (the test kernel has no evdev handler to read events back); Windows keyboard injection into a real application; Wayland; macOS (not supported); real-network behaviour such as packet loss.
+Not verified: the mouse path (`SetCursorPos`) and the driver connector-slot fix on a live Windows virtual monitor; Windows display scaling other than 100% (capture now uses `ddagrab`, which works in physical pixels, but this has not been confirmed on hardware); the Linux virtual display on real hardware (needs a GPU with a spare output; only parsing and mode-line maths are tested); Linux `uinput` event delivery (the test kernel has no evdev handler to read events back); Windows keyboard injection into a real application; Wayland; macOS (not supported); real-network behaviour such as packet loss.
 
 ### Known limitations
 
 - Pen tilt is one-dimensional (the OS gives the client only the pen's altitude angle).
 - One client at a time per host unless `--max-clients` is raised (not tried on real hardware; Windows allows at most 8 monitors).
-- The image is shown 1:1 (never scaled); if the client window is resized, the picture is centered.
+- The image is shown 1:1 unless `--fit` is given; if the client window is resized, the picture is centered.
+- When the network is slower than the stream, the host lowers the bitrate (restarting the encoder one rung down; at most once per 1.5 s, never below an eighth of `--bitrate-kbps`) and raises it again after 30 s without congestion. Its socket send buffer holds only about 100 ms of video, so lag cannot build up for seconds.
 - Video is cut into network chunks rather than whole frames, and keyframes cannot be requested. TCP is reliable, and every session starts a fresh encoder, so a client always sees the stream from its first frame.
 - No audio.
 - The pairing prompt reads the terminal (see manual pairing above for services).
-- See `desktop/docs/known-issues.md` for the Windows driver limit and the list of open improvements.
 
 ## Privacy
 
