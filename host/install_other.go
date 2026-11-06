@@ -26,7 +26,13 @@ type installerOptions struct {
 	InstallElevated   string
 	WinUSBBind        bool // internal: elevated WinUSB driver setup (scheduled task / UAC)
 	UninstallElevated string
+	UninstallRequest  uninstallRequest
 	NoArgs            bool
+}
+
+type uninstallRequest struct {
+	RemoveVDD   bool
+	RemoveZadig bool
 }
 
 func runInstallerMode(o installerOptions) (bool, int) {

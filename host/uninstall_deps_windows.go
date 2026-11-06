@@ -87,8 +87,6 @@ func (p uninstallDepsPlan) request(removeShared bool) uninstallRequest {
 	}
 }
 
-func uninstallRequestPath(resultPath string) string { return resultPath + ".request.json" }
-
 // removeUninstallDeps (elevated) removes the requested dependencies. Driver
 // removal problems are reported as warnings: DrawSplay itself is gone either
 // way and the user can remove leftovers from Device Manager.

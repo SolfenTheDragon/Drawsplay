@@ -76,6 +76,8 @@ func main() {
 	noAutostart := flag.Bool("no-autostart", false, "Windows install: do not start DrawSplay at sign-in (enable later in settings)")
 	installElevated := flag.String("install-elevated", "", "internal: elevated install phase (result file path)")
 	uninstallElevated := flag.String("uninstall-elevated", "", "internal: elevated uninstall phase (result file path)")
+	uninstallRemoveVDD := flag.Bool("uninstall-remove-vdd", false, "internal: elevated uninstall phase also removes the Parsec virtual display driver")
+	uninstallRemoveZadig := flag.Bool("uninstall-remove-zadig", false, "internal: elevated uninstall phase also removes Zadig WinUSB bindings")
 	flag.Parse()
 	attachParentConsole()
 
@@ -92,6 +94,7 @@ func main() {
 		InstallElevated:   *installElevated,
 		WinUSBBind:        *winusbBind,
 		UninstallElevated: *uninstallElevated,
+		UninstallRequest:  uninstallRequest{RemoveVDD: *uninstallRemoveVDD, RemoveZadig: *uninstallRemoveZadig},
 		NoArgs:            len(os.Args) == 1,
 	}); handled {
 		os.Exit(code)

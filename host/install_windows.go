@@ -69,7 +69,10 @@ type installerOptions struct {
 	InstallElevated   string // internal: elevated install phase, result path
 	WinUSBBind        bool   // internal: elevated WinUSB driver setup (scheduled task / UAC)
 	UninstallElevated string // internal: elevated uninstall phase, result path
-	NoArgs            bool
+	// internal: the dependency choices for the elevated uninstall phase. They travel on the
+	// command line, not in a file in the user's writable temp folder.
+	UninstallRequest uninstallRequest
+	NoArgs           bool
 }
 
 type uninstallResult struct {
@@ -91,7 +94,7 @@ func runInstallerMode(o installerOptions) (handled bool, code int) {
 	case o.WinUSBBind:
 		return true, runWinUSBBindMode()
 	case o.UninstallElevated != "":
-		return true, runUninstallElevated(o.UninstallElevated)
+		return true, runUninstallElevated(o.UninstallElevated, o.UninstallRequest)
 	case o.Uninstall || isUninstallerExeName(exe):
 		return true, runUninstall(exe, o)
 	case o.Install, o.NoArgs && isInstallerExeName(exe):
@@ -655,15 +658,17 @@ func runUninstall(exe string, o installerOptions) int {
 	resultPath := filepath.Join(os.TempDir(), fmt.Sprintf("drawsplay-uninstall-%d.json", os.Getpid()))
 	_ = os.Remove(resultPath)
 	defer os.Remove(resultPath)
-	reqPath := uninstallRequestPath(resultPath)
-	defer os.Remove(reqPath)
 	var problems []string
-	if err := writeJSONAtomic(reqPath, req); err != nil {
-		problems = append(problems, fmt.Sprintf("write dependency choices: %v", err))
+	args := fmt.Sprintf(`-uninstall-elevated "%s"`, resultPath)
+	if req.RemoveVDD {
+		args += " -uninstall-remove-vdd"
+	}
+	if req.RemoveZadig {
+		args += " -uninstall-remove-zadig"
 	}
 	if isProcessElevated() {
-		runUninstallElevated(resultPath)
-	} else if err := runElevatedAndWait(exe, fmt.Sprintf(`-uninstall-elevated "%s"`, resultPath), installElevateTimeout); err != nil {
+		runUninstallElevated(resultPath, req)
+	} else if err := runElevatedAndWait(elevatedUninstallerExe(exe, dir), args, installElevateTimeout); err != nil {
 		problems = append(problems, fmt.Sprintf("administrator phase: %v", err))
 	}
 	var res uninstallResult
@@ -743,10 +748,22 @@ func runUninstall(exe string, o installerOptions) int {
 }
 
 // runUninstallElevated is the administrator phase of uninstall.
-func runUninstallElevated(resultPath string) int {
+func runUninstallElevated(resultPath string, req uninstallRequest) int {
 	var res uninstallResult
 	dir := defaultInstallDir()
 	stopProcessesInDir(dir)
+	// Started from the installed copy: move it out of the folder (a running image can be renamed)
+	// into a protected staging folder, so the folder can be deleted; the copy is deleted on exit.
+	if self, err := os.Executable(); err == nil && pathInsideDir(self, dir) {
+		if stage, err := protectedStageDir("DrawSplay-uninstall-"); err == nil {
+			moved := filepath.Join(stage, filepath.Base(self))
+			if err := os.Rename(self, moved); err == nil {
+				defer scheduleTreeDelete(stage)
+			} else {
+				_ = os.Remove(stage)
+			}
+		}
+	}
 	for _, task := range []string{winusbBindTaskName} {
 		if out, err := runHiddenCommand(schtasksPath(), "/delete", "/tn", task, "/f"); err != nil {
 			if !strings.Contains(strings.ToLower(out), "cannot find") && !strings.Contains(strings.ToLower(out), "does not exist") {
@@ -770,12 +787,6 @@ func runUninstallElevated(resultPath string) int {
 	if rmErr != nil {
 		res.Errors = append(res.Errors, fmt.Sprintf("remove %s: %v", dir, rmErr))
 	}
-	var req uninstallRequest
-	if data, err := os.ReadFile(uninstallRequestPath(resultPath)); err == nil {
-		if err := json.Unmarshal(data, &req); err != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("read dependency choices: %v", err))
-		}
-	}
 	removeUninstallDeps(req, &res)
 	if err := writeJSONAtomic(resultPath, res); err != nil {
 		return 1
@@ -784,6 +795,31 @@ func runUninstallElevated(resultPath string) int {
 		return 1
 	}
 	return 0
+}
+
+// elevatedUninstallerExe picks the program to run with administrator rights.
+// The installed copy lives in the administrator-only install folder, so
+// nothing running as the user can swap it between the UAC prompt and its
+// start; the temporary copy in the user's temp folder could be. A portable
+// uninstall (nothing installed) has only its own executable.
+func elevatedUninstallerExe(exe, dir string) string {
+	installed := filepath.Join(dir, installHostExeName)
+	if fileExists(installed) {
+		return installed
+	}
+	return exe
+}
+
+// scheduleTreeDelete removes dir (holding this process's executable) after
+// the process exits.
+func scheduleTreeDelete(dir string) {
+	q := "'" + strings.ReplaceAll(dir, "'", "''") + "'"
+	script := "for($i=0;$i -lt 300;$i++){Remove-Item -LiteralPath " + q + " -Recurse -Force -ErrorAction SilentlyContinue; if(-not (Test-Path -LiteralPath " + q + ")){break}; Start-Sleep -Seconds 1}"
+	cmd := exec.Command(windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
+	hideChildWindow(cmd)
+	if err := cmd.Start(); err == nil {
+		_ = cmd.Process.Release()
+	}
 }
 
 // scheduleSelfDelete removes the temporary uninstaller copy after it exits.
