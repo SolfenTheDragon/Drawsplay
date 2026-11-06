@@ -44,8 +44,11 @@ jobs:
       - name: Vet host
         run: go vet ./...
 
-      - name: Test host
-        run: go test ./...
+      - name: Test host (race detector)
+        run: go test -race ./...
+
+      - name: Check for known vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
       - name: Build host (linux)
         run: go build -o host .
@@ -60,7 +63,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Rust
-        run: rustup toolchain install stable --profile minimal --component rustfmt
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
 
       - name: Install build libraries and ffmpeg
         run: |
@@ -70,6 +73,9 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --release --all-targets --locked -- -D warnings
 
       - name: Test DrawSplay Desktop
         run: cargo test --release --locked
@@ -90,6 +96,28 @@ jobs:
 
       - name: Test host (windows)
         run: go test ./...
+
+      - name: Build the Windows native media helper
+        working-directory: native/drawsplay-media-win
+        run: .\build.ps1
+
+  native-linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native/drawsplay-media
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install build libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential libva-dev libx11-dev libxext-dev \
+            libxdamage-dev libxfixes-dev zlib1g-dev
+
+      - name: Build the Linux native media helper (warnings are errors)
+        run: make CC="cc -Werror"
 
   android:
     runs-on: ubuntu-latest

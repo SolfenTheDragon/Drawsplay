@@ -764,6 +764,7 @@ fn serve(
     // Writes from two threads (video + pong) must not interleave.
     let writer = Arc::new(Mutex::new(stream));
     let w2 = writer.clone();
+    #[allow(clippy::clone_on_copy)] // an Arc on Linux, () elsewhere
     let portal = display.portal.clone();
     let input = thread::spawn(move || {
         // Whatever ends the input (disconnect, silence, even a panic), stop streaming to this peer too.
