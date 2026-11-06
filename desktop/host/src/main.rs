@@ -582,7 +582,14 @@ fn serve(
     let prompt_guard = if trusted_before || a.trust_all {
         None
     } else {
-        Some(shared.prompt.try_lock().map_err(|_| std::io::Error::other("another pairing is already in progress"))?)
+        // A panic during an earlier pairing poisons the lock; that question is over, so take it.
+        Some(match shared.prompt.try_lock() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(std::io::Error::other("another pairing is already in progress"))
+            }
+        })
     };
     let peer_ip = stream.peer_addr().ok().map(|p| access::peer_group(p.ip()));
     if prompt_guard.is_some() {
