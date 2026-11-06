@@ -58,18 +58,8 @@ func platformNativeHelperPath() string {
 			embeddedHelperOnce.path = path
 			return
 		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			log.Printf("Native media helper: cannot create %s: %v", dir, err)
-			return
-		}
-		tmp := path + ".tmp"
-		if err := os.WriteFile(tmp, data, 0o755); err != nil {
-			log.Printf("Native media helper: cannot extract: %v", err)
-			return
-		}
-		if err := os.Rename(tmp, path); err != nil {
-			_ = os.Remove(tmp)
-			log.Printf("Native media helper: cannot extract: %v", err)
+		if err := writeFileAtomic(path, data, 0o755); err != nil {
+			log.Printf("Native media helper: cannot extract to %s: %v", dir, err)
 			return
 		}
 		embeddedHelperOnce.path = path

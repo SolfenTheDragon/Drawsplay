@@ -415,7 +415,7 @@ func (l *linuxInjector) injectKey(msg *packet) {
 }
 
 func pressureValue(msg *packet) int32 {
-	p := clampF(float64(msg.Pressure))
+	p := clamp01(float64(msg.Pressure))
 	inContact := msg.Action == "down" || msg.Action == "move" || msg.Action == "pointer_down"
 	if inContact && p <= 0 {
 		p = 1.0 / pressureMax
@@ -434,16 +434,6 @@ func tiltValues(msg *packet) (int32, int32) {
 	return int32(deg * math.Sin(o)), int32(-deg * math.Cos(o))
 }
 
-func clampF(v float64) float64 {
-	if v < 0 {
-		return 0
-	}
-	if v > 1 {
-		return 1
-	}
-	return v
-}
-
 // tabletAbsCoords converts a normalized tablet position into absolute axis
 // values. The axes normally span the display the device is mapped to. On an
 // X11 extended display that nothing maps the device to (see
@@ -452,7 +442,7 @@ func clampF(v float64) float64 {
 // tablet's edges land on the centers of the display's edge pixels, keeping
 // input on the display.
 func tabletAbsCoords(nx, ny float64, t *captureTarget) (int32, int32) {
-	nx, ny = clampF(nx), clampF(ny)
+	nx, ny = clamp01(nx), clamp01(ny)
 	if t == nil || t.Kind != captureX11Grab || t.Rect.empty() || t.TabletMapped ||
 		t.DesktopWidth <= 0 || t.DesktopHeight <= 0 {
 		return int32(nx * absRange), int32(ny * absRange)

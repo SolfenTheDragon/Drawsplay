@@ -255,21 +255,13 @@ func loadSettings() settings {
 	return applyFeatureFlags(s)
 }
 
-// saveSettings writes the config file atomically (write temp + rename).
+// saveSettings writes the config file atomically.
 func saveSettings(s settings) error {
 	path, err := configPath()
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return writeJSONAtomic(path, s)
 }
 
 // settingsStore is the mutable, thread-safe runtime view of the settings.

@@ -24,6 +24,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -450,5 +451,5 @@ func multiSzHasID(buf []byte, want []uint16) bool {
 
 func equalFoldUTF16(s []uint16, want string) bool {
 	got := windows.UTF16ToString(s)
-	return equalFoldASCII(got, want)
+	return strings.EqualFold(got, want)
 }

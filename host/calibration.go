@@ -53,18 +53,9 @@ func (c deviceCalibration) validate() error {
 
 func (c deviceCalibration) apply(x, y float32) (float32, float32) {
 	c = c.normalized()
-	x = clampUnit(float64(x*c.ScaleX + c.OffsetX))
-	y = clampUnit(float64(y*c.ScaleY + c.OffsetY))
+	x = float32(clamp01(float64(x*c.ScaleX + c.OffsetX)))
+	y = float32(clamp01(float64(y*c.ScaleY + c.OffsetY)))
 	return x, y
-}
-
-func clampUnit(v float64) float32 {
-	if v < 0 {
-		v = 0
-	} else if v > 1 {
-		v = 1
-	}
-	return float32(v)
 }
 
 var calibrationState = struct {
@@ -119,15 +110,7 @@ func saveCalibrationsLocked() error {
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(calibrationState.values, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return writeJSONAtomic(path, calibrationState.values)
 }
 
 func calibrationForDevice(device string) deviceCalibration {
@@ -162,7 +145,7 @@ func setCalibrationForDevice(device string, c deviceCalibration) error {
 func bindSessionDevice(sessionID uint64, device string) {
 	device = strings.TrimSpace(device)
 	if device == "" {
-		device = "unknown-client"
+		device = unknownClientDevice
 	}
 	calibrationState.mu.Lock()
 	calibrationState.session[sessionID] = device

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
@@ -100,7 +99,7 @@ func runBackgroundTrayController(background bool, parent context.Context, cancel
 			menuStart.Enable()
 			menuStop.Disable()
 		}
-		statusLabel := trayConnectionStatusLabel(running, activeInputDevice())
+		statusLabel, _ := trayStatusText(running, activeInputDevice(), videoStatusInfo{})
 		menuStatus.SetTitle(statusLabel)
 	}
 
@@ -175,27 +174,4 @@ func openSettingsWebUI() {
 	if err := exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start(); err != nil {
 		log.Printf("Open Web UI failed: %v", err)
 	}
-}
-
-func trayConnectionStatusLabel(running bool, device string) string {
-	if !running {
-		return "🔴 Disconnected"
-	}
-	device = normalizeTrayDeviceName(device)
-	if device == "" {
-		return "🔴 Disconnected"
-	}
-	return "🟢 Connected: " + device
-}
-
-func normalizeTrayDeviceName(device string) string {
-	device = strings.TrimSpace(device)
-	device = strings.ReplaceAll(device, "\r", " ")
-	device = strings.ReplaceAll(device, "\n", " ")
-	device = strings.ReplaceAll(device, "\t", " ")
-	device = strings.TrimSpace(device)
-	if device == "" || device == "unknown-tablet" || device == "unknown-client" {
-		return ""
-	}
-	return device
 }

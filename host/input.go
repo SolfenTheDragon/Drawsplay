@@ -333,7 +333,7 @@ func handleHello(msg packet, id uint64) {
 	platform, clientType, clientVersion := normalizeClientIdentity(msg)
 	device := strings.TrimSpace(msg.Device)
 	if device == "" {
-		device = "unknown-client"
+		device = unknownClientDevice
 	}
 	bindSessionDevice(id, device)
 	bindSessionClientIdentity(id, clientIdentity{

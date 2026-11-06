@@ -124,27 +124,9 @@ func saveDisplayGuardLocked(st displayGuardState) {
 		_ = os.Remove(path)
 		return
 	}
-	data, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return
-	}
 	// Written and synced before the risky step starts: a crash right after
 	// must still leave the mark behind.
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return
-	}
-	_, werr := f.Write(data)
-	serr := f.Sync()
-	cerr := f.Close()
-	if werr != nil || serr != nil || cerr != nil {
-		_ = os.Remove(tmp)
-		return
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-	}
+	_ = writeJSONAtomic(path, st)
 }
 
 // displayGuardBegin records that a risky step for the method is starting.

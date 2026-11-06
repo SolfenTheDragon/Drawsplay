@@ -26,6 +26,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/binary"
 	"encoding/json"
 	"encoding/xml"
@@ -131,7 +132,7 @@ func shouldOfferInstall(exe string) bool {
 	if _, installed := loadInstallManifest(); installed {
 		return false
 	}
-	if pathInsideDir(exe, defaultInstallDir()) {
+	if pathWithin(exe, defaultInstallDir()) {
 		return false
 	}
 	if dir, err := userStateDir(); err == nil && fileExists(filepath.Join(dir, portableMarkerName)) {
@@ -283,7 +284,7 @@ func runInstall(exe string, o installerOptions) int {
 	summary := fmt.Sprintf("DrawSplay is installed in %s and is running in the system tray.\n"+
 		"%s Settings are stored in %s.\n\n"+
 		"Virtual display driver: %s\nWinUSB: %s",
-		m.InstallDir, startup, stateDir, valueOr(m.VDDDriver, "unknown"), summarizeWinUSB(m.WinUSB))
+		m.InstallDir, startup, stateDir, cmp.Or(m.VDDDriver, "unknown"), summarizeWinUSB(m.WinUSB))
 	if len(m.Warnings) > 0 {
 		summary += "\n\nWarnings:\n" + strings.Join(m.Warnings, "\n")
 		installerReport(o.Quiet, "DrawSplay installed", summary, showWarning)
@@ -597,13 +598,6 @@ func summarizeWinUSB(results map[string]string) string {
 	return fmt.Sprintf("%d installed, %d not installed (see the install log; reconnect the tablet or rerun the installer)", ok, failed)
 }
 
-func valueOr(s, fallback string) string {
-	if s == "" {
-		return fallback
-	}
-	return s
-}
-
 // -------------------------------------------------------------- uninstall
 
 func runUninstall(exe string, o installerOptions) int {
@@ -616,7 +610,7 @@ func runUninstall(exe string, o installerOptions) int {
 
 	// The uninstaller cannot delete the folder it runs from: relaunch from a
 	// temp copy and exit.
-	if os.Getenv(uninstallRelaunchEnv) == "" && pathInsideDir(exe, dir) {
+	if os.Getenv(uninstallRelaunchEnv) == "" && pathWithin(exe, dir) {
 		tmp := filepath.Join(os.TempDir(), fmt.Sprintf("DrawSplay-Uninstall-%d.exe", os.Getpid()))
 		if err := copyFileReplacing(exe, tmp); err != nil {
 			installerReport(o.Quiet, "DrawSplay uninstall failed", fmt.Sprintf("prepare uninstaller: %v", err), showError)
@@ -754,7 +748,7 @@ func runUninstallElevated(resultPath string, req uninstallRequest) int {
 	stopProcessesInDir(dir)
 	// Started from the installed copy: move it out of the folder (a running image can be renamed)
 	// into a protected staging folder, so the folder can be deleted; the copy is deleted on exit.
-	if self, err := os.Executable(); err == nil && pathInsideDir(self, dir) {
+	if self, err := os.Executable(); err == nil && pathWithin(self, dir) {
 		if stage, err := protectedStageDir("DrawSplay-uninstall-"); err == nil {
 			moved := filepath.Join(stage, filepath.Base(self))
 			if err := os.Rename(self, moved); err == nil {
@@ -854,7 +848,7 @@ func stopProcessesInDir(dir string) {
 		}
 		buf := make([]uint16, windows.MAX_LONG_PATH)
 		n := uint32(len(buf))
-		if windows.QueryFullProcessImageName(h, 0, &buf[0], &n) == nil && pathInsideDir(windows.UTF16ToString(buf[:n]), dir) {
+		if windows.QueryFullProcessImageName(h, 0, &buf[0], &n) == nil && pathWithin(windows.UTF16ToString(buf[:n]), dir) {
 			if windows.TerminateProcess(h, 0) == nil {
 				_, _ = windows.WaitForSingleObject(h, 5000)
 			}

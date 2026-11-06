@@ -79,3 +79,9 @@ func isPenTool(toolType string) bool {
 func isFingerRelease(action string) bool {
 	return action == "up" || action == "pointer_up" || action == "cancel"
 }
+
+// clamp01 limits v to [0, 1]; both injectors and calibration use it for
+// normalized coordinates and pressure.
+func clamp01(v float64) float64 {
+	return min(max(v, 0), 1)
+}

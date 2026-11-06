@@ -368,19 +368,6 @@ func writeRuntimeManifest(dir string, m runtimeManifest) error {
 	return os.WriteFile(filepath.Join(dir, runtimeManifestName), data, 0o644)
 }
 
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 // Runtime auto-download directories are never trusted merely because an
 // executable is present. Verify the executable and its DLLs against the
 // install manifest (or the legacy pinned hashes) before using it.
@@ -390,7 +377,7 @@ func verifyBundledToolCandidate(candidate, tool string) bool {
 		return false
 	}
 	runtimeRoot := filepath.Join(exeDir, "runtime", tool)
-	if !isPathWithin(candidate, runtimeRoot) {
+	if !pathWithin(candidate, runtimeRoot) {
 		return true // packaged, non-auto-downloaded bundle
 	}
 	hashes, err := runtimeExpectedHashes(runtimeRoot, candidate, tool)
@@ -494,7 +481,7 @@ func extractZipSubset(zipPath, destRoot string, mapName func(name string) (rel s
 			continue
 		}
 		target := filepath.Join(destRoot, filepath.FromSlash(rel))
-		if !isPathWithin(target, destRoot) {
+		if !pathWithin(target, destRoot) {
 			return errors.New("archive path traversal attempt blocked")
 		}
 		if err := extractFile(f, target); err != nil {
@@ -527,20 +514,4 @@ func extractFile(f *zip.File, target string) error {
 		return err
 	}
 	return out.Close()
-}
-
-func isPathWithin(path, root string) bool {
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(absRoot, absPath)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

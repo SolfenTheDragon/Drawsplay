@@ -107,11 +107,6 @@ func executableDir() (string, error) {
 	return filepath.Dir(path), nil
 }
 
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
-}
-
 // wellKnownToolPaths lists per-OS candidate locations for a tool binary.
 func wellKnownToolPaths(tool string) []string {
 	exe := tool

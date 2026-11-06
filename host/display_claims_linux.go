@@ -100,15 +100,7 @@ func withDisplayClaims(fn func(*displayClaimFile) bool) error {
 	if !fn(&f) {
 		return nil
 	}
-	data, err := json.Marshal(f)
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return writeJSONAtomic(path, f)
 }
 
 // claimDisplay records that this process holds the display.

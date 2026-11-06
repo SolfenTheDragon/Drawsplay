@@ -178,7 +178,14 @@ func signLocalDriverCatalog(dir, infName, catName, subject, friendlyName string)
 // certificate with thumbprint from the machine stores, or every one when
 // thumbprint is "".
 func removeWinUSBSigningCerts(thumbprint string) error {
-	return removeDriverSigningCertsMatching("$_.Subject -like '" + winusbSignerSubject + "*' -and ('" + thumbprint + "' -eq '' -or $_.Thumbprint -eq '" + thumbprint + "')")
+	return removeSigningCerts(winusbSignerSubject, thumbprint)
+}
+
+// removeSigningCerts deletes the DrawSplay signing certificates whose subject
+// starts with subject: the one with thumbprint, or every one when thumbprint
+// is "".
+func removeSigningCerts(subject, thumbprint string) error {
+	return removeDriverSigningCertsMatching("$_.Subject -like '" + subject + "*' -and ('" + thumbprint + "' -eq '' -or $_.Thumbprint -eq '" + thumbprint + "')")
 }
 
 // removeWinUSBSigningCertsExcept deletes DrawSplay driver-signing

@@ -220,16 +220,6 @@ func (w *winInjector) mapToScreen(msg *packet) (int32, int32) {
 	return x - int32(vx), y - int32(vy)
 }
 
-func clamp01(v float64) float64 {
-	if v < 0 {
-		return 0
-	}
-	if v > 1 {
-		return 1
-	}
-	return v
-}
-
 // liveRect returns the current desktop rect of the named GDI display,
 // re-queried at most every rectCacheTTL (caller holds w.mu). A resolution
 // or position change in display settings is reflected here within the TTL,

@@ -100,17 +100,9 @@ func rememberWindowsDisplayMode(nativeW, nativeH, w, h int) error {
 	} else {
 		modes[key] = windowsDisplayMode{Width: w, Height: h}
 	}
-	data, err := json.MarshalIndent(modes, "", "  ")
-	if err != nil {
-		return err
-	}
 	path, err := windowsDisplayModeStore.path()
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return writeJSONAtomic(path, modes)
 }
