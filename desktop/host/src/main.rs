@@ -1122,7 +1122,11 @@ fn main() {
                     }
                 });
             }
-            Err(e) => eprintln!("accept failed: {e}"),
+            Err(e) => {
+                // Persistent failures (out of file descriptors, say) would otherwise spin and flood the log.
+                eprintln!("accept failed: {e}");
+                thread::sleep(Duration::from_millis(200));
+            }
         }
     }
 }
