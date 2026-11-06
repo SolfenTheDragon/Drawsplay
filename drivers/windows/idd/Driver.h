@@ -231,8 +231,11 @@ namespace Microsoft
             // monitor; closing that handle removes it (RemoveMonitorsOwnedBy).
             NTSTATUS AddMonitor(DWORD Width, DWORD Height, DWORD RefreshHz, DWORD NativeWidth, DWORD NativeHeight, WDFFILEOBJECT Owner,
                 const std::vector<BYTE>& OwnerSid, _Out_ DWORD* pMonitorId);
-            NTSTATUS RemoveMonitor(DWORD MonitorId);
-            void RemoveAllMonitors();
+            // Removal is limited to monitors the caller may control: ones
+            // created through the same handle or by the same user, or any
+            // monitor for an administrator or SYSTEM (Privileged).
+            NTSTATUS RemoveMonitor(DWORD MonitorId, WDFFILEOBJECT Requester, const std::vector<BYTE>& CallerSid, bool Privileged);
+            void RemoveAllMonitors(WDFFILEOBJECT Requester, const std::vector<BYTE>& CallerSid, bool Privileged);
             // Called when a control handle closes: removes the monitors it
             // created and switches off export it enabled.
             void RemoveMonitorsOwnedBy(WDFFILEOBJECT Owner);
@@ -245,6 +248,8 @@ namespace Microsoft
             IDDCX_ADAPTER m_Adapter;
 
         protected:
+            struct ActiveMonitor;
+            static bool MayControl(const ActiveMonitor& m, WDFFILEOBJECT Requester, const std::vector<BYTE>& CallerSid, bool Privileged);
             NTSTATUS AddMonitorLocked(DWORD Width, DWORD Height, DWORD RefreshHz, DWORD NativeWidth, DWORD NativeHeight, WDFFILEOBJECT Owner,
                 const std::vector<BYTE>& OwnerSid, _Out_ DWORD* pMonitorId);
 

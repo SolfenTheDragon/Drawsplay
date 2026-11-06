@@ -180,7 +180,8 @@ func (d *iddDevice) RemoveMonitor(monitorID int) error {
 	return nil
 }
 
-// RemoveAllMonitors unplugs every monitor created through this handle.
+// RemoveAllMonitors unplugs every monitor this user created (any handle);
+// an elevated caller removes all of them. Other users' monitors are kept.
 func (d *iddDevice) RemoveAllMonitors() error {
 	if _, err := d.ioctl(iddIoctlRemoveAll, nil, nil); err != nil {
 		return fmt.Errorf("IDD remove all monitors: %w", err)

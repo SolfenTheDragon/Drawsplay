@@ -1030,7 +1030,20 @@ NTSTATUS IndirectDeviceContext::AddMonitorLocked(DWORD Width, DWORD Height, DWOR
     return STATUS_SUCCESS;
 }
 
-NTSTATUS IndirectDeviceContext::RemoveMonitor(DWORD MonitorId)
+bool IndirectDeviceContext::MayControl(const ActiveMonitor& m, WDFFILEOBJECT Requester, const vector<BYTE>& CallerSid, bool Privileged)
+{
+    if (Privileged || (m.Owner != nullptr && m.Owner == Requester))
+    {
+        return true;
+    }
+    // The device is open to every authenticated user, so another user's
+    // process must not be able to tear down this user's monitors.
+    const vector<BYTE>* OwnerSid = m.Export ? &m.Export->OwnerSid : nullptr;
+    return OwnerSid && !OwnerSid->empty() && !CallerSid.empty() &&
+        EqualSid((PSID) OwnerSid->data(), (PSID) CallerSid.data());
+}
+
+NTSTATUS IndirectDeviceContext::RemoveMonitor(DWORD MonitorId, WDFFILEOBJECT Requester, const vector<BYTE>& CallerSid, bool Privileged)
 {
     IDDCX_MONITOR Monitor = nullptr;
     AcquireSRWLockExclusive(&m_Lock);
@@ -1038,6 +1051,11 @@ NTSTATUS IndirectDeviceContext::RemoveMonitor(DWORD MonitorId)
     {
         if (it->Id == MonitorId)
         {
+            if (!MayControl(*it, Requester, CallerSid, Privileged))
+            {
+                ReleaseSRWLockExclusive(&m_Lock);
+                return STATUS_ACCESS_DENIED;
+            }
             Monitor = it->Monitor;
             m_Monitors.erase(it);
             break;
@@ -1056,11 +1074,22 @@ NTSTATUS IndirectDeviceContext::RemoveMonitor(DWORD MonitorId)
     return STATUS_SUCCESS;
 }
 
-void IndirectDeviceContext::RemoveAllMonitors()
+void IndirectDeviceContext::RemoveAllMonitors(WDFFILEOBJECT Requester, const vector<BYTE>& CallerSid, bool Privileged)
 {
     vector<ActiveMonitor> Monitors;
     AcquireSRWLockExclusive(&m_Lock);
-    Monitors.swap(m_Monitors);
+    for (auto it = m_Monitors.begin(); it != m_Monitors.end();)
+    {
+        if (MayControl(*it, Requester, CallerSid, Privileged))
+        {
+            Monitors.push_back(*it);
+            it = m_Monitors.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
     ReleaseSRWLockExclusive(&m_Lock);
 
     for (auto& m : Monitors)
@@ -1374,6 +1403,43 @@ static vector<BYTE> CallerSid(WDFREQUEST Request)
     return Sid;
 }
 
+static VOID CapturePrivileged(WDFREQUEST Request, PVOID Context)
+{
+    UNREFERENCED_PARAMETER(Request);
+    auto* Privileged = static_cast<bool*>(Context);
+    HANDLE Token = nullptr;
+    if (!OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &Token))
+    {
+        return;
+    }
+    BYTE AdminSid[SECURITY_MAX_SID_SIZE];
+    BYTE SystemSid[SECURITY_MAX_SID_SIZE];
+    DWORD AdminLen = sizeof(AdminSid), SystemLen = sizeof(SystemSid);
+    BOOL IsMember = FALSE;
+    if (CreateWellKnownSid(WinBuiltinAdministratorsSid, nullptr, AdminSid, &AdminLen) &&
+        CheckTokenMembership(Token, AdminSid, &IsMember) && IsMember)
+    {
+        *Privileged = true;
+    }
+    else if (CreateWellKnownSid(WinLocalSystemSid, nullptr, SystemSid, &SystemLen) &&
+        CheckTokenMembership(Token, SystemSid, &IsMember) && IsMember)
+    {
+        *Privileged = true;
+    }
+    CloseHandle(Token);
+}
+
+// Is the caller an (elevated) administrator or SYSTEM? False when unknown.
+static bool CallerPrivileged(WDFREQUEST Request)
+{
+    bool Privileged = false;
+    if (!NT_SUCCESS(WdfRequestImpersonate(Request, SecurityImpersonation, CapturePrivileged, &Privileged)))
+    {
+        return false;
+    }
+    return Privileged;
+}
+
 _Use_decl_annotations_
 VOID DrawSplayDeviceIoControl(WDFDEVICE Device, WDFREQUEST Request, size_t OutputBufferLength, size_t InputBufferLength, ULONG IoControlCode)
 {
@@ -1433,12 +1499,13 @@ VOID DrawSplayDeviceIoControl(WDFDEVICE Device, WDFREQUEST Request, size_t Outpu
             Status = STATUS_INVALID_PARAMETER;
             break;
         }
-        Status = pContext->RemoveMonitor(pIn->MonitorId);
+        Status = pContext->RemoveMonitor(pIn->MonitorId, WdfRequestGetFileObject(Request), CallerSid(Request),
+            CallerPrivileged(Request));
         break;
     }
     case IOCTL_DRAWSPLAY_REMOVE_ALL:
     {
-        pContext->RemoveAllMonitors();
+        pContext->RemoveAllMonitors(WdfRequestGetFileObject(Request), CallerSid(Request), CallerPrivileged(Request));
         Status = STATUS_SUCCESS;
         break;
     }
