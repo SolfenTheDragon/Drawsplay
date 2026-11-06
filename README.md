@@ -160,7 +160,7 @@ A paired computer can type, click and draw on the host as you, so pair only comp
 
 - No audio.
 - One client at a time unless the host is started with `--max-clients N`.
-- Pen tilt has one direction only.
+- Pen pressure, tilt and the pen's buttons work only when the client runs on Windows. On a Linux client the pen acts as a mouse.
 - The pairing question needs a terminal (see manual pairing above).
 
 ## Privacy
