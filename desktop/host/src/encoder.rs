@@ -78,7 +78,10 @@ impl Encoder {
             Encoder::Nvenc => rate(&["-preset", "p1", "-tune", "ull", "-zerolatency", "1", "-rc", "cbr"]),
             Encoder::Qsv => rate(&["-preset", "veryfast", "-look_ahead", "0"]),
             Encoder::Amf => rate(&["-usage", "ultralowlatency", "-quality", "speed", "-rc", "cbr"]),
-            Encoder::Vaapi => rate(&["-rc_mode", "CBR"]),
+            // VBR under the -maxrate/-bufsize cap. In CBR Intel's iHD driver pads every frame up to the
+            // bitrate: a static desktop cost ~49 KB per frame at 24 Mbit/s instead of ~1.5 KB (measured
+            // on the Go host), wasting the link for nothing.
+            Encoder::Vaapi => rate(&["-rc_mode", "VBR"]),
         });
         a
     }
@@ -171,6 +174,8 @@ mod tests {
         assert!(Encoder::Software.codec_args(400, 120).join(" ").contains("-bufsize 100k"));
         assert!(Encoder::Nvenc.codec_args(5000, 60).join(" ").contains("-tune ull"));
         assert!(Encoder::Amf.codec_args(5000, 60).join(" ").contains("ultralowlatency"));
+        let vaapi = Encoder::Vaapi.codec_args(5000, 60).join(" ");
+        assert!(vaapi.contains("-rc_mode VBR") && vaapi.contains("-maxrate 5000k"), "{vaapi}");
     }
 
     #[test]
