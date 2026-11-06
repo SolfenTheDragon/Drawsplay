@@ -244,7 +244,7 @@ pub fn primary_size() -> (u32, u32) {
 
 /// The DXGI output (adapter and output index, as ffmpeg's `ddagrab` counts them) whose desktop
 /// rectangle contains the point `(x, y)`, in physical pixels (the process is DPI-aware).
-pub fn dxgi_output_containing(x: i32, y: i32) -> Option<crate::DxgiOutput> {
+pub fn dxgi_output_containing(x: i32, y: i32) -> Option<crate::capture::DxgiOutput> {
     use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
     // SAFETY: plain COM calls on interfaces this function owns.
     unsafe {
@@ -257,7 +257,7 @@ pub fn dxgi_output_containing(x: i32, y: i32) -> Option<crate::DxgiOutput> {
                     let r = desc.DesktopCoordinates;
                     if x >= r.left && x < r.right && y >= r.top && y < r.bottom {
                         let rect = (r.left, r.top, (r.right - r.left) as u32, (r.bottom - r.top) as u32);
-                        return Some(crate::DxgiOutput { adapter: a, output: o, rect });
+                        return Some(crate::capture::DxgiOutput { adapter: a, output: o, rect });
                     }
                 }
                 o += 1;
