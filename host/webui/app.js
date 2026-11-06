@@ -415,38 +415,42 @@ async function api(path, opts) {
   }
 }
 
+// Form controls bound to a saved setting carry data-setting="<settings JSON
+// key>"; these two functions fill and read all of them. The server always
+// sends every setting with its default applied, so no defaults live here.
+function settingControls() {
+  return document.querySelectorAll("[data-setting]");
+}
+
+function fillSettingControls(s) {
+  for (const el of settingControls()) {
+    const value = s[el.dataset.setting];
+    if (el.type === "checkbox") el.checked = !!value;
+    else el.value = value ?? "";
+  }
+}
+
+function readSettingControls() {
+  const out = {};
+  for (const el of settingControls()) {
+    const key = el.dataset.setting;
+    if (el.type === "checkbox") out[key] = el.checked;
+    else if (el.type === "number") out[key] = Math.max(0, parseInt(el.value, 10) || 0);
+    else out[key] = el.value.trim();
+  }
+  return out;
+}
+
 async function loadSettings() {
   const s = await api("/api/settings");
   loadedSettings = s;
   resolutionDirty = false;
   syncResolutionPreset(s.width, s.height);
   refreshFramerateOptions(s.fps);
-  $("ffmpeg").value = s.ffmpeg;
-  $("adb").value = s.adb;
-  $("adb-serial").value = s.preferredADBSerial || "";
+  fillSettingControls(s);
   $("paired-wifi-enabled").checked = !!s.pairedWifiEnabled;
   wifiSelectedInterface = s.pairedWifiInterface || "";
-  $("aoa-enabled").checked = !!s.aoaEnabled;
-  $("aoa-auto-switch").checked = s.aoaAutoSwitch !== false;
-  $("adb-tunnel-enabled").checked = !!s.adbTunnelEnabled;
   updateADBVisibility();
-  $("require-adb-serial").checked = !!s.requirePreferredADB;
-  $("touch-enabled").checked = s.touchEnabled !== false;
-  $("touch-gestures").checked = s.touchGestures !== false;
-  $("pen-enabled").checked = s.penEnabled !== false;
-  $("keyboard-enabled").checked = s.keyboardEnabled !== false;
-  $("keep-alive-on-background").checked = !!s.keepAliveOnBackground;
-  $("idle-display-timeout").value = Number.isFinite(s.idleDisplayTimeoutSec) ? s.idleDisplayTimeoutSec : 600;
-  $("pen-prediction").checked = !!s.penPrediction;
-  $("pen-ink-preview").checked = s.penInkPreview !== false;
-  $("idle-capture-gate").checked = !!s.idleCaptureGate;
-  $("x11-high-rate-capture").checked = !!s.x11HighRateCapture;
-  $("video-scaling").value = s.videoScaling || "fill";
-  $("auto-launch-android-app").checked = !!s.autoLaunchAndroidApp;
-  $("zero-copy-capture").checked = !!s.zeroCopyCapture;
-  $("temporal-layering").checked = !!s.temporalLayering;
-  $("allow-tool-auto-install").checked = s.allowToolAutoInstall !== false;
-  $("no-driver-install").checked = !!s.noDriverInstall;
 }
 
 // ---- Connection kind: Android tablet (this host) or PC client (dd-host, read from its status file) ----
@@ -842,29 +846,7 @@ $("form").addEventListener("submit", async (ev) => {
       fps: parseInt($("fps").value, 10),
       width: resolution.width,
       height: resolution.height,
-      ffmpeg: $("ffmpeg").value.trim(),
-      adb: $("adb").value.trim(),
-      preferredADBSerial: $("adb-serial").value.trim(),
-      requirePreferredADB: $("require-adb-serial").checked,
-      touchEnabled: $("touch-enabled").checked,
-      touchGestures: $("touch-gestures").checked,
-      penEnabled: $("pen-enabled").checked,
-      keyboardEnabled: $("keyboard-enabled").checked,
-      keepAliveOnBackground: $("keep-alive-on-background").checked,
-      idleDisplayTimeoutSec: Math.max(0, parseInt($("idle-display-timeout").value, 10) || 0),
-      penPrediction: $("pen-prediction").checked,
-      penInkPreview: $("pen-ink-preview").checked,
-      idleCaptureGate: $("idle-capture-gate").checked,
-      x11HighRateCapture: $("x11-high-rate-capture").checked,
-      videoScaling: $("video-scaling").value,
-      autoLaunchAndroidApp: $("auto-launch-android-app").checked,
-      zeroCopyCapture: $("zero-copy-capture").checked,
-      temporalLayering: $("temporal-layering").checked,
-      allowToolAutoInstall: $("allow-tool-auto-install").checked,
-      noDriverInstall: $("no-driver-install").checked,
-      aoaEnabled: $("aoa-enabled").checked,
-      aoaAutoSwitch: $("aoa-auto-switch").checked,
-      adbTunnelEnabled: $("adb-tunnel-enabled").checked,
+      ...readSettingControls(),
     };
     if (featureFlags.wifi) {
       body.pairedWifiEnabled = $("paired-wifi-enabled").checked;

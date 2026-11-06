@@ -89,7 +89,8 @@ type settings struct {
 	IdleDisplayTimeoutSec int `json:"idleDisplayTimeoutSec"`
 }
 
-// defaultSettings mirrors the flag defaults in main.go.
+// defaultSettings is the built-in configuration; the command-line flags
+// (settings_flags.go) show these values as their defaults.
 func defaultSettings() settings {
 	return settings{
 		ADB:                   "adb",
