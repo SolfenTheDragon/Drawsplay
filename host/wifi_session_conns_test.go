@@ -93,7 +93,7 @@ func TestWiFiSessionConnsReadTabletStatsOnlyWhenNegotiated(t *testing.T) {
 }
 
 func TestPairedHostOffersVideoStats(t *testing.T) {
-	if wifiHostHello([32]byte{1}).Features&wifilan.FeatureVideoStats == 0 {
+	if wifilan.HostHello([32]byte{1}).Features&wifilan.FeatureVideoStats == 0 {
 		t.Fatal("host hello does not offer upstream video stats")
 	}
 }
