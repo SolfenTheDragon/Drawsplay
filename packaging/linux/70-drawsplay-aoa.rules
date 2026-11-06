@@ -6,67 +6,72 @@
 SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", ATTR{idProduct}=="2d0[0-5]", TAG+="uaccess", ATTR{power/control}="on"
 
 # Tablets in their normal mode: needed once so DrawSplay can ask them to switch to accessory mode.
+# Matching the vendor alone would also open up that vendor's keyboards, mice, docks, storage,
+# Bluetooth/Wi-Fi adapters and printers to raw access by any program of the logged-in user, so
+# devices with HID (03), printer (07), mass-storage (08), hub (09) or wireless-controller (e0)
+# interfaces are skipped. Android tablets expose only MTP/PTP (06), ADB (ff/42) or vendor (ff)
+# interfaces, or none in "No data transfer" mode. (A tablet in USB tethering mode is skipped too.)
 # Google
-SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="18d1", TAG+="uaccess"
 # Samsung
-SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="04e8", TAG+="uaccess"
 # Huawei
-SUBSYSTEM=="usb", ATTR{idVendor}=="12d1", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="12d1", TAG+="uaccess"
 # Xiaomi
-SUBSYSTEM=="usb", ATTR{idVendor}=="2717", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="2717", TAG+="uaccess"
 # Lenovo
-SUBSYSTEM=="usb", ATTR{idVendor}=="17ef", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="17ef", TAG+="uaccess"
 # ASUS
-SUBSYSTEM=="usb", ATTR{idVendor}=="0b05", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="0b05", TAG+="uaccess"
 # LG
-SUBSYSTEM=="usb", ATTR{idVendor}=="1004", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="1004", TAG+="uaccess"
 # Sony
-SUBSYSTEM=="usb", ATTR{idVendor}=="054c", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="054c", TAG+="uaccess"
 # HTC
-SUBSYSTEM=="usb", ATTR{idVendor}=="0bb4", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="0bb4", TAG+="uaccess"
 # Motorola
-SUBSYSTEM=="usb", ATTR{idVendor}=="22b8", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="22b8", TAG+="uaccess"
 # OnePlus
-SUBSYSTEM=="usb", ATTR{idVendor}=="2a70", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="2a70", TAG+="uaccess"
 # OPPO
-SUBSYSTEM=="usb", ATTR{idVendor}=="22d9", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="22d9", TAG+="uaccess"
 # Amazon
-SUBSYSTEM=="usb", ATTR{idVendor}=="1949", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="1949", TAG+="uaccess"
 # Acer
-SUBSYSTEM=="usb", ATTR{idVendor}=="0502", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="0502", TAG+="uaccess"
 # NVIDIA
-SUBSYSTEM=="usb", ATTR{idVendor}=="0955", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="0955", TAG+="uaccess"
 # vivo
-SUBSYSTEM=="usb", ATTR{idVendor}=="2d95", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="2d95", TAG+="uaccess"
 # ZTE
-SUBSYSTEM=="usb", ATTR{idVendor}=="19d2", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="19d2", TAG+="uaccess"
 # Alcatel/TCL
-SUBSYSTEM=="usb", ATTR{idVendor}=="1bbb", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="1bbb", TAG+="uaccess"
 # Sony Mobile
-SUBSYSTEM=="usb", ATTR{idVendor}=="0fce", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="0fce", TAG+="uaccess"
 # Dell
-SUBSYSTEM=="usb", ATTR{idVendor}=="413c", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="413c", TAG+="uaccess"
 # Meizu
-SUBSYSTEM=="usb", ATTR{idVendor}=="2a45", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="2a45", TAG+="uaccess"
 # Spreadtrum
-SUBSYSTEM=="usb", ATTR{idVendor}=="1782", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="1782", TAG+="uaccess"
 # Rockchip
-SUBSYSTEM=="usb", ATTR{idVendor}=="2207", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="2207", TAG+="uaccess"
 # Allwinner
-SUBSYSTEM=="usb", ATTR{idVendor}=="1f3a", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="1f3a", TAG+="uaccess"
 # MediaTek
-SUBSYSTEM=="usb", ATTR{idVendor}=="0e8d", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="0e8d", TAG+="uaccess"
 # Qualcomm
-SUBSYSTEM=="usb", ATTR{idVendor}=="05c6", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="05c6", TAG+="uaccess"
 # Hisense
-SUBSYSTEM=="usb", ATTR{idVendor}=="109b", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="109b", TAG+="uaccess"
 # Foxconn
-SUBSYSTEM=="usb", ATTR{idVendor}=="0489", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="0489", TAG+="uaccess"
 # Yota
-SUBSYSTEM=="usb", ATTR{idVendor}=="2916", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="2916", TAG+="uaccess"
 # Pegatron
-SUBSYSTEM=="usb", ATTR{idVendor}=="1d4d", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="1d4d", TAG+="uaccess"
 # Fairphone
-SUBSYSTEM=="usb", ATTR{idVendor}=="2b0e", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="2b0e", TAG+="uaccess"
 # Nokia
-SUBSYSTEM=="usb", ATTR{idVendor}=="0421", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:*|*:07????:*|*:08????:*|*:09????:*|*:e0????:*", ATTR{idVendor}=="0421", TAG+="uaccess"
