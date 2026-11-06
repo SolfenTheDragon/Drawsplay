@@ -480,3 +480,33 @@ func TestSettingsAPIRejectsUnsafeToolPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestWebUIRefusesRebindedHostNames(t *testing.T) {
+	store := newTestStore(t)
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	defer srv.Close()
+	for _, path := range []string{"/api/wifi/pairing", "/api/logs", "/api/csrf", "/api/settings", "/"} {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		req.Host = "evil.example:27180"
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusMisdirectedRequest {
+			t.Errorf("%s with a foreign Host: status %d, want %d", path, res.StatusCode, http.StatusMisdirectedRequest)
+		}
+	}
+	for _, host := range []string{"localhost:27180", "127.0.0.1:27180", "[::1]:27180", "LOCALHOST"} {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/csrf", nil)
+		req.Host = host
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Errorf("Host %q refused: %d", host, res.StatusCode)
+		}
+	}
+}

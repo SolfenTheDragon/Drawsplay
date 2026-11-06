@@ -35,6 +35,13 @@ func newWebUIHandler(store *settingsStore, stop func()) http.Handler {
 	api.register(mux)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// DNS rebinding: a hostile page can point its own name at 127.0.0.1
+		// and then read this API as same-origin. Its requests still carry its
+		// own name in Host, so only loopback names are served.
+		if !localHostHeader(r.Host) {
+			httpError(w, http.StatusMisdirectedRequest, "this settings page only answers requests addressed to localhost")
+			return
+		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
