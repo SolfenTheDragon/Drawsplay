@@ -18,23 +18,6 @@ type webUIAPI struct {
 	stop      func()
 }
 
-type settingsView struct {
-	settings
-	WifiAuthTokenConfigured bool `json:"wifiAuthTokenConfigured"`
-}
-
-func redactedSettingsView(s settings) settingsView {
-	return settingsView{
-		settings:                redactSettingsSecrets(s),
-		WifiAuthTokenConfigured: strings.TrimSpace(s.WifiAuthToken) != "",
-	}
-}
-
-func redactSettingsSecrets(s settings) settings {
-	s.WifiAuthToken = ""
-	return s
-}
-
 // newWebUIHandler builds the web UI routes (separate from runWebUI so tests
 // can drive the handler with httptest). stop is invoked, shortly after the
 // response is written, by POST /api/stop.
@@ -94,7 +77,7 @@ func (api webUIAPI) handleCSRF(w http.ResponseWriter, _ *http.Request) {
 func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, redactedSettingsView(api.store.get()))
+		writeJSON(w, api.store.get())
 	case http.MethodPut, http.MethodPost:
 		if !requireCSRF(w, r, api.csrfToken) {
 			return
@@ -252,7 +235,7 @@ func (api webUIAPI) handleDiagnostics(w http.ResponseWriter, _ *http.Request) {
 			"goArch":    runtime.GOARCH,
 			"cpus":      runtime.NumCPU(),
 		},
-		"settings":          redactedSettingsView(api.store.get()),
+		"settings":          api.store.get(),
 		"video":             currentVideoStatus(),
 		"clientVideoStats":  currentClientVideoStats(),
 		"activeClient":      activeClientIdentity(),

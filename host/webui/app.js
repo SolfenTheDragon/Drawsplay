@@ -426,19 +426,6 @@ async function loadSettings() {
   $("adb-serial").value = s.preferredADBSerial || "";
   $("paired-wifi-enabled").checked = !!s.pairedWifiEnabled;
   wifiSelectedInterface = s.pairedWifiInterface || "";
-  // Legacy Wi-Fi transport (Advanced settings > Advanced systems).
-  $("wifi-enabled").checked = !!s.wifiEnabled;
-  $("wifi-service-name").value = s.wifiServiceName || "DrawSplay";
-  $("wifi-bind-address").value = s.wifiBindAddress || "0.0.0.0";
-  $("wifi-input-port").value = s.wifiInputPort || 37183;
-  $("wifi-video-port").value = s.wifiVideoPort || 37184;
-  $("wifi-max-bitrate").value = s.wifiMaxBitrate || "12M";
-  const wifiAuthConfigured = !!s.wifiAuthTokenConfigured;
-  $("wifi-auth-token").value = "";
-  $("wifi-auth-token").placeholder = wifiAuthConfigured
-    ? "configured (enter new token to rotate)"
-    : "shared token";
-  $("wifi-tls").checked = s.wifiTLS !== false;
   $("aoa-enabled").checked = !!s.aoaEnabled;
   $("aoa-auto-switch").checked = s.aoaAutoSwitch !== false;
   $("adb-tunnel-enabled").checked = !!s.adbTunnelEnabled;
@@ -882,17 +869,6 @@ $("form").addEventListener("submit", async (ev) => {
     if (featureFlags.wifi) {
       body.pairedWifiEnabled = $("paired-wifi-enabled").checked;
       body.pairedWifiInterface = $("paired-wifi-interface").value;
-      body.wifiEnabled = $("wifi-enabled").checked;
-      body.wifiServiceName = $("wifi-service-name").value.trim();
-      body.wifiBindAddress = $("wifi-bind-address").value.trim();
-      body.wifiInputPort = parseInt($("wifi-input-port").value, 10);
-      body.wifiVideoPort = parseInt($("wifi-video-port").value, 10);
-      body.wifiMaxBitrate = $("wifi-max-bitrate").value.trim();
-      const wifiAuthToken = $("wifi-auth-token").value;
-      if (wifiAuthToken.trim() !== "") {
-        body.wifiAuthToken = wifiAuthToken;
-      }
-      body.wifiTLS = $("wifi-tls").checked;
     }
     const res = await api("/api/settings", {
       method: "PUT",

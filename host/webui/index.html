@@ -286,48 +286,6 @@
           </label>
         </div>
         <div class="hint" data-windows-only>This is rarely changed. If modified during a run, it applies on next host start.</div>
-        <!-- Hidden with the Wi-Fi feature flag while legacy Wi-Fi is its only content. -->
-        <details class="advanced advanced-systems" data-android-only data-feature-wifi hidden>
-          <summary>Advanced systems</summary>
-          <div class="hint">Older transports and low-level options most setups never need.</div>
-          <div class="input-options" data-feature-wifi hidden>
-            <strong>Legacy Wi-Fi transport</strong>
-            <div class="hint">The older shared-token LAN listener, separate from Wi-Fi pairing above. Adds LAN discovery/connectivity while keeping USB behavior unchanged when disabled.</div>
-            <div class="toggle-row">
-              <span>Enable Wi-Fi transport</span>
-              <label class="switch">
-                <input id="wifi-enabled" type="checkbox">
-                <span class="slider"></span>
-              </label>
-            </div>
-            <label for="wifi-service-name">Wi-Fi service name</label>
-            <input id="wifi-service-name" type="text" placeholder="DrawSplay">
-            <label for="wifi-bind-address">Wi-Fi bind address</label>
-            <input id="wifi-bind-address" type="text" placeholder="0.0.0.0">
-            <div class="row">
-              <div>
-                <label for="wifi-input-port">Wi-Fi input port</label>
-                <input id="wifi-input-port" type="number" min="1024" max="65535">
-              </div>
-              <div>
-                <label for="wifi-video-port">Wi-Fi video port</label>
-                <input id="wifi-video-port" type="number" min="1024" max="65535">
-              </div>
-            </div>
-            <label for="wifi-max-bitrate">Wi-Fi max bitrate cap</label>
-            <input id="wifi-max-bitrate" type="text" placeholder="12M">
-            <label for="wifi-auth-token">Wi-Fi auth token (optional)</label>
-            <input id="wifi-auth-token" type="text" placeholder="shared token">
-            <div class="hint">Saved tokens are not shown; enter a new token only when rotating it.</div>
-            <div class="toggle-row">
-              <span>Require TLS on Wi-Fi</span>
-              <label class="switch">
-                <input id="wifi-tls" type="checkbox">
-                <span class="slider"></span>
-              </label>
-            </div>
-          </div>
-        </details>
         <div class="input-options">
           <strong>Debug</strong>
           <div class="toggle-row">

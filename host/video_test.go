@@ -5,9 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"net"
-	"strings"
 	"testing"
 	"time"
 )
@@ -126,43 +124,6 @@ func TestWriteVideoPacketFraming(t *testing.T) {
 	}
 	if !bytes.Equal(got[5:], payload) {
 		t.Errorf("payload = % x, want % x", got[5:], payload)
-	}
-}
-
-func TestAuthorizeTransportVideoAcceptsValidToken(t *testing.T) {
-	server, client := net.Pipe()
-	defer server.Close()
-	defer client.Close()
-	go func() {
-		_, _ = client.Write([]byte("{\"type\":\"auth\",\"authToken\":\"secret\"}\n"))
-	}()
-	if !authorizeTransportVideo(server, "secret") {
-		t.Fatal("authorizeTransportVideo rejected valid token")
-	}
-}
-
-func TestAuthorizeTransportVideoRejectsWrongToken(t *testing.T) {
-	server, client := net.Pipe()
-	defer server.Close()
-	defer client.Close()
-	go func() {
-		_, _ = client.Write([]byte("{\"type\":\"auth\",\"authToken\":\"wrong\"}\n"))
-	}()
-	if authorizeTransportVideo(server, "secret") {
-		t.Fatal("authorizeTransportVideo accepted wrong token")
-	}
-}
-
-func TestAuthorizeTransportVideoRejectsOversizedLine(t *testing.T) {
-	server, client := net.Pipe()
-	defer server.Close()
-	defer client.Close()
-	go func() {
-		line := fmt.Sprintf("{\"type\":\"auth\",\"authToken\":\"%s\"}\n", strings.Repeat("a", transportVideoAuthMaxBytes))
-		_, _ = client.Write([]byte(line))
-	}()
-	if authorizeTransportVideo(server, "secret") {
-		t.Fatal("authorizeTransportVideo accepted oversized auth line")
 	}
 }
 

@@ -145,13 +145,12 @@ type packet struct {
 	// "key" packets (M5): Action is "down"/"up", Keycode is the Android
 	// KeyEvent keycode, Meta the Android meta-state bits, Chars the
 	// character(s) the key produces (Unicode fallback for unmapped keys).
-	Keycode   int    `json:"keycode"`
-	KeycodeS  int    `json:"k"`
-	Meta      int    `json:"meta"`
-	MetaS     int    `json:"m"`
-	Chars     string `json:"chars"`
-	CharsS    string `json:"c"`
-	AuthToken string `json:"authToken,omitempty"`
+	Keycode  int    `json:"keycode"`
+	KeycodeS int    `json:"k"`
+	Meta     int    `json:"meta"`
+	MetaS    int    `json:"m"`
+	Chars    string `json:"chars"`
+	CharsS   string `json:"c"`
 }
 
 // normalizeAliases folds compact packet keys into the canonical fields so
@@ -247,10 +246,6 @@ type hostSessionPolicyMsg struct {
 	PenPrediction         bool   `json:"penPrediction"`
 	PenInkPreview         bool   `json:"penInkPreview"`
 	VideoScaling          string `json:"videoScaling,omitempty"`
-	WifiEnabled           bool   `json:"wifiEnabled"`
-	WifiAuthToken         string `json:"wifiAuthToken,omitempty"`
-	WifiTLSRequired       bool   `json:"wifiTlsRequired"`
-	WifiTLSFingerprint    string `json:"wifiTlsFingerprint,omitempty"`
 }
 
 // videoConfigMsg is the JSON payload of a config packet on the video channel.
@@ -325,7 +320,7 @@ func negotiateVideoCodec() string {
 // channel (client → host, newline-delimited JSON; see feedback.go). All
 // counters are per-interval deltas, not cumulative.
 type clientStatsMsg struct {
-	Type           string  `json:"type"` // "stats"; also "keyframe" and "ack" (see feedback.go)
+	Type string `json:"type"` // "stats"; also "keyframe" and "ack" (see feedback.go)
 	// Frames is the cumulative picture count of an "ack" message.
 	Frames         int64   `json:"frames,omitempty"`
 	IntervalMs     int64   `json:"intervalMs"`
@@ -353,10 +348,4 @@ type clientStatsMsg struct {
 	WiFiRssiDbm      int `json:"wifiRssiDbm,omitempty"`
 	WiFiLinkMbps     int `json:"wifiLinkMbps,omitempty"`
 	WiFiFrequencyMHz int `json:"wifiFrequencyMhz,omitempty"`
-}
-
-// videoAuthMsg is an optional first upstream line on Wi-Fi video sessions.
-type videoAuthMsg struct {
-	Type      string `json:"type"` // "auth"
-	AuthToken string `json:"authToken,omitempty"`
 }

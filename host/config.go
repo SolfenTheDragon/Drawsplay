@@ -73,16 +73,8 @@ type settings struct {
 	// (videoScalingFill, videoScalingFit or videoScalingOriginal).
 	VideoScaling    string `json:"videoScaling"`
 	NoDriverInstall bool   `json:"noDriverInstall"`
-	WifiEnabled     bool   `json:"wifiEnabled"`
-	WifiBindAddress string `json:"wifiBindAddress"`
-	WifiInputPort   int    `json:"wifiInputPort"`
-	WifiVideoPort   int    `json:"wifiVideoPort"`
-	WifiServiceName string `json:"wifiServiceName"`
-	WifiTLS         bool   `json:"wifiTLS"`
-	WifiAuthToken   string `json:"wifiAuthToken,omitempty"`
-	WifiMaxBitrate  string `json:"wifiMaxBitrate"`
 	// PairedWifiEnabled turns on the paired mutual-TLS Wi-Fi transport (needs
-	// DRAWSPLAY_FEATURE_WIFI). It is separate from the legacy token transport.
+	// DRAWSPLAY_FEATURE_WIFI).
 	PairedWifiEnabled bool `json:"pairedWifiEnabled"`
 	// PairedWifiInterface is the explicit LAN interface for paired Wi-Fi.
 	PairedWifiInterface string `json:"pairedWifiInterface,omitempty"`
@@ -120,14 +112,6 @@ func defaultSettings() settings {
 		X11HighRateCapture:    true,
 		VideoScaling:          videoScalingFill,
 		NoDriverInstall:       false,
-		WifiEnabled:           false,
-		WifiBindAddress:       "0.0.0.0",
-		WifiInputPort:         37183,
-		WifiVideoPort:         37184,
-		WifiServiceName:       "DrawSplay",
-		WifiTLS:               true,
-		WifiAuthToken:         "",
-		WifiMaxBitrate:        "12M",
 		AOAEnabled:            true,
 		AOAAutoSwitch:         true,
 		ADBTunnelEnabled:      false,
@@ -188,35 +172,6 @@ func (s settings) validate() error {
 	}
 	if s.RequirePreferredADB && strings.TrimSpace(s.PreferredADBSerial) == "" {
 		return fmt.Errorf("preferred ADB serial is required when strict device trust is enabled")
-	}
-	if wifiFeatureEnabled() {
-		if strings.TrimSpace(s.WifiBindAddress) == "" {
-			return fmt.Errorf("wifi bind address must not be empty")
-		}
-		if s.WifiInputPort < 1024 || s.WifiInputPort > 65535 {
-			return fmt.Errorf("wifi input port must be between 1024 and 65535")
-		}
-		if s.WifiVideoPort < 1024 || s.WifiVideoPort > 65535 {
-			return fmt.Errorf("wifi video port must be between 1024 and 65535")
-		}
-		if s.WifiInputPort == s.WifiVideoPort {
-			return fmt.Errorf("wifi input and video ports must differ")
-		}
-		if strings.TrimSpace(s.WifiServiceName) == "" {
-			return fmt.Errorf("wifi service name must not be empty")
-		}
-		if kbps := parseBitrateKbps(s.WifiMaxBitrate); kbps < minLadderKbps {
-			return fmt.Errorf("wifi max bitrate must be at least %dk", minLadderKbps)
-		}
-		if strings.IndexFunc(s.WifiAuthToken, unicode.IsControl) >= 0 {
-			return fmt.Errorf("wifi auth token must not contain control characters")
-		}
-		if s.WifiEnabled && strings.TrimSpace(s.WifiAuthToken) == "" {
-			return fmt.Errorf("wifi auth token is required when Wi-Fi transport is enabled")
-		}
-		if s.WifiEnabled && !s.WifiTLS {
-			return fmt.Errorf("wifi TLS is required when Wi-Fi transport is enabled")
-		}
 	}
 	return nil
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -148,23 +147,13 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			log.Printf("Display-preference clear push failed (session=%d)", id)
 		}
 	}
-	sendSessionPolicy := func(keepAlive bool, penPrediction bool, penInkPreview bool, videoScaling string, wifiEnabled bool, wifiAuthToken string) {
-		tlsRequired, tlsFP := currentWiFiPolicyTLS()
-		clientWiFiEnabled := wifiEnabled && tlsRequired && strings.TrimSpace(tlsFP) != ""
-		clientWiFiToken := ""
-		if clientWiFiEnabled {
-			clientWiFiToken = wifiAuthToken
-		}
+	sendSessionPolicy := func(keepAlive bool, penPrediction bool, penInkPreview bool, videoScaling string) {
 		if !writeControl(hostSessionPolicyMsg{
 			Type:                  "sessionPolicy",
 			KeepAliveOnBackground: keepAlive,
 			PenPrediction:         penPrediction,
 			PenInkPreview:         penInkPreview,
 			VideoScaling:          videoScaling,
-			WifiEnabled:           clientWiFiEnabled,
-			WifiAuthToken:         clientWiFiToken,
-			WifiTLSRequired:       tlsRequired,
-			WifiTLSFingerprint:    tlsFP,
 		}) {
 			log.Printf("Session-policy push failed (session=%d)", id)
 		}
@@ -180,17 +169,6 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			if helloSeen {
 				log.Printf("Duplicate hello ignored (session=%d)", id)
 				return true
-			}
-			if want, protected := transportAuthToken(store.get(), transport); protected {
-				got := strings.TrimSpace(msg.AuthToken)
-				if want == "" {
-					log.Printf("%s hello rejected (session=%d): auth token unavailable", transportDisplayName(transport), id)
-					return false
-				}
-				if len(got) != len(want) || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-					log.Printf("%s hello rejected (session=%d): auth token mismatch", transportDisplayName(transport), id)
-					return false
-				}
 			}
 			if !hostSessionOwnership.acquireInput(transport) {
 				log.Printf(
@@ -210,11 +188,7 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			subscribeModeChanges(id, sendDisplayMode)
 			subscribeModePreferenceClears(id, sendClearDisplayMode)
 			cfg := store.get()
-			if transport == "usb" || transport == "wifi" {
-				sendSessionPolicy(cfg.KeepAliveOnBackground, cfg.PenPrediction, cfg.PenInkPreview, cfg.VideoScaling, cfg.WifiEnabled, cfg.WifiAuthToken)
-			} else {
-				sendSessionPolicy(cfg.KeepAliveOnBackground, cfg.PenPrediction, cfg.PenInkPreview, cfg.VideoScaling, false, "")
-			}
+			sendSessionPolicy(cfg.KeepAliveOnBackground, cfg.PenPrediction, cfg.PenInkPreview, cfg.VideoScaling)
 			return true
 		case "modePrefs":
 			log.Printf("Tablet remembered mode (session=%d): %dx%d@%d", id, msg.PrefWidth, msg.PrefHeight, msg.PrefFPS)

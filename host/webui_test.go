@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -63,19 +67,16 @@ func TestSettingsAPIRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var getBody struct {
-		WifiAuthToken           string `json:"wifiAuthToken"`
-		WifiAuthTokenConfigured bool   `json:"wifiAuthTokenConfigured"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&getBody); err != nil {
+	raw, err := io.ReadAll(res.Body)
+	res.Body.Close()
+	if err != nil {
 		t.Fatal(err)
 	}
-	res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("GET status = %d", res.StatusCode)
 	}
-	if getBody.WifiAuthToken != "" || getBody.WifiAuthTokenConfigured {
-		t.Fatalf("expected redacted default tokens, got %+v", getBody)
+	if bytes.Contains(raw, []byte("wifiAuthToken")) || bytes.Contains(raw, []byte(`"wifiEnabled"`)) {
+		t.Fatalf("retired token Wi-Fi settings still exposed: %s", raw)
 	}
 
 	// PUT applies a valid change.
@@ -104,14 +105,8 @@ func TestSettingsAPIPreservesWiFiFieldsWhenFeatureDisabled(t *testing.T) {
 	t.Setenv(wifiFeatureFlagEnv, "0")
 	store := newTestStore(t)
 	initial := defaultSettings()
-	initial.WifiEnabled = true
-	initial.WifiBindAddress = "10.0.0.5"
-	initial.WifiInputPort = 40001
-	initial.WifiVideoPort = 40002
-	initial.WifiServiceName = "SavedService"
-	initial.WifiTLS = true
-	initial.WifiAuthToken = "saved-token"
-	initial.WifiMaxBitrate = "9M"
+	initial.PairedWifiEnabled = true
+	initial.PairedWifiInterface = "wlan0"
 	if err := store.update(initial); err != nil {
 		t.Fatalf("store.update(initial): %v", err)
 	}
@@ -129,69 +124,44 @@ func TestSettingsAPIPreservesWiFiFieldsWhenFeatureDisabled(t *testing.T) {
 	}
 
 	got := store.get()
-	if got.WifiAuthToken != "saved-token" ||
-		got.WifiBindAddress != "10.0.0.5" ||
-		got.WifiInputPort != 40001 ||
-		got.WifiVideoPort != 40002 ||
-		got.WifiServiceName != "SavedService" ||
-		got.WifiMaxBitrate != "9M" ||
-		!got.WifiTLS {
-		t.Fatalf("wifi settings were unexpectedly changed: %+v", got)
+	if got.PairedWifiInterface != "wlan0" {
+		t.Fatalf("wifi interface was unexpectedly changed: %+v", got)
 	}
-	if got.WifiEnabled {
-		t.Fatalf("wifiEnabled should be forced off while feature is disabled")
+	if got.PairedWifiEnabled {
+		t.Fatalf("pairedWifiEnabled should be forced off while feature is disabled")
 	}
 }
 
-func TestSettingsAndDiagnosticsRedactAuthTokens(t *testing.T) {
-	store := newTestStore(t)
-	s := defaultSettings()
-	s.WifiEnabled = true
-	s.WifiAuthToken = "wifi-secret"
-	if err := store.update(s); err != nil {
-		t.Fatalf("store.update: %v", err)
-	}
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
-	defer srv.Close()
-
-	res, err := http.Get(srv.URL + "/api/settings")
+func TestLegacyWiFiSettingsAreDroppedFromConfig(t *testing.T) {
+	newTestStore(t)
+	path, err := configPath()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var settingsBody struct {
-		WifiAuthToken           string `json:"wifiAuthToken"`
-		WifiAuthTokenConfigured bool   `json:"wifiAuthTokenConfigured"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&settingsBody); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	res.Body.Close()
-	if settingsBody.WifiAuthToken != "" {
-		t.Fatalf("expected settings token redaction, got %+v", settingsBody)
+	legacy := `{"ffmpeg":"ffmpeg","fps":60,"bitrate":"24M","width":1920,"height":1080,"wifiEnabled":true,"wifiAuthToken":"old-secret","wifiTLS":true}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if !settingsBody.WifiAuthTokenConfigured {
-		t.Fatalf("expected configured flags true, got %+v", settingsBody)
+	cert := filepath.Join(filepath.Dir(path), "wifi_tls_key.pem")
+	if err := os.WriteFile(cert, []byte("key"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-
-	res, err = http.Get(srv.URL + "/api/diagnostics")
+	removeLegacyWiFiFiles()
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var diagnosticsBody struct {
-		Settings struct {
-			WifiAuthToken           string `json:"wifiAuthToken"`
-			WifiAuthTokenConfigured bool   `json:"wifiAuthTokenConfigured"`
-		} `json:"settings"`
+	if bytes.Contains(data, []byte("old-secret")) || bytes.Contains(data, []byte("wifiAuthToken")) {
+		t.Fatalf("legacy token left in config: %s", data)
 	}
-	if err := json.NewDecoder(res.Body).Decode(&diagnosticsBody); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(cert); !os.IsNotExist(err) {
+		t.Fatalf("legacy TLS key not removed: %v", err)
 	}
-	res.Body.Close()
-	if diagnosticsBody.Settings.WifiAuthToken != "" {
-		t.Fatalf("expected diagnostics token redaction, got %+v", diagnosticsBody.Settings)
-	}
-	if !diagnosticsBody.Settings.WifiAuthTokenConfigured {
-		t.Fatalf("expected diagnostics configured flags true, got %+v", diagnosticsBody.Settings)
+	if got := loadSettings(); got.FPS != 60 {
+		t.Fatalf("other settings lost: %+v", got)
 	}
 }
 

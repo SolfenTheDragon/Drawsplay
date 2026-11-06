@@ -8,7 +8,6 @@ import com.drawsplay.tablet.transport.AccessoryFraming
 import com.drawsplay.tablet.transport.AccessoryTransport
 import com.drawsplay.tablet.transport.HostEndpoint
 import com.drawsplay.tablet.transport.HostEndpointSelector
-import com.drawsplay.tablet.transport.TlsSocketFactory
 import org.json.JSONObject
 import java.io.DataInputStream
 import java.io.EOFException
@@ -161,40 +160,22 @@ class VideoChannel(
     private fun streamOneConnection(gen: Long) {
         val renderSurface = surface ?: throw IllegalStateException("no surface")
         val endpoints = endpointSelector.videoCandidates()
-        val (socket, selectedEndpoint) = dialEndpointHappyEyeballs(endpoints, FALLBACK_RACE_DELAY_MS) { endpoint ->
+        val (socket, _) = dialEndpointHappyEyeballs(endpoints, FALLBACK_RACE_DELAY_MS) { endpoint ->
             if (endpoint.accessory) {
                 return@dialEndpointHappyEyeballs AccessoryTransport.connect(
                     AccessoryFraming.KIND_VIDEO,
                     CONNECT_TIMEOUT_MS.toLong()
                 )
             }
-            if (endpoint.tls && endpoint.tlsFingerprintSha256.isNotBlank()) {
-                TlsSocketFactory.connectPinned(
-                    endpoint.host,
-                    endpoint.videoPort,
-                    CONNECT_TIMEOUT_MS,
-                    endpoint.tlsFingerprintSha256,
-                    receiveBufferSize = 1024 * 1024
-                )
-            } else {
-                Socket().apply {
-                    receiveBufferSize = 1024 * 1024
-                    connect(InetSocketAddress(endpoint.host, endpoint.videoPort), CONNECT_TIMEOUT_MS)
-                }
+            Socket().apply {
+                receiveBufferSize = 1024 * 1024
+                connect(InetSocketAddress(endpoint.host, endpoint.videoPort), CONNECT_TIMEOUT_MS)
             }.apply {
                 tcpNoDelay = true
             }
         }
-        val selectedAuthToken = selectedEndpoint.authToken
         socket.use {
             activeSocket = socket
-            val auth = JSONObject().apply {
-                put("type", "auth")
-                put("authToken", selectedAuthToken)
-            }.toString() + "\n"
-            socket.getOutputStream().write(auth.toByteArray(Charsets.UTF_8))
-            socket.getOutputStream().flush()
-
             val input = DataInputStream(socket.getInputStream().buffered(256 * 1024))
             val connectionCurrent = {
                 gen == generation.get() && activeSocket === socket &&

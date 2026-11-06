@@ -15,9 +15,7 @@ package main
 //	  -> TCP -> adb reverse -> tablet MediaCodec
 
 import (
-	"bufio"
 	"context"
-	"crypto/subtle"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -62,8 +60,6 @@ const (
 	// Only allow reconnect-triggered handoff when the active session has
 	// been idle (no encoded output) for at least this long.
 	videoReconnectHandoffMinSilence = 3 * time.Second
-	transportVideoAuthTimeout       = 5 * time.Second
-	transportVideoAuthMaxBytes      = 4 * 1024
 )
 
 // videoOptions carries the user-tunable video settings from main.
@@ -141,13 +137,6 @@ func runVideoListenerAt(ctx context.Context, store *settingsStore, addr string, 
 }
 
 func handleAcceptedVideoConnection(ctx context.Context, conn net.Conn, store *settingsStore, transport string) {
-	if token, protected := transportAuthToken(store.get(), transport); protected {
-		if !authorizeTransportVideo(conn, token) {
-			log.Printf("%s video authentication failed for %s", transportDisplayName(transport), conn.RemoteAddr())
-			_ = conn.Close()
-			return
-		}
-	}
 	if !acquireVideoSession(transport) {
 		_ = conn.Close()
 		return
@@ -250,9 +239,6 @@ func serveVideoSession(ctx context.Context, conn net.Conn, store *settingsStore,
 		opts.WiFiBaseline = true
 		opts.NativeMedia = "off"
 		opts.TemporalLayering = false
-	}
-	if cap := transportMaxBitrate(store.get(), transport); cap != "" {
-		opts.Bitrate = cappedBitrate(opts.Bitrate, cap)
 	}
 	if err := streamVideo(sessionCtx, conn, opts); err != nil && sessionCtx.Err() == nil {
 		log.Printf("Video session ended: %v", err)
@@ -1378,33 +1364,4 @@ func flushAnnexBTail(buf []byte) ([]byte, bool) {
 	unit := make([]byte, len(buf))
 	copy(unit, buf)
 	return unit, true
-}
-
-func authorizeTransportVideo(conn net.Conn, requiredToken string) bool {
-	want := strings.TrimSpace(requiredToken)
-	if want == "" {
-		return false
-	}
-	_ = conn.SetReadDeadline(time.Now().Add(transportVideoAuthTimeout))
-	reader := bufio.NewReaderSize(conn, transportVideoAuthMaxBytes)
-	line, err := reader.ReadSlice('\n')
-	_ = conn.SetReadDeadline(time.Time{})
-	if err != nil {
-		return false
-	}
-	if len(line) > transportVideoAuthMaxBytes {
-		return false
-	}
-	var msg videoAuthMsg
-	if err := json.Unmarshal(line, &msg); err != nil {
-		return false
-	}
-	if msg.Type != "auth" {
-		return false
-	}
-	got := strings.TrimSpace(msg.AuthToken)
-	if len(got) != len(want) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }

@@ -21,7 +21,6 @@ func wifiFeatureEnabled() bool {
 
 func applyFeatureFlags(s settings) settings {
 	if !wifiFeatureEnabled() {
-		s.WifiEnabled = false
 		s.PairedWifiEnabled = false
 	}
 	// A USB transport must stay on: with both off the tablet cannot connect.

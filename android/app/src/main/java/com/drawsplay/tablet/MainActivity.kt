@@ -34,13 +34,10 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.drawsplay.tablet.input.InputChannel
 import com.drawsplay.tablet.input.InputPadView
 import com.drawsplay.tablet.transport.AccessoryTransport
 import com.drawsplay.tablet.transport.HostEndpointSelector
-import com.drawsplay.tablet.transport.WiFiDiscoveryManager
 import com.drawsplay.tablet.video.CursorPacket
 import com.drawsplay.tablet.video.VideoChannel
 import com.drawsplay.tablet.video.VideoScaling
@@ -77,7 +74,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var inputChannel: InputChannel
     private lateinit var videoChannel: VideoChannel
     private val endpointSelector = HostEndpointSelector()
-    private lateinit var wifiDiscoveryManager: WiFiDiscoveryManager
     private lateinit var pairedWifiHost: WiFiPairedSessionHost
     private lateinit var waitingGroup: View
     private lateinit var wifiPairPanel: View
@@ -113,14 +109,6 @@ class MainActivity : AppCompatActivity() {
     private var videoScaling = VideoScaling.DEFAULT
     private var videoWidth = 0
     private var videoHeight = 0
-    @Volatile
-    private var wifiPolicyEnabled = false
-    @Volatile
-    private var wifiPolicyAuthToken = ""
-    @Volatile
-    private var wifiPolicyTlsRequired = false
-    @Volatile
-    private var wifiPolicyTlsFingerprint = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -177,7 +165,7 @@ class MainActivity : AppCompatActivity() {
         requestHighRefreshMode()
         // A monitor must not sleep while in use.
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        restoreKnownHostPolicy()
+        removeRetiredWifiSecrets()
         videoScaling = VideoScaling.fromWireName(displayPrefs.getString(KEY_VIDEO_SCALING, null))
             ?: VideoScaling.DEFAULT
         (videoFrame.parent as View).addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
@@ -211,24 +199,13 @@ class MainActivity : AppCompatActivity() {
             override fun onSessionPolicy(
                 keepAliveOnBackground: Boolean,
                 videoScaling: String,
-                wifiEnabled: Boolean,
-                wifiAuthToken: String,
-                wifiTlsRequired: Boolean,
-                wifiTlsFingerprint: String,
                 penPrediction: Boolean,
                 penInkPreview: Boolean
             ) {
                 inputPad.penPredictionEnabled = penPrediction
                 inputPad.penInkPreviewEnabled = penInkPreview
-                applySessionPolicy(
-                    keepAliveOnBackground,
-                    wifiEnabled,
-                    wifiAuthToken,
-                    wifiTlsRequired,
-                    wifiTlsFingerprint
-                )
+                this@MainActivity.keepAliveOnBackground = keepAliveOnBackground
                 runOnUiThread {
-                    updateWiFiDiscoveryState()
                     VideoScaling.fromWireName(videoScaling)?.let { setVideoScaling(it) }
                 }
             }
@@ -286,14 +263,6 @@ class MainActivity : AppCompatActivity() {
                 inputPad.post { inputPad.onHostFrameShown(inputSeq) }
             }
         }, endpointSelector) { appForeground }
-        wifiDiscoveryManager = WiFiDiscoveryManager(
-            this,
-            endpointSelector,
-            { wifiPolicyAuthToken },
-            { wifiPolicyTlsRequired },
-            { wifiPolicyTlsFingerprint }
-        )
-
         pairedWifiHost = WiFiPairedSessionHost(this, endpointSelector, { pendingForegroundSurface },
             onStreaming = { up ->
                 runOnUiThread {
@@ -362,7 +331,6 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         appForeground = true
-        updateWiFiDiscoveryState()
         if (!wifiHostReset.reconnectBlocked) pairedWifiHost.start()
         refreshSavedWifiHost()
         AccessoryTransport.refresh()
@@ -384,7 +352,6 @@ class MainActivity : AppCompatActivity() {
         if (!keepAliveOnBackground || isFinishing) {
             inputChannel.stop()
         }
-        wifiDiscoveryManager.stop()
         pairedWifiHost.stop()
         pairing?.cancel()
         pairing = null
@@ -413,7 +380,6 @@ class MainActivity : AppCompatActivity() {
     // here â€” the app is the durable store for the user's choice.
 
     private val displayPrefs by lazy { getSharedPreferences("display", MODE_PRIVATE) }
-    private val knownHostPrefs by lazy { knownHostPreferences() }
 
     private fun buildDisplayInfo(): InputChannel.DisplayInfo {
         val mode = currentDisplay()?.mode
@@ -866,60 +832,6 @@ class MainActivity : AppCompatActivity() {
         backgroundSink = null
     }
 
-    private fun applySessionPolicy(
-        keepAliveOnBackground: Boolean,
-        wifiEnabled: Boolean,
-        wifiAuthToken: String,
-        wifiTlsRequired: Boolean,
-        wifiTlsFingerprint: String
-    ) {
-        this.keepAliveOnBackground = keepAliveOnBackground
-        this.wifiPolicyEnabled = wifiEnabled
-        this.wifiPolicyTlsRequired = wifiTlsRequired
-        val authToken = wifiAuthToken.trim()
-        if (authToken.isNotEmpty()) {
-            this.wifiPolicyAuthToken = authToken
-        }
-        val tlsFingerprint = wifiTlsFingerprint.trim()
-        if (tlsFingerprint.isNotEmpty()) {
-            this.wifiPolicyTlsFingerprint = tlsFingerprint
-        }
-        persistKnownHostPolicy()
-        if (this.wifiPolicyEnabled && !hasKnownHostTrust()) {
-            Log.w(TAG, "Host enabled Wi-Fi without complete known-host trust material")
-        }
-    }
-
-    private fun restoreKnownHostPolicy() {
-        wifiPolicyEnabled = knownHostPrefs.getBoolean(KEY_WIFI_ENABLED, false)
-        wifiPolicyAuthToken = knownHostPrefs.getString(KEY_WIFI_AUTH_TOKEN, "")?.trim().orEmpty()
-        wifiPolicyTlsRequired = knownHostPrefs.getBoolean(KEY_WIFI_TLS_REQUIRED, false)
-        wifiPolicyTlsFingerprint =
-            knownHostPrefs.getString(KEY_WIFI_TLS_FINGERPRINT, "")?.trim().orEmpty()
-        if (wifiPolicyEnabled && !hasKnownHostTrust()) {
-            Log.w(TAG, "Known-host trust was incomplete; waiting for fresh host policy")
-            wifiPolicyEnabled = false
-        }
-    }
-
-    private fun persistKnownHostPolicy() {
-        val saved = knownHostPrefs.edit()
-            .putBoolean(KEY_WIFI_ENABLED, wifiPolicyEnabled)
-            .putString(KEY_WIFI_AUTH_TOKEN, wifiPolicyAuthToken)
-            .putBoolean(KEY_WIFI_TLS_REQUIRED, wifiPolicyTlsRequired)
-            .putString(KEY_WIFI_TLS_FINGERPRINT, wifiPolicyTlsFingerprint)
-            .commit()
-        if (!saved) {
-            Log.w(TAG, "Failed to persist known-host Wi-Fi policy")
-        }
-    }
-
-    private fun hasKnownHostTrust(): Boolean {
-        if (wifiPolicyAuthToken.isBlank()) return false
-        if (wifiPolicyTlsRequired && wifiPolicyTlsFingerprint.isBlank()) return false
-        return true
-    }
-
     /** USB (accessory, or USB power with adb on) has priority over a paired Wi-Fi session. */
     private fun wifiAllowedNow(): Boolean {
         if (wifiHostReset.reconnectBlocked) return false
@@ -929,34 +841,25 @@ class MainActivity : AppCompatActivity() {
         return UsbPriorityPolicy.allowWifi(endpointSelector.isAccessoryAttached(), usbPowered, adbEnabled)
     }
 
-    private fun updateWiFiDiscoveryState() {
-        if (wifiPolicyEnabled && hasKnownHostTrust()) {
-            wifiDiscoveryManager.start()
-        } else {
-            wifiDiscoveryManager.stop()
-        }
-    }
-
     private fun maybeStartForegroundVideo() {
         val surface = pendingForegroundSurface ?: return
         videoChannel.start(surface)
     }
 
-    private fun knownHostPreferences(): SharedPreferences {
-        return try {
-            val masterKey = MasterKey.Builder(this)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            EncryptedSharedPreferences.create(
-                this,
-                "known-host",
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
+    /**
+     * The token-based Wi-Fi transport was retired. Delete what it stored: the
+     * "known-host" preferences (token and TLS pin) and the Jetpack Security
+     * master key that encrypted them. Runs once; cheap when nothing is left.
+     */
+    private fun removeRetiredWifiSecrets() {
+        if (getSharedPreferences("display", MODE_PRIVATE).getBoolean(KEY_RETIRED_WIFI_CLEANED, false)) return
+        try {
+            deleteSharedPreferences("known-host")
+            val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            if (keyStore.containsAlias(RETIRED_MASTER_KEY_ALIAS)) keyStore.deleteEntry(RETIRED_MASTER_KEY_ALIAS)
+            getSharedPreferences("display", MODE_PRIVATE).edit().putBoolean(KEY_RETIRED_WIFI_CLEANED, true).apply()
         } catch (e: Exception) {
-            Log.w(TAG, "Encrypted known-host preferences unavailable; falling back to MODE_PRIVATE", e)
-            getSharedPreferences("known-host", MODE_PRIVATE)
+            Log.w(TAG, "Could not remove retired Wi-Fi credentials; will retry", e)
         }
     }
 
@@ -988,10 +891,8 @@ class MainActivity : AppCompatActivity() {
         private val wifiTrustWorker = Executors.newSingleThreadExecutor()
         private const val TAG = "MainActivity"
         private const val KEY_VIDEO_SCALING = "videoScaling"
-        private const val KEY_WIFI_ENABLED = "wifiEnabled"
-        private const val KEY_WIFI_AUTH_TOKEN = "wifiAuthToken"
-        private const val KEY_WIFI_TLS_REQUIRED = "wifiTlsRequired"
-        private const val KEY_WIFI_TLS_FINGERPRINT = "wifiTlsFingerprint"
+        private const val KEY_RETIRED_WIFI_CLEANED = "retiredWifiCredentialsRemoved"
+        private const val RETIRED_MASTER_KEY_ALIAS = "_androidx_security_master_key_"
     }
 
     private fun appVersionName(): String {

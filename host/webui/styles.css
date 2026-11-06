@@ -260,8 +260,6 @@ details.advanced > summary {
   cursor: pointer; user-select: none;
 }
 /* Nested dropdown inside Advanced settings for rarely used systems. */
-details.advanced.advanced-systems > summary { font-size: .8rem; }
-details.advanced.advanced-systems[open] { padding-left: .6rem; border-left: 2px solid var(--border); }
 .input-options { margin-top: 1rem; padding-top: .85rem; border-top: 1px solid var(--border); }
 .input-options > strong { display: block; margin-bottom: .25rem; }
 .input-options .toggle-row { padding-top: .7rem; }

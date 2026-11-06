@@ -30,9 +30,7 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	// port is unavailable; input continues to work regardless).
 	go runVideoListener(ctx, store)
 
-	// Optional Wi-Fi transport is additive and disabled by default so USB
-	// behavior and performance stay unchanged.
-	go startWiFiTransport(ctx, store)
+	removeLegacyWiFiFiles()
 	// Paired mutual-TLS Wi-Fi: inert unless DRAWSPLAY_FEATURE_WIFI, an
 	// explicit interface and an existing pairing are all present.
 	pairedWiFiRuntime.init(ctx, store)
