@@ -144,7 +144,7 @@ func aoaPollOnce(ctx context.Context, scan aoaScanFunc, lastSwitch map[string]ti
 		lastSwitch[c.Key] = time.Now()
 		dev, err := c.Open()
 		if err != nil {
-			setAOAStatus("error", fmt.Sprintf("cannot open %04x:%04x: %v (see the udev rule in the README)", c.VID, c.PID, err))
+			setAOAStatus("error", fmt.Sprintf("cannot open %04x:%04x: %v (on Linux, rerun the install script to add the USB udev rule)", c.VID, c.PID, err))
 			throttledLog("aoa-open-"+c.Key, "AOA: cannot open %04x:%04x: %v", c.VID, c.PID, err)
 			continue
 		}
