@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -82,8 +81,7 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 	defer conn.Close()
 	registerInputConnection(id, conn)
 	defer unregisterInputConnection(id)
-	defer unbindSessionDevice(id)
-	defer unbindSessionClientIdentity(id)
+	defer unbindClientSession(id)
 	inputOwned := false
 	defer func() {
 		if inputOwned {
@@ -330,75 +328,15 @@ func detectInputWireMode(reader *bufio.Reader) (inputWireMode, error) {
 }
 
 func handleHello(msg packet, id uint64) {
-	platform, clientType, clientVersion := normalizeClientIdentity(msg)
-	device := strings.TrimSpace(msg.Device)
-	if device == "" {
-		device = unknownClientDevice
-	}
-	bindSessionDevice(id, device)
-	bindSessionClientIdentity(id, clientIdentity{
-		Platform:     platform,
-		Type:         clientType,
-		Version:      clientVersion,
-		NativeWidth:  msg.ScreenWidth,
-		NativeHeight: msg.ScreenHeight,
-		RefreshRates: msg.ScreenRefreshRates,
-
-		RecommendedWidth:  msg.RecommendedWidth,
-		RecommendedHeight: msg.RecommendedHeight,
-		RecommendedReason: msg.RecommendedReason,
-		PrefWidth:         msg.PrefWidth,
-		PrefHeight:        msg.PrefHeight,
-		PrefFPS:           msg.PrefFPS,
-		PrefsPending:      msg.HostPrefs,
-	})
+	bindClientSession(id, newClientSession(msg))
+	c, _ := clientSessionByID(id)
 	log.Printf(
 		"HELLO session=%d device=%s platform=%s type=%s clientVersion=%s android=%s app=%s screen=%dx%d refreshRates=%v recommendedMax=%dx%d (%s) pref=%dx%d@%d codecs=%v ts=%d",
-		id,
-		device,
-		platform,
-		clientType,
-		clientVersion,
-		msg.Android,
-		msg.App,
-		msg.ScreenWidth,
-		msg.ScreenHeight,
-		msg.ScreenRefreshRates,
-		msg.RecommendedWidth,
-		msg.RecommendedHeight,
-		msg.RecommendedReason,
-		msg.PrefWidth,
-		msg.PrefHeight,
-		msg.PrefFPS,
-		msg.VideoCodecs,
-		msg.Timestamp,
+		id, c.Device, c.Identity.Platform, c.Identity.Type, c.Identity.Version, msg.Android, msg.App,
+		msg.ScreenWidth, msg.ScreenHeight, msg.ScreenRefreshRates,
+		msg.RecommendedWidth, msg.RecommendedHeight, msg.RecommendedReason,
+		msg.PrefWidth, msg.PrefHeight, msg.PrefFPS, c.Codecs, msg.Timestamp,
 	)
-	publishClientVideoCodecs(msg.VideoCodecs)
-	publishClientVideoFeatures(msg.VideoFeatures)
-}
-
-func normalizeClientIdentity(msg packet) (string, string, string) {
-	platform := strings.ToLower(strings.TrimSpace(msg.ClientOS))
-	if platform == "" {
-		if strings.TrimSpace(msg.Android) != "" {
-			platform = "android"
-		} else {
-			platform = "unknown"
-		}
-	}
-	clientType := strings.ToLower(strings.TrimSpace(msg.ClientType))
-	if clientType == "" {
-		if platform == "android" {
-			clientType = "tablet"
-		} else {
-			clientType = "client"
-		}
-	}
-	version := strings.TrimSpace(msg.ClientVer)
-	if version == "" {
-		version = strings.TrimSpace(msg.App)
-	}
-	return platform, clientType, version
 }
 
 func handleInput(msg *packet, id uint64, events *eventLogger, inj injector, store *settingsStore) {
@@ -407,8 +345,8 @@ func handleInput(msg *packet, id uint64, events *eventLogger, inj injector, stor
 		return
 	}
 	if msg.Width > 0 && msg.Height > 0 {
-		device := sessionDevice(id)
-		cal := calibrationForDevice(device)
+		c, _ := clientSessionByID(id)
+		cal := calibrationForDevice(c.Device)
 		x := msg.X / float32(msg.Width)
 		y := msg.Y / float32(msg.Height)
 		x, y = cal.apply(x, y)

@@ -381,8 +381,6 @@ func TestCalibrationAPIRoundTrip(t *testing.T) {
 	calibrationState.mu.Lock()
 	calibrationState.loaded = false
 	calibrationState.values = make(map[string]deviceCalibration)
-	calibrationState.session = make(map[uint64]string)
-	calibrationState.active = ""
 	calibrationState.mu.Unlock()
 
 	store := newSettingsStore(defaultSettings())

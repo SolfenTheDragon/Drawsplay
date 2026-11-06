@@ -630,9 +630,9 @@ func withFakeX11Ext(t *testing.T, f *fakeXrandr) *fakeX11Session {
 	resetX11Ext()
 
 	const sessionID = 1 << 60
-	bindSessionClientIdentity(sessionID, clientIdentity{Platform: "android", NativeWidth: 2960, NativeHeight: 1848})
+	bindTestIdentity(sessionID, clientIdentity{Platform: "android", NativeWidth: 2960, NativeHeight: 1848})
 	t.Cleanup(func() {
-		unbindSessionClientIdentity(sessionID)
+		unbindClientSession(sessionID)
 		resetX11Ext()
 		xrandrRun, mapX11Tablet = prevRun, prevMap
 		x11OfferSteppedSizes = prevStep

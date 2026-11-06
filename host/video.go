@@ -88,6 +88,11 @@ type videoOptions struct {
 	// baseline, one slice per picture. False (the default) leaves every
 	// encoder setting exactly as before.
 	WiFiBaseline bool
+	// Client is the tablet's session as it was when this video session
+	// started; the stream reads its codecs and features only from here.
+	Client clientSession
+	// HostCodecs are the codecs this host's ffmpeg can encode, preferred first.
+	HostCodecs []string
 }
 
 func runVideoListenerAt(ctx context.Context, store *settingsStore, addr string, transport string, listenerFactory func(string) (net.Listener, error)) {
@@ -219,8 +224,9 @@ func serveVideoSession(ctx context.Context, conn net.Conn, store *settingsStore,
 	// its video socket connects; the display must be created from it.
 	waitForClientIdentity(sessionCtx, clientHelloWait)
 	opts := store.get().videoOptions()
-	applyClientDisplayDefaults(&opts, activeClientIdentity())
-	if ident := activeClientIdentity(); strings.EqualFold(ident.Platform, "android") && opts.TemporalLayering {
+	opts.Client = activeClientSession()
+	applyClientDisplayDefaults(&opts, opts.Client.Identity)
+	if strings.EqualFold(opts.Client.Identity.Platform, "android") && opts.TemporalLayering {
 		// Temporal enhancement-layer dropping can make text look unstable on
 		// Android tablet decode paths; prefer cleaner glyph edges there.
 		opts.TemporalLayering = false
@@ -389,35 +395,22 @@ type videoStatusInfo struct {
 	ResolutionControl string `json:"resolutionControl,omitempty"`
 }
 
-var (
-	videoStatusMu sync.Mutex
-	videoStatus   videoStatusInfo
-)
+var videoStatus latest[videoStatusInfo]
 
 func publishVideoStatus(streaming bool, encoder, bitrate string) {
-	videoStatusMu.Lock()
-	if !streaming {
-		videoStatus = videoStatusInfo{Streaming: false}
-		videoStatusMu.Unlock()
-		return
-	}
-	status := videoStatus
-	status.Streaming = true
-	status.Encoder = encoder
-	status.Bitrate = bitrate
-	videoStatus = status
-	videoStatusMu.Unlock()
+	videoStatus.Update(func(st *videoStatusInfo) {
+		if !streaming {
+			*st = videoStatusInfo{}
+			return
+		}
+		st.Streaming, st.Encoder, st.Bitrate = true, encoder, bitrate
+	})
 }
 
 func publishVideoDisplay(mode, captureKind, description, resolutionControl string) {
-	videoStatusMu.Lock()
-	status := videoStatus
-	status.DisplayMode = mode
-	status.CaptureKind = captureKind
-	status.Display = description
-	status.ResolutionControl = resolutionControl
-	videoStatus = status
-	videoStatusMu.Unlock()
+	videoStatus.Update(func(st *videoStatusInfo) {
+		st.DisplayMode, st.CaptureKind, st.Display, st.ResolutionControl = mode, captureKind, description, resolutionControl
+	})
 }
 
 func displayModeFromTarget(target captureTarget) (mode, captureKind string) {
@@ -455,11 +448,7 @@ func resolutionControlOf(target captureTarget) string {
 	return ""
 }
 
-func currentVideoStatus() videoStatusInfo {
-	videoStatusMu.Lock()
-	defer videoStatusMu.Unlock()
-	return videoStatus
-}
+func currentVideoStatus() videoStatusInfo { return videoStatus.Get() }
 
 const (
 	// Capture recovery stays inside the current client/display session so a
@@ -632,8 +621,8 @@ func isTransientCaptureError(err error) bool {
 // retried with backoff instead of ending the session, so a monitor move
 // only blanks the stream for a moment.
 func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
-	publishHostVideoCodecs(detectedHostVideoCodecs(opts.FFmpeg))
-	opts.Codec = negotiateVideoCodec()
+	opts.HostCodecs = detectedHostVideoCodecs(opts.FFmpeg)
+	opts.Codec = negotiateVideoCodec(opts.HostCodecs, opts.Client.Codecs)
 
 	// Display enumeration can fail transiently while the display topology
 	// is settling (the previous session's virtual display tearing down, a
@@ -1046,7 +1035,7 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 		}
 		cfg, _ := json.Marshal(videoConfigMsg{
 			Codec:      opts.Codec,
-			HostCodecs: hostVideoCodecs,
+			HostCodecs: opts.HostCodecs,
 			Encoder:    encoderName,
 			FPS:        opts.FPS,
 			Bitrate:    opts.Bitrate,

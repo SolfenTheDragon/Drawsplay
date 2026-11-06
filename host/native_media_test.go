@@ -111,16 +111,15 @@ func TestProbeRealHelper(t *testing.T) {
 }
 
 func TestNativeCursorArgs(t *testing.T) {
-	t.Cleanup(func() { publishClientVideoFeatures(nil) })
-	publishClientVideoFeatures([]string{"tile1", "cursor1"})
-	if got := strings.Join(nativeCursorArgs(nativeCursorHelperVersion), " "); got != "--cursor overlay" {
+	drawsCursor := clientSession{Features: normalizeClientFeatures([]string{"tile1", "cursor1"})}
+	if got := strings.Join(nativeCursorArgs(nativeCursorHelperVersion, drawsCursor), " "); got != "--cursor overlay" {
 		t.Fatalf("helper with cursor support: args = %q", got)
 	}
-	if got := nativeCursorArgs(nativeCursorHelperVersion - 1); got != nil {
+	if got := nativeCursorArgs(nativeCursorHelperVersion-1, drawsCursor); got != nil {
 		t.Fatalf("older helper rejects --cursor, got %v", got)
 	}
-	publishClientVideoFeatures([]string{"tile1"})
-	if got := nativeCursorArgs(nativeCursorHelperVersion); got != nil {
+	tilesOnly := clientSession{Features: normalizeClientFeatures([]string{"tile1"})}
+	if got := nativeCursorArgs(nativeCursorHelperVersion, tilesOnly); got != nil {
 		t.Fatalf("tablet without cursor1 must keep the cursor in the video, got %v", got)
 	}
 }

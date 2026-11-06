@@ -75,10 +75,10 @@ func windowsNativeHelperArgs(target captureTarget, opts videoOptions) []string {
 		"--bitrate-kbps", strconv.Itoa(parseBitrateKbps(opts.Bitrate)),
 		"--max-inflight", strconv.Itoa(nativeMaxInflight),
 	}
-	if clientRequestsKeyframes() {
+	if opts.Client.requestsKeyframes() {
 		args = append(args, "--keyframes", "on-demand")
 	}
-	if clientHasFeature(clientFeatureCursor) {
+	if opts.Client.hasFeature(clientFeatureCursor) {
 		// The tablet draws the cursor: take it out of the frames so cursor
 		// motion costs no encode and never waits behind a frame.
 		args = append(args, "--cursor", "overlay")

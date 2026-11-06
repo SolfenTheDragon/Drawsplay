@@ -2,8 +2,10 @@
 
 package main
 
-import "testing"
-import "time"
+import (
+	"testing"
+	"time"
+)
 
 func testDisplayOutput(name string, adapter, output int, attached bool) displayOutput {
 	return displayOutput{

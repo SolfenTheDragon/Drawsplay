@@ -111,14 +111,8 @@ func runAUTestPipeline(t *testing.T, spec pipelineSpec, timeout time.Duration) (
 	prevDisabled := auEarlyFlushDisabled.Load()
 	auEarlyFlushDisabled.Store(false)
 	t.Cleanup(func() { auEarlyFlushDisabled.Store(prevDisabled) })
-	videoStatusMu.Lock()
-	prevStatus := videoStatus
-	videoStatusMu.Unlock()
-	t.Cleanup(func() {
-		videoStatusMu.Lock()
-		videoStatus = prevStatus
-		videoStatusMu.Unlock()
-	})
+	prevStatus := videoStatus.Get()
+	t.Cleanup(func() { videoStatus.Set(prevStatus) })
 	target := captureTarget{Kind: captureDDAGrab, Width: 1920, Height: 1080}
 	opts := videoOptions{Codec: "h264", FPS: 60, Bitrate: "24M"}
 	out := &packetRecorder{}

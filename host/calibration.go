@@ -59,14 +59,11 @@ func (c deviceCalibration) apply(x, y float32) (float32, float32) {
 }
 
 var calibrationState = struct {
-	mu      sync.RWMutex
-	loaded  bool
-	values  map[string]deviceCalibration
-	session map[uint64]string
-	active  string
+	mu     sync.RWMutex
+	loaded bool
+	values map[string]deviceCalibration
 }{
-	values:  make(map[string]deviceCalibration),
-	session: make(map[uint64]string),
+	values: make(map[string]deviceCalibration),
 }
 
 func calibrationPath() (string, error) {
@@ -140,36 +137,4 @@ func setCalibrationForDevice(device string, c deviceCalibration) error {
 	defer calibrationState.mu.Unlock()
 	calibrationState.values[device] = c.normalized()
 	return saveCalibrationsLocked()
-}
-
-func bindSessionDevice(sessionID uint64, device string) {
-	device = strings.TrimSpace(device)
-	if device == "" {
-		device = unknownClientDevice
-	}
-	calibrationState.mu.Lock()
-	calibrationState.session[sessionID] = device
-	calibrationState.active = device
-	calibrationState.mu.Unlock()
-}
-
-func unbindSessionDevice(sessionID uint64) {
-	calibrationState.mu.Lock()
-	delete(calibrationState.session, sessionID)
-	if len(calibrationState.session) == 0 {
-		calibrationState.active = ""
-	}
-	calibrationState.mu.Unlock()
-}
-
-func sessionDevice(sessionID uint64) string {
-	calibrationState.mu.RLock()
-	defer calibrationState.mu.RUnlock()
-	return calibrationState.session[sessionID]
-}
-
-func activeInputDevice() string {
-	calibrationState.mu.RLock()
-	defer calibrationState.mu.RUnlock()
-	return calibrationState.active
 }

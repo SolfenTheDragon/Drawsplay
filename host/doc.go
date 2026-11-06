@@ -30,16 +30,19 @@
 //
 // # Input
 //
-// input.go reads mux frames (usbmux.go), handles the hello and passes input
-// and key packets to the injector (inject.go, inject_linux.go,
-// inject_touch_linux.go, inject_windows.go, keymap.go). The tablet's identity
-// is kept in client_identity.go, calibration in calibration.go.
+// input.go reads mux frames (usbmux.go), records the tablet's hello as a
+// clientSession (client_session.go: device, identity, codecs, features) and
+// passes input and key packets to the injector (inject.go, inject_linux.go,
+// inject_touch_linux.go, inject_windows.go, keymap.go). Display defaults
+// derived from the identity are in client_identity.go, calibration in
+// calibration.go.
 //
 // # Video
 //
 // video.go runs one session at a time:
 //
-//  1. Wait for the tablet's hello, then create a display (display.go).
+//  1. Wait for the tablet's hello and copy its clientSession into the
+//     session's videoOptions, then create a display (display.go).
 //     Linux (display_linux.go chooses): X11 (x11_extend_linux.go), GNOME
 //     (mutter_extend_linux.go), sway, Hyprland or KWin (wl_extend_linux.go
 //     with sway_extend_linux.go, hypr_extend_linux.go, kwin_extend_linux.go),
@@ -57,7 +60,9 @@
 // # Settings page, status and tray
 //
 // webui_*.go and webui/ serve http://127.0.0.1:27180; webui_security.go holds
-// the CSRF and Host-header checks. Form controls bound to a setting carry
+// the CSRF and Host-header checks. host_snapshot.go builds the status and
+// diagnostics responses from the status cells (latest.go) the rest of the
+// host publishes. Form controls bound to a setting carry
 // data-setting attributes (webui/index.html). The trays are tray_linux.go and
 // tray_windows.go, with shared labels in tray_status.go.
 //

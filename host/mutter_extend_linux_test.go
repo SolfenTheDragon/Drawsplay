@@ -938,9 +938,9 @@ func withFakeMutter(t *testing.T, f *fakeMutter) *fakeMutterSession {
 	resetMutterExt()
 
 	const sessionID = 1 << 60
-	bindSessionClientIdentity(sessionID, clientIdentity{Platform: "android", NativeWidth: 2960, NativeHeight: 1848})
+	bindTestIdentity(sessionID, clientIdentity{Platform: "android", NativeWidth: 2960, NativeHeight: 1848})
 	t.Cleanup(func() {
-		unbindSessionClientIdentity(sessionID)
+		unbindClientSession(sessionID)
 		resetMutterExt()
 		startMutterCast, setTabletOutput = prevStart, prevSet
 		mutterReleaseGrace, mutterSettle = prevGrace, prevSettle

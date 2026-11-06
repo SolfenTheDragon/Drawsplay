@@ -2,7 +2,6 @@ package main
 
 import (
 	"strings"
-	"sync"
 )
 
 // Wire formats for both host channels.
@@ -261,44 +260,10 @@ type videoConfigMsg struct {
 	CaptureMode string `json:"captureMode,omitempty"`
 }
 
-var (
-	hostVideoCodecs = []string{"h264"}
-	clientCodecsMu  sync.RWMutex
-	clientCodecs    []string
-	hostCodecsMu    sync.RWMutex
-)
-
-func publishClientVideoCodecs(codecs []string) {
-	normalized := make([]string, 0, len(codecs))
-	for _, c := range codecs {
-		cc := strings.ToLower(strings.TrimSpace(c))
-		if cc == "h265" {
-			cc = "hevc"
-		}
-		if cc != "" {
-			normalized = append(normalized, cc)
-		}
-	}
-	clientCodecsMu.Lock()
-	clientCodecs = append([]string(nil), normalized...)
-	clientCodecsMu.Unlock()
-}
-
-func publishHostVideoCodecs(codecs []string) {
-	hostCodecsMu.Lock()
-	hostVideoCodecs = append([]string(nil), codecs...)
-	hostCodecsMu.Unlock()
-}
-
-// negotiateVideoCodec selects the first host-preferred codec that the client
-// also advertised. Legacy clients without a list remain on H.264.
-func negotiateVideoCodec() string {
-	clientCodecsMu.RLock()
-	offered := append([]string(nil), clientCodecs...)
-	clientCodecsMu.RUnlock()
-	hostCodecsMu.RLock()
-	supported := append([]string(nil), hostVideoCodecs...)
-	hostCodecsMu.RUnlock()
+// negotiateVideoCodec selects the first host-supported codec (in the host's
+// order of preference) that the client offered; H.264 when the client offered
+// none or none matches.
+func negotiateVideoCodec(supported, offered []string) string {
 	if len(offered) == 0 {
 		setOperationalWarning("codec", "")
 		return "h264"

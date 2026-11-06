@@ -122,14 +122,8 @@ func TestRunEncodePipelineSendsFramesWithTheirLastWrite(t *testing.T) {
 	prevDisabled := auEarlyFlushDisabled.Load()
 	auEarlyFlushDisabled.Store(false)
 	t.Cleanup(func() { auEarlyFlushDisabled.Store(prevDisabled) })
-	videoStatusMu.Lock()
-	prevStatus := videoStatus
-	videoStatusMu.Unlock()
-	t.Cleanup(func() {
-		videoStatusMu.Lock()
-		videoStatus = prevStatus
-		videoStatusMu.Unlock()
-	})
+	prevStatus := videoStatus.Get()
+	t.Cleanup(func() { videoStatus.Set(prevStatus) })
 
 	spec := pipelineSpec{
 		Name:         "au-writer",

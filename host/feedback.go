@@ -23,7 +23,6 @@ import (
 	"log"
 	"net"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -155,10 +154,7 @@ func newWiFiSessionMonitor() *sessionMonitor {
 	return &sessionMonitor{minDropPercent: wifiMinDropPercent, excludeStaleDrops: true}
 }
 
-var latestClientVideoStats = struct {
-	sync.RWMutex
-	value *clientStatsMsg
-}{}
+var latestClientVideoStats latest[*clientStatsMsg]
 
 // runStatsReader consumes upstream stats lines until the connection dies.
 // Run as a goroutine; it owns the read half of conn.
@@ -284,23 +280,18 @@ func publishLatestClientVideoStats(stats *clientStatsMsg) {
 		return
 	}
 	copyStats := *stats
-	latestClientVideoStats.Lock()
-	latestClientVideoStats.value = &copyStats
-	latestClientVideoStats.Unlock()
+	latestClientVideoStats.Set(&copyStats)
 }
 
 func clearLatestClientVideoStats() {
-	latestClientVideoStats.Lock()
-	latestClientVideoStats.value = nil
-	latestClientVideoStats.Unlock()
+	latestClientVideoStats.Set(nil)
 }
 
 func currentClientVideoStats() *clientStatsMsg {
-	latestClientVideoStats.RLock()
-	defer latestClientVideoStats.RUnlock()
-	if latestClientVideoStats.value == nil {
+	stats := latestClientVideoStats.Get()
+	if stats == nil {
 		return nil
 	}
-	copyStats := *latestClientVideoStats.value
+	copyStats := *stats
 	return &copyStats
 }

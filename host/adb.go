@@ -14,7 +14,6 @@ import (
 	"log"
 	"math/rand/v2"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -267,10 +266,7 @@ type adbStatusInfo struct {
 	Error            string   `json:"error,omitempty"`
 }
 
-var adbStatusState struct {
-	sync.RWMutex
-	value adbStatusInfo
-}
+var adbStatusState latest[adbStatusInfo]
 
 func publishADBStatus(ready bool, preferred string, available, targets []string, err error) {
 	status := adbStatusInfo{
@@ -282,15 +278,11 @@ func publishADBStatus(ready bool, preferred string, available, targets []string,
 	if err != nil {
 		status.Error = err.Error()
 	}
-	adbStatusState.Lock()
-	adbStatusState.value = status
-	adbStatusState.Unlock()
+	adbStatusState.Set(status)
 }
 
 func currentADBStatus() adbStatusInfo {
-	adbStatusState.RLock()
-	status := adbStatusState.value
-	adbStatusState.RUnlock()
+	status := adbStatusState.Get()
 	status.AvailableSerials = append([]string(nil), status.AvailableSerials...)
 	status.TargetSerials = append([]string(nil), status.TargetSerials...)
 	return status

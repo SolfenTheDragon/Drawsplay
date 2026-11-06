@@ -115,30 +115,6 @@ func auIsDecodableStart(au []byte) bool {
 	return seen&nativeFirstFrameNALMask == nativeFirstFrameNALMask
 }
 
-// Client-advertised video-channel extensions.
-var clientFeatures = struct {
-	sync.RWMutex
-	set map[string]bool
-}{set: map[string]bool{}}
-
-func publishClientVideoFeatures(features []string) {
-	set := make(map[string]bool, len(features))
-	for _, f := range features {
-		if f = strings.ToLower(strings.TrimSpace(f)); f != "" {
-			set[f] = true
-		}
-	}
-	clientFeatures.Lock()
-	clientFeatures.set = set
-	clientFeatures.Unlock()
-}
-
-func clientHasFeature(name string) bool {
-	clientFeatures.RLock()
-	defer clientFeatures.RUnlock()
-	return clientFeatures.set[name]
-}
-
 // Input kicks: after each injected input event the active helper is told to
 // capture now instead of waiting for the next damage notification.
 var (
@@ -164,13 +140,6 @@ func noteInputInjected(seq uint32) {
 // a few frames of latency.
 const nativeMaxInflight = 5
 
-// clientRequestsKeyframes reports whether the tablet asks for a keyframe
-// whenever it drops pictures (clients with frame acks also do that). Native
-// helpers then send keyframes only on request instead of every two seconds:
-// on a lossless link (USB, TCP) a periodic keyframe only adds a periodic
-// burst, several frames in size, to the link and the latency.
-func clientRequestsKeyframes() bool { return clientHasFeature(clientFeatureFrameAck) }
-
 // nativeFlowControlHelperVersion is the first Linux helper version that
 // accepts --max-inflight and frame acks ("A <n>"). Older helper binaries
 // (built separately, see BUILD.md) reject unknown options, so they get the
@@ -179,12 +148,12 @@ const nativeFlowControlHelperVersion = 2
 
 // nativeFlowControlArgs returns the frame-window and keyframe options for a
 // Linux helper of the given probed version.
-func nativeFlowControlArgs(helperVersion, fps int) []string {
+func nativeFlowControlArgs(helperVersion, fps int, client clientSession) []string {
 	if helperVersion < nativeFlowControlHelperVersion {
 		return nil
 	}
 	args := []string{"--max-inflight", strconv.Itoa(nativeMaxInflight)}
-	if clientRequestsKeyframes() {
+	if client.requestsKeyframes() {
 		// Keyframes only when the tablet asks: no periodic IDR spikes.
 		args = append(args, "--gop", strconv.Itoa(onDemandGOPFrames(fps)))
 	}
@@ -199,8 +168,8 @@ const nativeCursorHelperVersion = 3
 // nativeCursorArgs returns --cursor overlay for a Linux helper of the given
 // probed version when the tablet draws the host cursor itself: cursor motion
 // then costs no encode and never waits behind a video frame, as on Windows.
-func nativeCursorArgs(helperVersion int) []string {
-	if helperVersion < nativeCursorHelperVersion || !clientHasFeature(clientFeatureCursor) {
+func nativeCursorArgs(helperVersion int, client clientSession) []string {
+	if helperVersion < nativeCursorHelperVersion || !client.hasFeature(clientFeatureCursor) {
 		return nil
 	}
 	return []string{"--cursor", "overlay"}
@@ -371,9 +340,9 @@ func withNativeHelperCandidate(specs []pipelineSpec, opts videoOptions, target c
 		log.Printf("Native media helper skipped for VA driver %q in %s mode; using ffmpeg (set nativeMediaHelper to \"on\" to try it)", res.Vendor, mode)
 		return specs
 	}
-	args := nativeHelperArgs(display, target.Rect, opts.FPS, opts.Bitrate, clientHasFeature(clientFeatureTiles))
-	args = append(args, nativeFlowControlArgs(res.Version, opts.FPS)...)
-	args = append(args, nativeCursorArgs(res.Version)...)
+	args := nativeHelperArgs(display, target.Rect, opts.FPS, opts.Bitrate, opts.Client.hasFeature(clientFeatureTiles))
+	args = append(args, nativeFlowControlArgs(res.Version, opts.FPS, opts.Client)...)
+	args = append(args, nativeCursorArgs(res.Version, opts.Client)...)
 	spec := pipelineSpec{
 		Name:        "native_vaapi",
 		BaseEncoder: vaapiH264Encoder,
@@ -424,9 +393,9 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 	if encoderName == "" {
 		encoderName = spec.Name
 	}
-	sendMeta := clientHasFeature(clientFeatureFrameMeta)
-	sendTiles := clientHasFeature(clientFeatureTiles)
-	sendCursor := clientHasFeature(clientFeatureCursor)
+	sendMeta := opts.Client.hasFeature(clientFeatureFrameMeta)
+	sendTiles := opts.Client.hasFeature(clientFeatureTiles)
+	sendCursor := opts.Client.hasFeature(clientFeatureCursor)
 	nextSummary := time.Now().Add(sessionSummaryInterval)
 	telemetry := newPipelineTelemetry(spec.Name)
 	defer telemetry.finish()
@@ -467,7 +436,7 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 			markActiveVideoSessionReady()
 			cfg, _ := json.Marshal(videoConfigMsg{
 				Codec:       opts.Codec,
-				HostCodecs:  hostVideoCodecs,
+				HostCodecs:  opts.HostCodecs,
 				Encoder:     encoderName,
 				FPS:         opts.FPS,
 				Bitrate:     opts.Bitrate,

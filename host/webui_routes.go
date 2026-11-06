@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -144,34 +143,7 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {
-	enabled, autostartErr := autostartEnabled()
-	desktop := currentDesktopHostStatus()
-	status := map[string]any{
-		"video":                   currentVideoStatus(),
-		"clientVideoStats":        currentClientVideoStats(),
-		"adb":                     currentADBStatus(),
-		"aoa":                     currentAOAStatus(),
-		"adbTunnelEnabled":        api.store.get().ADBTunnelEnabled,
-		"aoaEnabled":              api.store.get().AOAEnabled,
-		"warnings":                currentOperationalWarnings(),
-		"metrics":                 currentOperationalMetrics(),
-		"setup":                   currentSetupChecklist(api.store.get()),
-		"autostart":               enabled,
-		"autostartImplementation": autostartImplementation(),
-		"hostOS":                  runtime.GOOS,
-		"version":                 hostVersion(),
-		"featureFlags":            map[string]bool{"wifi": wifiFeatureEnabled()},
-		"desktopHost":             desktop,
-		"connectionKind":          connectionKind(androidClientConnected(), desktop),
-		"activeTransport":         hostSessionOwnership.currentTransport(),
-		"activeClient":            activeClientIdentity(),
-		"activeInputDevice":       activeInputDevice(),
-		"inputLocked":             sessionInputLocked(),
-	}
-	if autostartErr != nil {
-		status["autostartError"] = autostartErr.Error()
-	}
-	writeJSON(w, status)
+	writeJSON(w, currentHostStatus(api.store.get()))
 }
 
 // handleDesktopDisconnect ends the PC client session served by dd-host.
@@ -233,29 +205,7 @@ func shouldRestartX11AfterSetupRepair(x11Session bool, video videoStatusInfo, vi
 }
 
 func (api webUIAPI) handleDiagnostics(w http.ResponseWriter, _ *http.Request) {
-	lines, next := currentDebugLogs(0)
-	writeJSON(w, map[string]any{
-		"generatedAt": time.Now().UTC().Format(time.RFC3339),
-		"runtime": map[string]any{
-			"goVersion": runtime.Version(),
-			"goOS":      runtime.GOOS,
-			"goArch":    runtime.GOARCH,
-			"cpus":      runtime.NumCPU(),
-		},
-		"settings":          api.store.get(),
-		"video":             currentVideoStatus(),
-		"clientVideoStats":  currentClientVideoStats(),
-		"activeClient":      activeClientIdentity(),
-		"adb":               currentADBStatus(),
-		"aoa":               currentAOAStatus(),
-		"warnings":          currentOperationalWarnings(),
-		"metrics":           currentOperationalMetrics(),
-		"setup":             currentSetupChecklist(api.store.get()),
-		"activeInputDevice": activeInputDevice(),
-		"inputLocked":       sessionInputLocked(),
-		"logCursor":         next,
-		"logLines":          lines,
-	})
+	writeJSON(w, currentHostDiagnostics(api.store.get()))
 }
 
 func (api webUIAPI) handleCalibration(w http.ResponseWriter, r *http.Request) {

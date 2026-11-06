@@ -16,7 +16,7 @@ func TestReapDisconnectedDisplayEndsTheSessionOnlyWhenDisconnected(t *testing.T)
 	setActiveVideoSession(cancel, server)
 	defer setActiveVideoSession(nil, nil)
 
-	bindSessionDevice(9001, "test-tablet")
+	bindClientSession(9001, clientSession{Device: "test-tablet"})
 	if reapDisconnectedDisplay() {
 		t.Fatal("session torn down while the tablet is connected")
 	}
@@ -24,7 +24,7 @@ func TestReapDisconnectedDisplayEndsTheSessionOnlyWhenDisconnected(t *testing.T)
 		t.Fatal("session context cancelled while the tablet is connected")
 	}
 
-	unbindSessionDevice(9001)
+	unbindClientSession(9001)
 	if !reapDisconnectedDisplay() {
 		t.Fatal("stale session was not torn down while disconnected")
 	}
@@ -48,11 +48,11 @@ func TestReapDisconnectedDisplayWithoutSession(t *testing.T) {
 func TestIdleDisplayTrackerWaitsForTimeout(t *testing.T) {
 	var tr idleDisplayTracker
 	now := time.Now()
-	bindSessionDevice(9002, "idle-tablet")
+	bindClientSession(9002, clientSession{Device: "idle-tablet"})
 	if tr.check(now.Add(time.Hour), 10*time.Minute) {
 		t.Fatal("released while a tablet is connected")
 	}
-	unbindSessionDevice(9002)
+	unbindClientSession(9002)
 	if tr.check(now, 10*time.Minute) || tr.check(now.Add(9*time.Minute), 10*time.Minute) {
 		t.Fatal("released before the timeout")
 	}

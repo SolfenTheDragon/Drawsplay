@@ -1,13 +1,14 @@
 package main
 
 import (
+	"reflect"
 	"slices"
 	"testing"
 )
 
 func TestClientRefreshRates(t *testing.T) {
-	bindSessionClientIdentity(902, clientIdentity{Platform: "android", RefreshRates: []int{120, 60, 0, 999, 60, 24, 96}})
-	defer unbindSessionClientIdentity(902)
+	bindTestIdentity(902, clientIdentity{Platform: "android", RefreshRates: []int{120, 60, 0, 999, 60, 24, 96}})
+	defer unbindClientSession(902)
 	got := activeClientIdentity()
 	if want := []int{24, 60, 96, 120}; !slices.Equal(got.RefreshRates, want) {
 		t.Fatalf("RefreshRates = %v, want %v", got.RefreshRates, want)
@@ -47,14 +48,14 @@ func TestApplyClientDisplayDefaults(t *testing.T) {
 
 	opts = base
 	applyClientDisplayDefaults(&opts, clientIdentity{Platform: "windows"})
-	if opts != base {
+	if !reflect.DeepEqual(opts, base) {
 		t.Fatalf("non-android client changed options: %+v", opts)
 	}
 }
 
 func TestSetClientPrefModeKeepsFPSWhenZero(t *testing.T) {
-	bindSessionClientIdentity(900, clientIdentity{Platform: "android", NativeWidth: 2560, NativeHeight: 1600, PrefFPS: 90})
-	defer unbindSessionClientIdentity(900)
+	bindTestIdentity(900, clientIdentity{Platform: "android", NativeWidth: 2560, NativeHeight: 1600, PrefFPS: 90})
+	defer unbindClientSession(900)
 	setClientPrefMode(1920, 1200, 0)
 	got := activeClientIdentity()
 	if got.PrefWidth != 1920 || got.PrefHeight != 1200 || got.PrefFPS != 90 {
@@ -63,8 +64,8 @@ func TestSetClientPrefModeKeepsFPSWhenZero(t *testing.T) {
 }
 
 func TestModePrefsClearPendingAndApply(t *testing.T) {
-	bindSessionClientIdentity(901, clientIdentity{Platform: "android", NativeWidth: 2560, NativeHeight: 1600, PrefsPending: true})
-	defer unbindSessionClientIdentity(901)
+	bindTestIdentity(901, clientIdentity{Platform: "android", NativeWidth: 2560, NativeHeight: 1600, PrefsPending: true})
+	defer unbindClientSession(901)
 	if !activeClientIdentity().PrefsPending {
 		t.Fatal("expected pending prefs after hello")
 	}

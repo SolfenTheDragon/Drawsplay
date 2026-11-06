@@ -5,7 +5,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -32,21 +31,15 @@ type clientIdentity struct {
 
 // bindSessionModePrefs applies the tablet's remembered mode for this host.
 func bindSessionModePrefs(sessionID uint64, w, h, fps int) {
-	clientIdentityState.mu.Lock()
-	defer clientIdentityState.mu.Unlock()
-	ident, ok := clientIdentityState.session[sessionID]
-	if !ok {
-		return
-	}
-	if w > 0 && h > 0 {
-		ident.PrefWidth, ident.PrefHeight = w, h
-	}
-	if fps > 0 {
-		ident.PrefFPS = fps
-	}
-	ident.PrefsPending = false
-	clientIdentityState.session[sessionID] = ident
-	clientIdentityState.active = ident
+	updateClientSessions(sessionID, func(ident *clientIdentity) {
+		if w > 0 && h > 0 {
+			ident.PrefWidth, ident.PrefHeight = w, h
+		}
+		if fps > 0 {
+			ident.PrefFPS = fps
+		}
+		ident.PrefsPending = false
+	})
 }
 
 // clientHelloWait bounds how long a new video session waits for the input
@@ -92,21 +85,12 @@ func firstConnectFPS(ident clientIdentity) int {
 // setClientPrefMode records a mode the user chose (OS display settings or web
 // UI) so a session restart keeps it. fps == 0 leaves the rate unchanged.
 func setClientPrefMode(w, h, fps int) {
-	clientIdentityState.mu.Lock()
-	defer clientIdentityState.mu.Unlock()
-	apply := func(ident clientIdentity) clientIdentity {
+	updateClientSessions(0, func(ident *clientIdentity) {
 		ident.PrefWidth, ident.PrefHeight = w, h
 		if fps > 0 {
 			ident.PrefFPS = fps
 		}
-		return ident
-	}
-	for id, ident := range clientIdentityState.session {
-		clientIdentityState.session[id] = apply(ident)
-	}
-	if len(clientIdentityState.session) > 0 {
-		clientIdentityState.active = apply(clientIdentityState.active)
-	}
+	})
 }
 
 // applyClientDisplayDefaults sets the session's resolution and frame rate from
@@ -126,15 +110,9 @@ func applyClientDisplayDefaults(opts *videoOptions, ident clientIdentity) {
 	}
 }
 
-var clientIdentityState = struct {
-	mu      sync.RWMutex
-	session map[uint64]clientIdentity
-	active  clientIdentity
-}{
-	session: make(map[uint64]clientIdentity),
-}
-
-func bindSessionClientIdentity(sessionID uint64, ident clientIdentity) {
+// normalized trims the text fields, fills in "unknown" placeholders and drops
+// implausible sizes and refresh rates.
+func (ident clientIdentity) normalized() clientIdentity {
 	ident.Platform = strings.TrimSpace(ident.Platform)
 	ident.Type = strings.TrimSpace(ident.Type)
 	ident.Version = strings.TrimSpace(ident.Version)
@@ -144,32 +122,10 @@ func bindSessionClientIdentity(sessionID uint64, ident clientIdentity) {
 	if ident.Type == "" {
 		ident.Type = "unknown"
 	}
-	if ident.NativeWidth < 0 {
-		ident.NativeWidth = 0
-	}
-	if ident.NativeHeight < 0 {
-		ident.NativeHeight = 0
-	}
+	ident.NativeWidth = max(ident.NativeWidth, 0)
+	ident.NativeHeight = max(ident.NativeHeight, 0)
 	ident.RefreshRates = normalizeRefreshRates(ident.RefreshRates)
-	clientIdentityState.mu.Lock()
-	clientIdentityState.session[sessionID] = ident
-	clientIdentityState.active = ident
-	clientIdentityState.mu.Unlock()
-}
-
-func unbindSessionClientIdentity(sessionID uint64) {
-	clientIdentityState.mu.Lock()
-	delete(clientIdentityState.session, sessionID)
-	if len(clientIdentityState.session) == 0 {
-		clientIdentityState.active = clientIdentity{}
-	}
-	clientIdentityState.mu.Unlock()
-}
-
-func activeClientIdentity() clientIdentity {
-	clientIdentityState.mu.RLock()
-	defer clientIdentityState.mu.RUnlock()
-	return clientIdentityState.active
+	return ident
 }
 
 // Bounds for refresh rates accepted from a client.
