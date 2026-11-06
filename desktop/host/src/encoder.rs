@@ -129,8 +129,27 @@ fn works(ffmpeg: &str, e: Encoder) -> bool {
         use std::os::windows::process::CommandExt;
         c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    matches!(c.status(), Ok(s) if s.success())
+    let Ok(mut child) = c.spawn() else { return false };
+    // A hung GPU driver must not block start-up forever: give the five-frame test a fixed time.
+    let deadline = std::time::Instant::now() + PROBE_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50))
+            }
+            _ => {
+                eprintln!("encoder {} test did not finish in {} s; skipping it", e.name(), PROBE_TIMEOUT.as_secs());
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
 }
+
+/// Longest an encoder test may take (it normally finishes in well under a second).
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Pick an encoder. `requested` of `None` means automatic.
 pub fn choose(ffmpeg: &str, requested: Option<Encoder>) -> Encoder {
