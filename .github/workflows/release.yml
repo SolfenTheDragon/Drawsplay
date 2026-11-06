@@ -171,6 +171,7 @@ jobs:
           cp drawsplay-tray.png ../release/drawsplay-tray.png
           cp ../packaging/linux/70-drawsplay-aoa.rules ../release/70-drawsplay-aoa.rules
           cp ../packaging/linux/70-drawsplay-drm-connector.rules ../release/70-drawsplay-drm-connector.rules
+          cp ../packaging/linux/99-drawsplay-uinput.rules ../release/99-drawsplay-uinput.rules
           cp ../packaging/linux/drawsplay-display-helper ../release/drawsplay-display-helper
           cp ../packaging/linux/com.drawsplay.display-helper.policy ../release/com.drawsplay.display-helper.policy
           chmod +x ../release/install-drawsplay-host-linux.sh ../release/uninstall-drawsplay-host-linux.sh
@@ -187,6 +188,7 @@ jobs:
             release/drawsplay-tray.png
             release/70-drawsplay-aoa.rules
             release/70-drawsplay-drm-connector.rules
+            release/99-drawsplay-uinput.rules
             release/drawsplay-display-helper
             release/com.drawsplay.display-helper.policy
 
@@ -308,7 +310,7 @@ jobs:
           mkdir "$lin"
           cp drawsplay-host-linux-amd64 install-drawsplay-host-linux.sh \
             uninstall-drawsplay-host-linux.sh drawsplay-tray.png \
-            70-drawsplay-aoa.rules 70-drawsplay-drm-connector.rules \
+            70-drawsplay-aoa.rules 70-drawsplay-drm-connector.rules 99-drawsplay-uinput.rules \
             drawsplay-display-helper com.drawsplay.display-helper.policy DrawSplay.APK "$lin/"
           chmod +x "$lin/drawsplay-host-linux-amd64" "$lin"/*.sh
           tar -czf "${lin}.tar.gz" "$lin"

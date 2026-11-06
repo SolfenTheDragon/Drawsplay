@@ -203,9 +203,26 @@ With the default settings, the app and host connect over AOA; USB debugging is n
 
 ## Packaging and installer scripts
 
-From the repository root:
+### Where each packaging file is used
+
+| Path | What it is | Used by |
+|---|---|---|
+| `packaging/linux/70-drawsplay-aoa.rules` | udev: tablet USB access for the accessory (AOA) transport | `scripts/install-host-linux.sh`, release tarball |
+| `packaging/linux/70-drawsplay-drm-connector.rules` | udev: lets `plugdev` force a spare HDMI port on | `scripts/install-host-linux.sh`, release tarball |
+| `packaging/linux/99-drawsplay-uinput.rules` | udev: `/dev/uinput` for the logged-in session (pen, touch, keyboard) | both `scripts/install-host-linux.sh` and `desktop/packaging/install-linux.sh` |
+| `packaging/linux/drawsplay-display-helper`, `com.drawsplay.display-helper.policy` | root helper and polkit action for X11 virtual displays | `scripts/install-host-linux.sh` |
+| `packaging/windows/drawsplay-aoa.inf` | WinUSB binding template for the accessory identity (must match `host/aoa_inf.go`) | reference for the generated package |
+| `scripts/install-host-linux.sh`, `scripts/uninstall-host-linux.sh` | install / remove the Android-tablet host on Linux | users, release tarball |
+| `scripts/install-host-windows.ps1` | developer install of the host on Windows | developers (users run the installer exe) |
+| `scripts/build-release.ps1` | Windows release build (host, media helper, installer) | CI `release.yml` |
+| `scripts/build-idd-driver.ps1`, `drivers/windows/idd/build.ps1` | build the IddCx driver and copy it into `host/driver/idd/` | developers with the WDK |
+| `scripts/build-native-media.sh` | build the Linux native media helper | developers |
+| `desktop/packaging/package-linux.sh`, `package-windows.ps1` | DrawSplay Desktop release archives | CI `release.yml` |
+| `desktop/packaging/install-linux.sh` | install `dd-host` / `dd-client` for the current user | DrawSplay Desktop users |
 
 ### Windows release packaging
+
+From the repository root:
 
 ```powershell
 .\scripts\build-release.ps1
@@ -257,10 +274,11 @@ Gradle properties or environment variables:
 
 In CI, signing is optional unless the repository variable `DRAWSPLAY_REQUIRE_SIGNING` is `1`; partially configured secrets always fail the build. See [SIGNING.md](SIGNING.md).
 
-### USB accessory (AOA) packaging files
+### Linux and USB accessory (AOA) packaging files
 
 - `packaging/linux/70-drawsplay-aoa.rules`: udev rule granting the logged-in user (`uaccess`) access to Android devices for the ADB-free transport. Install to `/etc/udev/rules.d/`. The per-vendor lines skip devices that expose HID, printer, mass-storage, hub or wireless interfaces, so a tablet maker's keyboards, drives or dongles are not opened up. Comments must stay on their own lines: udev ignores a rule line with a trailing comment.
 - `packaging/linux/70-drawsplay-drm-connector.rules`: makes each HDMI connector's `status` file writable by the `plugdev` group, so the host can force a spare port on for the X11 virtual display without a password prompt.
+- `packaging/linux/99-drawsplay-uinput.rules`: grants the logged-in session (`uaccess`) access to `/dev/uinput` for pen, touch and keyboard injection. Both the host installer and DrawSplay Desktop's `install-linux.sh --udev` install this same file; the host uninstaller keeps it while `dd-host` is installed.
 - `packaging/linux/drawsplay-display-helper` and `com.drawsplay.display-helper.policy`: the fixed-purpose root helper (installed to `/usr/libexec/drawsplay/`) and its polkit action. The host runs root steps (forcing a connector, loading `vkms`) through it, so the password prompt names DrawSplay; without it the host falls back to a generic `pkexec` prompt.
 - `packaging/windows/drawsplay-aoa.inf`: WinUSB binding for the accessory identity. The tablet's normal-mode identity also needs WinUSB for AOA switching; the installed host generates and signs a WinUSB package on the user's PC for both (per-PC self-signed certificate, private key deleted after signing), so no build-time driver signing is needed.
 

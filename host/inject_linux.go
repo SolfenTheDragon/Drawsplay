@@ -43,8 +43,8 @@ package main
 // output's rectangle of the X screen itself where no compositor maps the
 // device (see x11_tablet_linux.go and tabletAbsCoords).
 //
-// Requires write access to /dev/uinput: either run via sudo or add a udev
-// rule granting the user access (see README).
+// Requires write access to /dev/uinput, which the installer grants to the
+// logged-in session with packaging/linux/99-drawsplay-uinput.rules.
 
 import (
 	"fmt"

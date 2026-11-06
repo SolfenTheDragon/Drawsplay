@@ -24,7 +24,7 @@ cp "$bin/dd-host" "$bin/dd-client" "dist/${name}/"
 # Documentation is optional (it may not be in the checkout).
 if ls docs/*.md >/dev/null 2>&1; then mkdir -p "dist/${name}/docs" && cp docs/*.md "dist/${name}/docs/"; fi
 cp ../README.md "dist/${name}/" 2>/dev/null || true
-cp packaging/install-linux.sh packaging/99-drawsplay-desktop.rules "dist/${name}/"
+cp packaging/install-linux.sh ../packaging/linux/99-drawsplay-uinput.rules "dist/${name}/"
 cp ../LICENSE "dist/${name}/LICENSE" 2>/dev/null || true
 chmod +x "dist/${name}/install-linux.sh"
 tar -C dist -czf "dist/${name}.tar.gz" "${name}"

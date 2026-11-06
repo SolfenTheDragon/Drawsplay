@@ -216,17 +216,20 @@ if command -v vainfo >/dev/null 2>&1 && ! vainfo 2>/dev/null | grep -q "EncSlice
   echo
 fi
 
-# --- User groups (uinput + adb USB access) ----------------------------------
+# --- User groups (USB access, spare HDMI port) ------------------------------
+# plugdev lets the host force a spare HDMI port on (70-drawsplay-drm-connector.rules).
+# /dev/uinput needs no group: 99-drawsplay-uinput.rules grants it to the
+# logged-in session. The "input" group is not used: it can read every keyboard.
 user_groups="$(groups "$USER" 2>/dev/null || true)"
 needs_groups=()
-for g in input plugdev; do
+for g in plugdev; do
   if [[ ! "$user_groups" =~ (^|[[:space:]])$g($|[[:space:]]) ]]; then
     needs_groups+=("$g")
   fi
 done
 if [[ ${#needs_groups[@]} -gt 0 ]]; then
   group_list="$(IFS=,; echo "${needs_groups[*]}")"
-  echo "User '$USER' is missing group membership: ${needs_groups[*]} (needed for pen/uinput injection and USB access)."
+  echo "User '$USER' is missing group membership: ${needs_groups[*]} (needed for USB and display access)."
   if [[ "$SKIP_INSTALL" -eq 0 ]]; then
     if sudo usermod -aG "$group_list" "$USER"; then
       echo "Added $USER to: ${needs_groups[*]}. Log out and back in for this to take effect."
@@ -240,46 +243,38 @@ if [[ ${#needs_groups[@]} -gt 0 ]]; then
   echo
 fi
 
-# --- /dev/uinput permissions (pen/touch injection) --------------------------
-UDEV_RULE_FILE="/etc/udev/rules.d/99-drawsplay-uinput.rules"
-UDEV_RULE_LINE='KERNEL=="uinput", GROUP="input", MODE="0660"'
-uinput_needs_fix=0
-if [[ -e /dev/uinput ]]; then
-  uinput_group="$(stat -c '%G' /dev/uinput 2>/dev/null || echo "")"
-  uinput_mode="$(stat -c '%a' /dev/uinput 2>/dev/null || echo "")"
-  if [[ "$uinput_group" != "input" || "$uinput_mode" != "660" ]]; then
-    uinput_needs_fix=1
-  fi
+# --- /dev/uinput access (pen, touch and keyboard injection) -----------------
+# Shared with DrawSplay Desktop's installer, which installs the same file.
+UINPUT_RULE_SOURCE="$SCRIPT_DIR/99-drawsplay-uinput.rules"
+if [[ ! -f "$UINPUT_RULE_SOURCE" ]]; then
+  UINPUT_RULE_SOURCE="$ROOT_DIR/packaging/linux/99-drawsplay-uinput.rules"
 fi
-if [[ ! -f "$UDEV_RULE_FILE" ]] || [[ "$uinput_needs_fix" -eq 1 ]]; then
-  echo "/dev/uinput is not accessible to the 'input' group (needed for pen/touch injection)."
-  if [[ "$SKIP_INSTALL" -eq 0 ]]; then
-    if [[ ! -f "$UDEV_RULE_FILE" ]]; then
-      echo "Installing udev rule: $UDEV_RULE_FILE"
-      if echo "$UDEV_RULE_LINE" | sudo tee "$UDEV_RULE_FILE" >/dev/null; then
-        sudo udevadm control --reload-rules 2>/dev/null || true
-        sudo udevadm trigger --name-match=uinput 2>/dev/null || true
-      else
-        echo "Could not write udev rule. Run manually:"
-        echo "  echo '$UDEV_RULE_LINE' | sudo tee $UDEV_RULE_FILE"
-        echo "  sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput"
-      fi
-    fi
-    sudo chgrp input /dev/uinput 2>/dev/null || true
-    sudo chmod 0660 /dev/uinput 2>/dev/null || true
-    if [[ "$(stat -c '%G:%a' /dev/uinput 2>/dev/null)" == "input:660" ]]; then
-      echo "/dev/uinput permissions fixed."
-    else
-      echo "Could not verify /dev/uinput permissions; a reboot may be required."
-      NEEDS_RESTART=1
+UINPUT_RULE_TARGET="/etc/udev/rules.d/99-drawsplay-uinput.rules"
+UINPUT_MANUAL="  sudo install -m 0644 99-drawsplay-uinput.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger --name-match=uinput"
+if [[ ! -f "$UINPUT_RULE_SOURCE" ]]; then
+  echo "udev rule 99-drawsplay-uinput.rules not found; pen and touch input need it. Download it and run:"
+  echo "$UINPUT_MANUAL"
+elif cmp -s "$UINPUT_RULE_SOURCE" "$UINPUT_RULE_TARGET" 2>/dev/null; then
+  echo "uinput udev rule already installed: $UINPUT_RULE_TARGET"
+elif [[ "$SKIP_INSTALL" -eq 1 ]]; then
+  echo "Run manually:"
+  echo "$UINPUT_MANUAL"
+else
+  # Replaces the older rule, which gave /dev/uinput to the "input" group.
+  echo "Installing uinput udev rule for pen and touch input (asks for your password)..."
+  if sudo install -m 0644 "$UINPUT_RULE_SOURCE" "$UINPUT_RULE_TARGET" &&
+    sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput; then
+    echo "Installed $UINPUT_RULE_TARGET."
+    if [[ ! -w /dev/uinput ]]; then
+      echo "/dev/uinput is not writable yet; log out and back in."
+      NEEDS_RELOGIN=1
     fi
   else
-    echo "Run manually:"
-    echo "  echo '$UDEV_RULE_LINE' | sudo tee $UDEV_RULE_FILE"
-    echo "  sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput"
+    echo "Could not install the udev rule. Run manually:" >&2
+    echo "$UINPUT_MANUAL" >&2
   fi
-  echo
 fi
+echo
 
 # --- Android USB access (accessory mode) ------------------------------------
 UDEV_RULE_SOURCE="$SCRIPT_DIR/70-drawsplay-aoa.rules"

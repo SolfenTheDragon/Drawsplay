@@ -104,7 +104,7 @@ func currentSetupChecklist(cfg settings) setupChecklist {
 			Label:  "uinput injection access",
 			OK:     !containsWarning(warnings, "uinput"),
 			Detail: warningDetail(warnings, "uinput", "Ready"),
-			Action: `Create /etc/udev/rules.d/99-drawsplay-uinput.rules with: KERNEL=="uinput", MODE="0660", GROUP="input"; add user to input group; reload udev; then reconnect.`,
+			Action: "Run the DrawSplay install script again (it installs 99-drawsplay-uinput.rules), then log out and back in and reconnect.",
 		})
 		if x11SessionActive() {
 			items = append(items, setupCheckItem{

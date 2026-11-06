@@ -88,7 +88,13 @@ for f in \
   /etc/modprobe.d/drawsplay-vkms.conf \
   /usr/libexec/drawsplay/drawsplay-display-helper \
   /usr/share/polkit-1/actions/com.drawsplay.display-helper.policy; do
-  [[ -e "$f" ]] && SYSTEM_FILES+=("$f")
+  [[ -e "$f" ]] || continue
+  # DrawSplay Desktop's dd-host uses the same uinput rule; keep it while dd-host is installed.
+  if [[ "$f" == */99-drawsplay-uinput.rules ]] && { command -v dd-host >/dev/null 2>&1 || [[ -x "$HOME/.local/bin/dd-host" ]]; }; then
+    echo "Keeping $f: DrawSplay Desktop (dd-host) uses it too."
+    continue
+  fi
+  SYSTEM_FILES+=("$f")
 done
 
 # A forced port is connected with no monitor identity (no EDID) behind it. It
@@ -170,7 +176,7 @@ if [[ "$PURGE" -eq 1 ]]; then
 else
   echo "DrawSplay settings and logs were kept in ${CONFIG_DIR}/DrawSplay (run with --purge to delete them)."
 fi
-echo "Group memberships added by the installer (input, plugdev) are kept; remove them with: sudo gpasswd -d \$USER <group>"
+echo "Group memberships added by the installer (plugdev; older versions also input) are kept; remove them with: sudo gpasswd -d \$USER <group>"
 
 # --- Restart prompt ----------------------------------------------------------
 # Kernel modules and display state DrawSplay touched (for example vkms while
