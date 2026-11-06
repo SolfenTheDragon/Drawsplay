@@ -1,4 +1,4 @@
-﻿package com.drawsplay.tablet
+package com.drawsplay.tablet
 
 import com.drawsplay.tablet.video.TileView
 import com.drawsplay.tablet.transport.UsbPriorityPolicy
@@ -45,14 +45,14 @@ import com.drawsplay.tablet.video.VideoScaling
 /**
  * Single fullscreen activity. Zero-configuration by design: both channels
  * connect automatically, retry until the host appears, and reconnect after
- * drops â€” there are no connect/disconnect controls.
+ * drops — there are no connect/disconnect controls.
  *
  * View stack (back to front):
- *  1. [SurfaceView]   â€” hardware-decoded host video, sized and centred
+ *  1. [SurfaceView]   — hardware-decoded host video, sized and centred
  *                       inside videoFrame per the host's [VideoScaling].
- *  2. [InputPadView]  â€” transparent, captures touch/stylus over the video so
+ *  2. [InputPadView]  — transparent, captures touch/stylus over the video so
  *                       input coordinates map 1:1 onto displayed host pixels.
- *  3. Status text     â€” only visible while waiting for the host.
+ *  3. Status text     — only visible while waiting for the host.
  *
  * Channel lifecycles:
  *  - By default, input runs from onStart to onStop and video tracks the
@@ -378,7 +378,7 @@ class MainActivity : AppCompatActivity() {
     // so the host sizes its virtual display to match by default, plus the
     // stored preferred mode. When the user changes the resolution in the
     // Windows display settings, the host pushes it back and it is persisted
-    // here â€” the app is the durable store for the user's choice.
+    // here — the app is the durable store for the user's choice.
 
     private val displayPrefs by lazy { getSharedPreferences("display", MODE_PRIVATE) }
 

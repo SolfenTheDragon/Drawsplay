@@ -1,4 +1,4 @@
-﻿package com.drawsplay.tablet.input
+package com.drawsplay.tablet.input
 
 import com.drawsplay.tablet.video.EchoTracker
 import android.os.Build

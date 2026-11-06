@@ -1,4 +1,4 @@
-﻿package com.drawsplay.tablet.input
+package com.drawsplay.tablet.input
 
 import android.content.Context
 import android.graphics.Bitmap

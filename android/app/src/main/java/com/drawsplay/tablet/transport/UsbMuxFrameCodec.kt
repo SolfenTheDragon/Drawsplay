@@ -1,4 +1,4 @@
-﻿package com.drawsplay.tablet.transport
+package com.drawsplay.tablet.transport
 
 import java.io.EOFException
 import java.io.InputStream

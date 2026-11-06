@@ -1,4 +1,4 @@
-﻿package com.drawsplay.tablet.video
+package com.drawsplay.tablet.video
 
 import android.util.Log
 import android.os.Handler
@@ -29,12 +29,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  *     [1 byte packet type][4 byte payload length][payload]
  *
- *     type 0 (config) â€” JSON {"codec","encoder","fps"}, once per session.
- *     type 1 (nal)    â€” one H.264 Annex-B NAL unit, start code included.
+ *     type 0 (config) — JSON {"codec","encoder","fps"}, once per session.
+ *     type 1 (nal)    — one H.264 Annex-B NAL unit, start code included.
  *
  * Connection model: fully automatic, mirroring the input channel. [start]
  * launches a reader thread that connects, streams until failure, then sleeps
- * [RECONNECT_DELAY_MS] and reconnects â€” forever, until [stop]. An open app is
+ * [RECONNECT_DELAY_MS] and reconnects — forever, until [stop]. An open app is
  * a willing secondary monitor; there is no manual connect control.
  *
  * A fresh [VideoDecoder] is created per connection (the host restarts its
@@ -281,7 +281,7 @@ class VideoChannel(
                 tiles?.release()
                 if (tileModeActive) listener.onTileLayerVisible(false)
                 decoder.release()
-                // Note: never lockCanvas() this surface to blank it â€” that
+                // Note: never lockCanvas() this surface to blank it — that
                 // permanently connects it as a CPU producer, and MediaCodec
                 // can no longer attach on reconnect ("already connected
                 // (cur=2 req=3)"). The activity's opaque status overlay is
@@ -294,7 +294,7 @@ class VideoChannel(
      * Starts the upstream statistics reporter (M4): every [STATS_INTERVAL_MS]
      * a JSON line with per-interval decode statistics is written back on the
      * video socket. The host uses these for adaptive bitrate decisions and as
-     * a fast dead-peer signal. Reporter failures end silently â€” the reader
+     * a fast dead-peer signal. Reporter failures end silently — the reader
      * side will notice a dead socket on its own.
      */
     private fun startStatsReporter(socket: Socket, decoder: VideoDecoder, writeLock: Any): Thread {

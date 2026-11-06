@@ -1,4 +1,4 @@
-﻿package com.drawsplay.tablet.transport
+package com.drawsplay.tablet.transport
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals

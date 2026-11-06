@@ -1,0 +1,14 @@
+# Keeps source files in one encoding and line-ending style.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+
+[*.go]
+indent_style = tab
+
+# Windows-only files keep CRLF.
+[*.{bat,cmd,ps1,inf}]
+end_of_line = crlf

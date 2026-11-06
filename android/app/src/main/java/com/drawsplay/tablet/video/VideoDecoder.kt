@@ -1,4 +1,4 @@
-﻿package com.drawsplay.tablet.video
+package com.drawsplay.tablet.video
 
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicLong
  * Frame pacing: decoded frames are released with an explicit presentation
  * timestamp on an even cadence derived from the stream fps ([streamFps]),
  * so SurfaceFlinger latches one frame per source interval regardless of
- * network/decode arrival jitter â€” that jitter otherwise maps 1:1 onto
+ * network/decode arrival jitter — that jitter otherwise maps 1:1 onto
  * screen time and makes video content judder. The cadence stays at most
  * one frame interval ahead of the clock (bounded latency); a frame whose
  * slot has already passed resyncs and renders immediately, so a paused

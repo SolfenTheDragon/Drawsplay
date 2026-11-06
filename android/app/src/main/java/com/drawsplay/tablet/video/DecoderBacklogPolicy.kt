@@ -1,4 +1,4 @@
-﻿package com.drawsplay.tablet.video
+package com.drawsplay.tablet.video
 
 /**
  * Chooses a safe low-latency recovery point when MediaCodec's input queue
