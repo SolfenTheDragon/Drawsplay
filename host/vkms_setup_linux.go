@@ -226,7 +226,11 @@ func loadVkmsPrivileged(mayPrompt bool) error {
 	if err != nil {
 		return errors.New("pkexec is not available; run \"sudo modprobe vkms create_default_dev=1\" and configure vkms to load at boot")
 	}
-	err = run(pkexec, "sh", "-c", vkmsLoadAndPersistScript)
+	if helper, ok := displayHelper(); ok {
+		err = run(pkexec, helper, "vkms-load")
+	} else {
+		err = run(pkexec, "sh", "-c", vkmsLoadAndPersistScript)
+	}
 	var ee *exec.ExitError
 	// 126: the user dismissed the prompt or is not authorized.
 	if errors.As(err, &ee) && ee.ExitCode() == 126 {

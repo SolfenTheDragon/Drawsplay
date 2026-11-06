@@ -85,7 +85,9 @@ for f in \
   /etc/udev/rules.d/70-drawsplay-drm-connector.rules \
   /etc/udev/rules.d/99-drawsplay-uinput.rules \
   /etc/modules-load.d/drawsplay-vkms.conf \
-  /etc/modprobe.d/drawsplay-vkms.conf; do
+  /etc/modprobe.d/drawsplay-vkms.conf \
+  /usr/libexec/drawsplay/drawsplay-display-helper \
+  /usr/share/polkit-1/actions/com.drawsplay.display-helper.policy; do
   [[ -e "$f" ]] && SYSTEM_FILES+=("$f")
 done
 
@@ -112,7 +114,7 @@ for a in "$@"; do
   if [[ "$a" == "--" ]]; then seen=1; continue; fi
   if [[ "$seen" -eq 0 ]]; then
     case "$a" in
-      /etc/udev/rules.d/70-drawsplay-aoa.rules|/etc/udev/rules.d/70-drawsplay-drm-connector.rules|/etc/udev/rules.d/99-drawsplay-uinput.rules|/etc/modules-load.d/drawsplay-vkms.conf|/etc/modprobe.d/drawsplay-vkms.conf) files+=("$a") ;;
+      /etc/udev/rules.d/70-drawsplay-aoa.rules|/etc/udev/rules.d/70-drawsplay-drm-connector.rules|/etc/udev/rules.d/99-drawsplay-uinput.rules|/etc/modules-load.d/drawsplay-vkms.conf|/etc/modprobe.d/drawsplay-vkms.conf|/usr/libexec/drawsplay/drawsplay-display-helper|/usr/share/polkit-1/actions/com.drawsplay.display-helper.policy) files+=("$a") ;;
       *) echo "refusing unexpected path: $a" >&2; exit 2 ;;
     esac
   else
@@ -123,6 +125,7 @@ done
 for p in "${ports[@]}"; do echo detect >"$p"; done
 if [[ ${#files[@]} -gt 0 ]]; then
   rm -f "${files[@]}"
+  rmdir /usr/libexec/drawsplay 2>/dev/null
   udevadm control --reload-rules
   udevadm trigger --subsystem-match=drm --subsystem-match=usb --action=change
   for f in "${files[@]}"; do

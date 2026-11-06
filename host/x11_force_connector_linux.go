@@ -184,6 +184,9 @@ func writeConnectorStatusPrivileged(path, value string, mayPrompt bool) error {
 	if err != nil {
 		return errors.New("pkexec is not available; run: echo on | sudo tee " + path)
 	}
+	if helper, ok := displayHelper(); ok {
+		args = []string{helper, "connector", path, value}
+	}
 	err = run(append([]string{pkexec}, args...)...)
 	var ee *exec.ExitError
 	if errors.As(err, &ee) && ee.ExitCode() == 126 {

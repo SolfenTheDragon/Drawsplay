@@ -308,6 +308,39 @@ else
 fi
 echo
 
+# --- Display helper (X11 virtual display, run through pkexec) ---------------
+# The host switches spare HDMI ports and loads vkms through this small,
+# fixed-purpose helper, so the password prompt names a DrawSplay action
+# instead of asking to run a shell as root.
+if [[ "$WAYLAND_CAPTURE" -eq 0 ]]; then
+  HELPER_SOURCE="$SCRIPT_DIR/drawsplay-display-helper"
+  POLICY_SOURCE="$SCRIPT_DIR/com.drawsplay.display-helper.policy"
+  if [[ ! -f "$HELPER_SOURCE" ]]; then
+    HELPER_SOURCE="$ROOT_DIR/packaging/linux/drawsplay-display-helper"
+    POLICY_SOURCE="$ROOT_DIR/packaging/linux/com.drawsplay.display-helper.policy"
+  fi
+  HELPER_TARGET="/usr/libexec/drawsplay/drawsplay-display-helper"
+  POLICY_TARGET="/usr/share/polkit-1/actions/com.drawsplay.display-helper.policy"
+  if [[ ! -f "$HELPER_SOURCE" || ! -f "$POLICY_SOURCE" ]]; then
+    echo "Display helper files not found; the host will fall back to a generic administrator prompt."
+  elif cmp -s "$HELPER_SOURCE" "$HELPER_TARGET" 2>/dev/null && cmp -s "$POLICY_SOURCE" "$POLICY_TARGET" 2>/dev/null; then
+    echo "Display helper already installed: $HELPER_TARGET"
+  elif [[ "$SKIP_INSTALL" -eq 1 ]]; then
+    echo "Optional: install the display helper so the password prompt names DrawSplay:"
+    echo "  sudo install -D -o root -g root -m 0755 drawsplay-display-helper $HELPER_TARGET"
+    echo "  sudo install -D -o root -g root -m 0644 com.drawsplay.display-helper.policy $POLICY_TARGET"
+  else
+    echo "Installing the display helper (asks for your password)..."
+    if sudo install -D -o root -g root -m 0755 "$HELPER_SOURCE" "$HELPER_TARGET" &&
+      sudo install -D -o root -g root -m 0644 "$POLICY_SOURCE" "$POLICY_TARGET"; then
+      echo "Installed $HELPER_TARGET"
+    else
+      echo "Could not install the display helper; the host falls back to a generic administrator prompt." >&2
+    fi
+  fi
+fi
+echo
+
 # --- Spare HDMI connector access (X11 virtual display fallback) --------------
 # Lets the plugdev group force an unplugged HDMI port on, so the X11 fallback
 # virtual display works without root or a password prompt on every boot.

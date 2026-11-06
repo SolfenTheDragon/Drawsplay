@@ -1,0 +1,27 @@
+#!/bin/bash
+# DrawSplay display helper: the only commands the DrawSplay host runs as root on X11.
+# Installed root-owned at /usr/libexec/drawsplay/drawsplay-display-helper and run through
+# pkexec, so the password prompt names this action (com.drawsplay.display-helper) instead of
+# "run a shell as root". Every argument is checked; anything else is refused.
+#
+#   drawsplay-display-helper connector /sys/class/drm/cardN-HDMI-A-M/status on|detect
+#   drawsplay-display-helper vkms-load
+set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+case "${1:-}" in
+  connector)
+    [[ $# -eq 3 ]] || { echo "usage: $0 connector PATH on|detect" >&2; exit 2; }
+    [[ "$2" =~ ^/sys/class/drm/card[0-9]+-HDMI-A-[0-9]+/status$ ]] || { echo "refusing path: $2" >&2; exit 2; }
+    [[ "$3" == on || "$3" == detect ]] || { echo "refusing value: $3" >&2; exit 2; }
+    printf '%s\n' "$3" >"$2"
+    ;;
+  vkms-load)
+    [[ $# -eq 1 ]] || { echo "usage: $0 vkms-load" >&2; exit 2; }
+    modprobe vkms create_default_dev=1 || modprobe vkms
+    ;;
+  *)
+    echo "usage: $0 connector PATH on|detect | vkms-load" >&2
+    exit 2
+    ;;
+esac
