@@ -190,7 +190,9 @@ impl VirtualOutput {
             return Err("no X11 display (Wayland sessions are not supported yet)".into());
         }
         let q = query()?;
-        let candidates = candidate_outputs(&q);
+        // The Android DrawSplay host (or another dd-host) may be using a spare output right now.
+        let candidates: Vec<&Output> =
+            candidate_outputs(&q).into_iter().filter(|o| !crate::display_claims::claimed_by_other(&o.name)).collect();
         if candidates.is_empty() {
             return Err("no spare video output to use (all outputs are in use)".into());
         }

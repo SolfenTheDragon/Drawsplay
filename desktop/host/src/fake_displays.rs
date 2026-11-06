@@ -80,6 +80,19 @@ fn is_fake_name(name: &str) -> bool {
     n.starts_with("virtual") || n.starts_with("headless")
 }
 
+/// The Intel X driver's `VIRTUAL1...` outputs carry real monitors (on another GPU) while
+/// `intel-virtual-output` runs, so they are not fake then.
+fn intel_virtual_output_running() -> bool {
+    let Ok(rd) = std::fs::read_dir("/proc") else { return false };
+    rd.flatten().any(|e| std::fs::read_to_string(e.path().join("comm")).is_ok_and(|c| c.trim() == "intel-virtual-o"))
+}
+
+/// Outputs another live program has claimed (see `display_claims`), and Intel `VIRTUAL*` outputs
+/// bridging real monitors, are never touched.
+fn protected(name: &str, intel_bridge: bool) -> bool {
+    (intel_bridge && name.starts_with("VIRTUAL")) || crate::display_claims::claimed_by_other(name)
+}
+
 /// Decide which X11 outputs are fake. Pure so it can be tested. `forced` are RandR names.
 pub fn x11_fakes<'a>(q: &'a linux_display::Query, forced: &[String]) -> Vec<&'a linux_display::Output> {
     let fake = |o: &linux_display::Output| {
@@ -150,7 +163,8 @@ fn remove_x11(report: &mut Report) {
     let forced = forced_connectors(Path::new("/sys/class/drm"));
     let names: Vec<String> = forced.iter().map(|(n, _)| n.clone()).collect();
     let Ok(q) = linux_display::query() else { return };
-    for o in x11_fakes(&q, &names) {
+    let intel_bridge = intel_virtual_output_running();
+    for o in x11_fakes(&q, &names).into_iter().filter(|o| !protected(&o.name, intel_bridge)) {
         let active = o.geometry.is_some();
         if active && !linux_display::release_output(&o.name, "") {
             report.failed.push(o.name.clone());
@@ -171,7 +185,7 @@ fn remove_x11(report: &mut Report) {
 
 fn remove_wayland(report: &mut Report) {
     let Ok(outs) = wayland_display::outputs() else { return };
-    for o in wayland_fakes(&outs) {
+    for o in wayland_fakes(&outs).into_iter().filter(|o| !protected(&o.name, false)) {
         if wayland_display::release_named(wayland_display::kind_of_session(), &o.name) {
             report.removed.push(o.name.clone());
         } else {

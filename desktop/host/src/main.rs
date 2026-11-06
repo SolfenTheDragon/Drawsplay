@@ -5,6 +5,8 @@ mod access;
 #[cfg(target_os = "linux")]
 mod active_record;
 mod display;
+#[cfg(target_os = "linux")]
+mod display_claims;
 mod encoder;
 #[cfg(target_os = "linux")]
 mod fake_displays;

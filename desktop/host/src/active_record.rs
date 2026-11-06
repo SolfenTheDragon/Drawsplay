@@ -59,6 +59,8 @@ pub fn write(kind: &str, output: &str, mode: &str) {
     all.retain(|r| !(r.kind == kind && r.output == output));
     all.push(Record { kind: kind.into(), output: output.into(), mode: mode.into(), pid: std::process::id() });
     save(&all);
+    // Tell the Android host (and other dd-hosts) this output is in use.
+    crate::display_claims::claim(crate::display_claims::OUTPUT, output);
 }
 
 /// Forget one monitor once it is verifiably gone.
@@ -67,6 +69,7 @@ pub fn clear(output: &str) {
     let mut all = read();
     all.retain(|r| r.output != output);
     save(&all);
+    crate::display_claims::release(output);
 }
 
 /// Output and mode names go straight onto the command line of `xrandr`, `swaymsg` and `hyprctl`. A name

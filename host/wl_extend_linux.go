@@ -255,6 +255,7 @@ func stopHeldWlExtLocked() {
 		log.Printf("%s extended display %s: could not remove it: %v", b.Label(), hd.Name(), err)
 		return
 	}
+	releaseDisplayClaim(displayClaimOutput, hd.Name())
 	log.Printf("%s extended display %s removed", b.Label(), hd.Name())
 }
 
@@ -340,6 +341,7 @@ func ensureWlExtLocked(b wlExtBackend, w, h int) error {
 			return err
 		}
 		wlExt.held, wlExt.backend, wlExt.seen = hd, b, nil
+		claimDisplay(displayClaimOutput, hd.Name())
 		log.Printf("%s extended display %s created", b.Label(), hd.Name())
 		err = arrangeWlExtLocked(b, hd, w, h, true)
 		if err == nil {

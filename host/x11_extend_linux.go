@@ -42,8 +42,8 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -266,6 +266,10 @@ func pickX11VirtualOutput(st xrandrState, name string) (xrandrOutput, error) {
 		primary := ""
 		for _, o := range st.Outputs {
 			if !isX11VirtualOutputName(o.Name) {
+				continue
+			}
+			// dd-host (DrawSplay Desktop) may be using it right now.
+			if displayClaimedByOther(o.Name) {
 				continue
 			}
 			// vkms always reports connected; the intel driver's VIRTUAL
@@ -754,6 +758,7 @@ func configureX11Extended(display, name string, w, h, nativeW, nativeH int) (x11
 		if ok {
 			o, _ := settled.output(out.Name)
 			res.target = x11ExtendedTarget(settled, o)
+			claimDisplay(displayClaimOutput, out.Name)
 			return res, nil
 		}
 		lastErr = fmt.Errorf("%s did not keep the %dx%d mode (the window manager reconfigured the screen)", out.Name, w, h)
@@ -773,6 +778,11 @@ func switchOffX11Output(display, name string) (placement *x11Placement, switched
 	}
 	o, ok := st.output(name)
 	if !ok || !o.Active {
+		releaseDisplayClaim(displayClaimOutput, name)
+		return nil, false, nil
+	}
+	// Another DrawSplay program is using this output: it is not ours to switch off.
+	if displayClaimedByOther(name) {
 		return nil, false, nil
 	}
 	var others []xrandrOutput
@@ -810,6 +820,7 @@ func switchOffX11Output(display, name string) (placement *x11Placement, switched
 	if _, err := xrandrRun(display, args...); err != nil {
 		return nil, false, err
 	}
+	releaseDisplayClaim(displayClaimOutput, name)
 	return placement, true, nil
 }
 
@@ -1246,7 +1257,7 @@ func releaseStaleVirtualDisplays() {
 		return
 	}
 	o, err := pickX11VirtualOutput(st, strings.TrimSpace(os.Getenv(x11OutputEnv)))
-	if err != nil || !o.Active {
+	if err != nil || !o.Active || displayClaimedByOther(o.Name) {
 		return
 	}
 	if _, _, err := switchOffX11Output(display, o.Name); err != nil {
