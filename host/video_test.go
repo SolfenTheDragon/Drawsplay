@@ -107,11 +107,11 @@ func TestSplitAnnexBPayloadEndingInZero(t *testing.T) {
 	mustUnits(t, buf, [][]byte{{0, 0, 1, 0x67}}, []byte{0x00, 0x00, 0x00, 0x01, 0x68})
 }
 
-func TestWriteVideoPacketFraming(t *testing.T) {
+func TestStreamVideoSinkFraming(t *testing.T) {
 	var out bytes.Buffer
 	payload := []byte{0xDE, 0xAD, 0xBE, 0xEF}
-	if err := writeVideoPacket(&out, videoPacketNAL, payload); err != nil {
-		t.Fatalf("writeVideoPacket: %v", err)
+	if err := (streamVideoSink{&out}).WritePacket(videoPacketNAL, payload); err != nil {
+		t.Fatalf("WritePacket: %v", err)
 	}
 	got := out.Bytes()
 	if len(got) != 5+len(payload) {

@@ -48,15 +48,16 @@
 //     with sway_extend_linux.go, hypr_extend_linux.go, kwin_extend_linux.go),
 //     or a mirror. The three extend backends share the hold-and-release
 //     life cycle in held_display_linux.go. Windows: display_windows.go with
-//     the IddCx driver
-//     (idd_*.go), Parsec (parsec_*.go) or a mirror.
+//     the IddCx driver (idd_*.go), Parsec (parsec_*.go) or a mirror.
 //  2. Build ranked capture and encode pipelines (pipeline.go,
 //     pipeline_linux.go, pipeline_windows.go, native_media*.go) and run one
 //     (ffmpeg.go).
 //  3. Split the encoder output into H.264 units (internal/h264,
-//     au_boundary.go) and send them as video packets (protocol.go). On Wi-Fi,
-//     wifi_video_bridge.go turns those packets into Wi-Fi frames.
-//  4. Tablet feedback (feedback.go) drives the bitrate ladder (ratecontrol.go,
+//     au_boundary.go) and write them as video packets (protocol.go) to the
+//     connection's videoSink (video_sink.go): the USB byte stream, or Wi-Fi
+//     frames (wifi_video_sink.go).
+//  4. Tablet feedback, read from the connection's feedbackSource
+//     (feedback.go), drives the bitrate ladder (ratecontrol.go,
 //     congestion*.go) and temporal-layer dropping (temporal.go).
 //
 // # Settings page, status and tray

@@ -8,9 +8,9 @@ import (
 )
 
 // newWiFiSessionConns turns an attached paired control/video socket pair into
-// the two net.Conns the existing accept loops expect: an input conn (control
-// socket as a byte stream) and a video conn (writes become Wi-Fi frames after
-// the tablet reports its decoder ready). Closing either conn closes its socket.
+// the two net.Conns the accept loops expect: an input conn (control socket as
+// a byte stream) and a video conn whose videoEndpoint sends Wi-Fi frames once
+// the tablet reports its decoder ready. Closing either conn closes its socket.
 func newWiFiSessionConns(control, video net.Conn, epoch uint64, limits wifilan.SessionHello, readyTimeout time.Duration) (input, videoConn net.Conn, err error) {
 	guard, err := wifilan.NewSequenceGuard(epoch)
 	if err != nil {
@@ -19,11 +19,7 @@ func newWiFiSessionConns(control, video net.Conn, epoch uint64, limits wifilan.S
 	gate := newWiFiDecoderGate()
 	in := newWiFiInputConn(control, epoch, guard, 2)
 	in.SetControlHandler(gate.Handle)
-	bridge := newWiFiVideoBridge(video, epoch, int(limits.MaxAccessUnit), func() error {
-		return gate.Wait(readyTimeout)
-	})
-	if limits.Features&wifilan.FeatureVideoStats != 0 {
-		return in, newWiFiVideoConnWithStats(video, bridge, epoch), nil
-	}
-	return in, newWiFiVideoConn(video, bridge), nil
+	ready := func() error { return gate.Wait(readyTimeout) }
+	stats := limits.Features&wifilan.FeatureVideoStats != 0
+	return in, newWiFiVideoConn(video, epoch, int(limits.MaxAccessUnit), ready, stats), nil
 }

@@ -358,7 +358,7 @@ func withNativeHelperCandidate(specs []pipelineSpec, opts videoOptions, target c
 // runFramedPipeline pumps a helper's framed stdout to the client. As with
 // runEncodePipeline, an error before any output lets the caller fall back to
 // the next candidate.
-func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec pipelineSpec, monitor *sessionMonitor, rc *rateController, temporal *temporalController, expectBlackout bool, gate *congestionGate) (bool, error) {
+func runFramedPipeline(ctx context.Context, sink videoSink, opts videoOptions, spec pipelineSpec, monitor *sessionMonitor, rc *rateController, temporal *temporalController, expectBlackout bool, gate *congestionGate) (bool, error) {
 	pipeline, err := startCapturePipeline(ctx, spec)
 	if err != nil {
 		return false, err
@@ -443,7 +443,7 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 				Pacing:      "latency",
 				CaptureMode: captureModeDamage,
 			})
-			if err := writeVideoPacket(w, videoPacketConfig, cfg); err != nil {
+			if err := sink.WritePacket(videoPacketConfig, cfg); err != nil {
 				return true, fmt.Errorf("client write: %w", err)
 			}
 			publishVideoStatus(true, spec.Name, opts.Bitrate)
@@ -452,7 +452,7 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 		switch hdr.Kind {
 		case nativeFrameKindAU:
 			if sendMeta {
-				if err := writeVideoPacket(w, videoPacketFrameMeta, frameMetaPayload(hdr.InputSeq, hdr.PipeUs)); err != nil {
+				if err := sink.WritePacket(videoPacketFrameMeta, frameMetaPayload(hdr.InputSeq, hdr.PipeUs)); err != nil {
 					return true, fmt.Errorf("client write: %w", err)
 				}
 			}
@@ -462,7 +462,7 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 				if spec.SignalBT709Limited && h264.NALType(unit) == 7 {
 					unit = h264.WithBT709LimitedVUI(unit)
 				}
-				if err := writeVideoPacket(w, videoPacketNAL, unit); err != nil {
+				if err := sink.WritePacket(videoPacketNAL, unit); err != nil {
 					return true, fmt.Errorf("client write: %w", err)
 				}
 				sentNALs++
@@ -473,7 +473,7 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 			if !sendCursor {
 				break
 			}
-			if err := writeVideoPacket(w, videoPacketCursor, payload); err != nil {
+			if err := sink.WritePacket(videoPacketCursor, payload); err != nil {
 				return true, fmt.Errorf("client write: %w", err)
 			}
 			sentBytes += int64(len(payload))
@@ -485,7 +485,7 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 			if hdr.Kind == nativeFrameKindMode {
 				ptype = videoPacketMode
 			}
-			if err := writeVideoPacket(w, ptype, payload); err != nil {
+			if err := sink.WritePacket(ptype, payload); err != nil {
 				return true, fmt.Errorf("client write: %w", err)
 			}
 			sentBytes += int64(len(payload))

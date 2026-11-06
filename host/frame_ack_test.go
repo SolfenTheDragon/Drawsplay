@@ -97,11 +97,11 @@ func TestStatsReaderCreditsCumulativeAcks(t *testing.T) {
 	mon := &sessionMonitor{}
 	done := make(chan struct{})
 	go func() {
-		mon.runStatsReader(host)
+		mon.runFeedback(newLineFeedback(host))
 		close(done)
 	}()
 
-	// runStatsReader starts by settling everything sent so far.
+	// runFeedback starts by settling everything sent so far.
 	for _, line := range []string{
 		`{"type":"ack","frames":3}`,
 		`{"type":"ack","frames":2}`, // stale/out of order: ignored

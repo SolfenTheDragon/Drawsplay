@@ -118,7 +118,7 @@ func runAUTestPipeline(t *testing.T, spec pipelineSpec, timeout time.Duration) (
 	out := &packetRecorder{}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	produced, err := runEncodePipeline(ctx, out, opts, spec, &sessionMonitor{}, newRateController(opts.Bitrate),
+	produced, err := runEncodePipeline(ctx, streamVideoSink{out}, opts, spec, &sessionMonitor{}, newRateController(opts.Bitrate),
 		newTemporalController(), false, newSessionCongestionGate(target))
 	return out, produced, err
 }

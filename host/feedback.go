@@ -17,11 +17,7 @@ package main
 // session summary log.
 
 import (
-	"bufio"
 	"drawsplay/host/internal/h264"
-	"encoding/json"
-	"log"
-	"net"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -156,16 +152,14 @@ func newWiFiSessionMonitor() *sessionMonitor {
 
 var latestClientVideoStats latest[*clientStatsMsg]
 
-// runStatsReader consumes upstream stats lines until the connection dies.
-// Run as a goroutine; it owns the read half of conn.
-func (m *sessionMonitor) runStatsReader(conn net.Conn) {
-	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, 0, 512), maxStatsLineBytes)
+// runFeedback consumes the tablet's upstream messages until it is gone.
+// Run as a goroutine; it owns src.
+func (m *sessionMonitor) runFeedback(src feedbackSource) {
 	resetFrameAcks()
-	for scanner.Scan() {
-		var stats clientStatsMsg
-		if err := json.Unmarshal(scanner.Bytes(), &stats); err != nil {
-			continue // tolerate unknown upstream traffic
+	for {
+		stats, err := src.Next()
+		if err != nil {
+			break
 		}
 		if stats.Type == "keyframe" {
 			m.keyframeWanted.Store(true)
@@ -251,29 +245,6 @@ func (m *sessionMonitor) gone() bool { return m.clientGone.Load() }
 
 // stats returns the most recent client report, or nil before the first one.
 func (m *sessionMonitor) stats() *clientStatsMsg { return m.lastStats.Load() }
-
-// monitoredWriter wraps the video connection: every write carries a
-// dead-peer deadline, and slow (buffer-full) writes raise the congestion
-// signal.
-type monitoredWriter struct {
-	conn net.Conn
-	mon  *sessionMonitor
-}
-
-func (w *monitoredWriter) Write(p []byte) (int, error) {
-	if err := w.conn.SetWriteDeadline(time.Now().Add(videoWriteTimeout)); err != nil {
-		return 0, err
-	}
-	start := time.Now()
-	n, err := w.conn.Write(p)
-	w.mon.bytesSent.Add(int64(n))
-	if d := time.Since(start); d > slowWriteThreshold && err == nil {
-		w.mon.linkStalled.Store(true)
-		w.mon.congested.Store(true)
-		log.Printf("Video send stalled %v (link congested)", d.Round(time.Millisecond))
-	}
-	return n, err
-}
 
 func publishLatestClientVideoStats(stats *clientStatsMsg) {
 	if stats == nil {

@@ -436,15 +436,16 @@ and a changed pair is reported), and requires one slice per picture so a
 picture NAL ends its AU with no added frame of latency. Multi-slice,
 partitioned or start-code-less input is rejected.
 
-Two host adapters let the existing session code run over a paired Wi-Fi
-session without edits to the USB accept loops (neither is wired into the
-product yet). `wifiVideoBridge` is the `io.Writer` the video session writes
-its `[type][len][payload]` packets to: it sends one config frame (schema 1,
+The video session sends packets to a `videoSink` and reads tablet messages
+from a `feedbackSource` (`host/video_sink.go`); USB and ADB use the
+`[type][len][payload]` byte stream and JSON lines. A paired Wi-Fi video
+socket supplies its own (`host/wifi_video_sink.go`): `wifiVideoSink` sends
+one config frame (schema 1,
 width/height read from the SPS (the tablet requires the config size to equal the SPS size), fps from the config packet, SPS, PPS)
 when both parameter sets are known, then waits for the tablet's decoder-ready
 control record, then sends AU frames from sequence 3 with capture time and
 `1000000/fps` duration. Unknown packet types, oversized packets, pictures
-before parameter sets and mid-session SPS/PPS changes fail the bridge closed
+before parameter sets and mid-session SPS/PPS changes fail the sink closed
 (the first implementation reconnects). `wifiInputConn` presents the control
 socket as a byte stream: tablet-to-host and host-to-tablet bytes travel in
 `FrameInput` payloads of at most 4096 bytes, each direction authenticated by

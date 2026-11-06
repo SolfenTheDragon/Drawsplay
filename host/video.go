@@ -11,13 +11,13 @@ package main
 //	ffmpeg stdout (Annex-B byte stream)
 //	  -> h264.Split (reassemble into complete NAL units; accessUnitTracker
 //	     sends a frame's last unit as soon as the frame's last write is read)
-//	  -> writeVideoPacket (type+length framing, see protocol.go)
-//	  -> TCP -> adb reverse -> tablet MediaCodec
+//	  -> videoSink.WritePacket (video_sink.go: type+length framing on USB,
+//	     Wi-Fi frames on paired Wi-Fi)
+//	  -> transport -> tablet MediaCodec
 
 import (
 	"context"
 	"drawsplay/host/internal/h264"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -665,14 +665,15 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 	if opts.WiFiBaseline {
 		monitor = newWiFiSessionMonitor()
 	}
-	go monitor.runStatsReader(conn)
+	sink, feedback := videoEndpointsFor(conn)
+	go monitor.runFeedback(feedback)
 
 	rc := newRateController(opts.Bitrate)
 	var temporal *temporalController
 	if opts.TemporalLayering {
 		temporal = newTemporalController()
 	}
-	writer := &monitoredWriter{conn: conn, mon: monitor}
+	writer := monitoredSink{sink: sink, conn: conn, mon: monitor}
 	goodSpecs := map[string]bool{}
 	var recovery captureRecoveryState
 	displayRecoveryAttempts := 0
@@ -970,9 +971,9 @@ func newPipelineTelemetry(specName string) pipelineTelemetry {
 // producing output is reported as an error so the caller can fall back to
 // the next candidate; errRateChanged means the rate controller requested a
 // restart at a new bitrate.
-func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec pipelineSpec, monitor *sessionMonitor, rc *rateController, temporal *temporalController, expectBlackout bool, gate *congestionGate) (bool, error) {
+func runEncodePipeline(ctx context.Context, sink videoSink, opts videoOptions, spec pipelineSpec, monitor *sessionMonitor, rc *rateController, temporal *temporalController, expectBlackout bool, gate *congestionGate) (bool, error) {
 	if spec.Framed {
-		return runFramedPipeline(ctx, w, opts, spec, monitor, rc, temporal, expectBlackout, gate)
+		return runFramedPipeline(ctx, sink, opts, spec, monitor, rc, temporal, expectBlackout, gate)
 	}
 	pipeline, err := startCapturePipeline(ctx, spec)
 	if err != nil {
@@ -1041,7 +1042,7 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 			Bitrate:    opts.Bitrate,
 			Pacing:     "latency",
 		})
-		if err := writeVideoPacket(w, videoPacketConfig, cfg); err != nil {
+		if err := sink.WritePacket(videoPacketConfig, cfg); err != nil {
 			return fmt.Errorf("client write: %w", err)
 		}
 		publishVideoStatus(true, spec.Name, opts.Bitrate)
@@ -1063,7 +1064,7 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 			telemetry.addDropped(1)
 			return nil
 		}
-		if err := writeVideoPacket(w, videoPacketNAL, unit); err != nil {
+		if err := sink.WritePacket(videoPacketNAL, unit); err != nil {
 			return fmt.Errorf("client write: %w", err)
 		}
 		sentNALs++
@@ -1268,18 +1269,4 @@ func refreshClass(refreshHz float64) string {
 		return "mid"
 	}
 	return "high"
-}
-
-// writeVideoPacket frames one payload per the video channel wire format.
-func writeVideoPacket(w io.Writer, pktType byte, payload []byte) error {
-	var header [5]byte
-	header[0] = pktType
-	binary.BigEndian.PutUint32(header[1:], uint32(len(payload)))
-	if len(payload) == 0 {
-		_, err := w.Write(header[:])
-		return err
-	}
-	parts := net.Buffers{header[:], payload}
-	_, err := parts.WriteTo(w)
-	return err
 }

@@ -137,7 +137,7 @@ func TestRunEncodePipelineSendsFramesWithTheirLastWrite(t *testing.T) {
 	out := &packetRecorder{}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	produced, err := runEncodePipeline(ctx, out, opts, spec, &sessionMonitor{}, newRateController(opts.Bitrate),
+	produced, err := runEncodePipeline(ctx, streamVideoSink{out}, opts, spec, &sessionMonitor{}, newRateController(opts.Bitrate),
 		newTemporalController(), false, newSessionCongestionGate(target))
 	if !produced || !errors.Is(err, io.EOF) {
 		t.Fatalf("runEncodePipeline = %v, %v; want output, then EOF", produced, err)
