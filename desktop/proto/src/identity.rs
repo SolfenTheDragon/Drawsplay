@@ -8,6 +8,16 @@ use zeroize::Zeroizing;
 
 /// Directory for keys and trust lists of `role` ("host" or "client"), under e.g. `%APPDATA%\DrawSplayDesktop` or `~/.config/drawsplay-desktop`.
 pub fn config_dir(role: &str) -> io::Result<PathBuf> {
+    // The DrawSplay web UI (Go host) reads the host's status from this folder and honours the same
+    // override, so both agree on where it is.
+    if role == "host" {
+        if let Some(d) = std::env::var_os("DRAWSPLAY_DESKTOP_CONFIG").filter(|d| !d.is_empty()) {
+            let dir = PathBuf::from(d);
+            fs::create_dir_all(&dir)?;
+            make_private(&dir, 0o700);
+            return Ok(dir);
+        }
+    }
     let dir = if cfg!(windows) {
         PathBuf::from(std::env::var_os("APPDATA").ok_or_else(|| io::Error::other("APPDATA is not set"))?)
             .join("DrawSplayDesktop")

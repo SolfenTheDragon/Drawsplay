@@ -905,6 +905,44 @@ fn serve(
     result
 }
 
+/// Hold an exclusive lock on `host.lock` in `dir` for the life of the process.
+fn lock_config_dir(dir: &Path) -> Result<std::fs::File, String> {
+    let path = dir.join("host.lock");
+    let busy = || format!("another dd-host is already running with the config folder {}", dir.display());
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+        // SAFETY: flock on a descriptor we own; released when the file closes at exit.
+        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            return Err(busy());
+        }
+        Ok(f)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // No sharing: a second process gets a sharing violation.
+        std::fs::OpenOptions::new().create(true).truncate(false).write(true).share_mode(0).open(&path).map_err(|e| {
+            if e.raw_os_error() == Some(32) {
+                busy()
+            } else {
+                format!("cannot open {}: {e}", path.display())
+            }
+        })
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        let _ = busy;
+        std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path).map_err(|e| e.to_string())
+    }
+}
+
 /// Size the socket's kernel send buffer (best effort).
 fn set_send_buffer(s: &TcpStream, bytes: usize) {
     let v = i32::try_from(bytes).unwrap_or(i32::MAX);
@@ -1034,6 +1072,11 @@ fn main() {
         eprintln!("cannot open config directory: {e}");
         std::process::exit(1);
     });
+    // One dd-host per config folder: two would overwrite each other's status.json and trust state.
+    let _instance = lock_config_dir(&dir).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    });
     let id = load_or_create_identity(&dir).unwrap_or_else(|e| {
         eprintln!("cannot load identity: {e}");
         std::process::exit(1);
@@ -1143,6 +1186,19 @@ mod tests {
         let part = windows_capture_args((2020, 50), 800, 600, 30, Some(DxgiOutput { adapter: 2, ..out })).join(" ");
         assert!(part.starts_with("-init_hw_device d3d11va:2 -filter_complex"), "{part}");
         assert!(part.contains(":video_size=800x600:offset_x=100:offset_y=50"), "{part}");
+    }
+
+    #[cfg(any(target_os = "linux", windows))]
+    #[test]
+    fn a_second_host_on_the_same_config_folder_is_refused() {
+        let d = std::env::temp_dir().join(format!("dd-lock-test-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let first = lock_config_dir(&d).expect("first lock");
+        let err = lock_config_dir(&d).expect_err("second lock must fail");
+        assert!(err.contains("already running"), "{err}");
+        drop(first);
+        assert!(lock_config_dir(&d).is_ok(), "the lock is free again once the first host is gone");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
