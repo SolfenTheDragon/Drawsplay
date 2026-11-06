@@ -385,3 +385,11 @@ packaging/package-linux.sh       # dist/DrawSplayDesktop-linux-x86_64-vX.tar.gz
 ```
 
 Linux builds and tests can also be run in a container (for example `rust:1-bookworm` with the packages above); copy the sources in with `docker cp` or `tar` rather than a bind mount if the drive is not shared. Windows virtual-display support needs the DrawSplay IddCx driver from `drivers/windows/idd` to be installed; rebuild, re-sign and reinstall it to pick up the connector-slot fix and the rule that a caller may remove only the monitors it created (administrators may remove any).
+
+**Tests.** `cargo test --release` runs the unit tests and `desktop/host/tests/loopback.rs`, which starts a real `dd-host --source test` and drives it with a scripted client (needs `ffmpeg`; those tests skip without it). The host honours `DD_IDLE_TIMEOUT_MS` and `DD_STEP_TIMEOUT_MS` to shorten timeouts for testing. From `desktop/`, `cargo run -p dd-client --example send_input -- HOST:PORT` replays a scripted pen stroke, two-finger touch and a modifier key, to test host injection without a touchscreen.
+
+Both packages include the repository README (and `desktop/docs/` when it is present in the source tree; it is not part of the public repository).
+
+### DrawSplay Desktop on ARM
+
+Both programs build for `aarch64-unknown-linux-gnu` (verified: cross-built from x86_64; `dd-proto` and `dd-client` unit tests pass under qemu-user). Cross-build recipe on Debian/Ubuntu: `rustup target add aarch64-unknown-linux-gnu`, install `gcc-aarch64-linux-gnu libc6-dev-arm64-cross`, make the arm64 `libxdo.so` visible to the linker (for example in a private sysroot passed with `-C link-arg=-L...`), then `TARGET=aarch64-unknown-linux-gnu packaging/package-linux.sh`. On a native ARM machine just use the normal build and `package-linux.sh`. Windows on ARM: `packaging/package-windows.ps1 -Target aarch64-pc-windows-msvc` (not built or run yet; the virtual display driver's `build.ps1 -Arch arm64` exists but has not been exercised).

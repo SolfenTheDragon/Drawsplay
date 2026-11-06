@@ -2,7 +2,7 @@
 # Builds a release tarball: dist/DrawSplayDesktop-linux-ARCH-vVERSION.tar.gz
 # Usage: package-linux.sh [VERSION]   (default: the version in Cargo.toml; a leading "v" is ignored)
 # Cross-build: TARGET=aarch64-unknown-linux-gnu package-linux.sh  (needs the target's linker and the
-# arm64 libxdo, see the ARM notes in the repository README.md). The file name then says aarch64.
+# arm64 libxdo, see "DrawSplay Desktop on ARM" in the repository BUILD.md). The file name then says aarch64.
 set -eu
 cd "$(dirname "$0")/.."
 version=${1:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}
