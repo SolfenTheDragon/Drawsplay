@@ -225,7 +225,7 @@ func (k *kwinOutput) MapTablet() error {
 	return kwinSetTabletOutput(kwinOutputName)
 }
 
-func (k *kwinOutput) Remove([]x11OutputPos, string) error {
+func (k *kwinOutput) Remove([]outputPos, string) error {
 	k.close()
 	return nil
 }

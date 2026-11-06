@@ -958,7 +958,7 @@ func withFakeMutter(t *testing.T, f *fakeMutter) *fakeMutterSession {
 func resetMutterExt() {
 	mutterExt.mu.Lock()
 	defer mutterExt.mu.Unlock()
-	stopMutterReleaseTimerLocked()
+	mutterExt.stopTimerLocked()
 	mutterExt.gen, mutterExt.claimed, mutterExt.exiting = 0, false, false
 	mutterExt.held, mutterExt.others = nil, ""
 	mutterExt.seen, mutterExt.placement = nil, nil
@@ -1012,11 +1012,11 @@ func expireMutterGrace(t *testing.T) {
 	if mutterExt.timer == nil {
 		t.Fatal("the virtual monitor is not being released")
 	}
-	stopMutterReleaseTimerLocked()
+	mutterExt.stopTimerLocked()
 	stopHeldMutterLocked()
 }
 
-func lastMutterPlacement() *x11Placement {
+func lastMutterPlacement() *displayPlacement {
 	mutterExt.mu.Lock()
 	defer mutterExt.mu.Unlock()
 	return mutterExt.placement
@@ -1254,7 +1254,7 @@ func TestPlanMutterLayout(t *testing.T) {
 		// monitor and the state before it was added (nil once in use).
 		setup      func(t *testing.T) (*fakeMutter, mutterCast, *mutterState)
 		size       [2]int
-		remembered *x11Placement
+		remembered *displayPlacement
 		wantKeep   bool
 		wantRect   displayRect
 		fromBefore bool
@@ -1272,7 +1272,7 @@ func TestPlanMutterLayout(t *testing.T) {
 			name:       "a new monitor returns to where the last one was",
 			setup:      fakeMutterWithCast(desk, 1920, 1080, nil),
 			size:       [2]int{1920, 1080},
-			remembered: &x11Placement{Side: "below", Offset: 500},
+			remembered: &displayPlacement{Side: "below", Offset: 500},
 			wantRect:   displayRect{X: 500, Y: 2520, W: 1920, H: 1080},
 			fromBefore: true,
 			want:       "HDMI-1@0,0 2560x1440 Meta-0@500,2520 1920x1080 eDP-1@320,1440 1920x1080*",
@@ -1285,7 +1285,7 @@ func TestPlanMutterLayout(t *testing.T) {
 				return f
 			}, 1920, 1080, nil),
 			size:       [2]int{1920, 1080},
-			remembered: &x11Placement{Side: "right", Offset: 1200},
+			remembered: &displayPlacement{Side: "right", Offset: 1200},
 			wantRect:   displayRect{X: 4480, Y: 1079, W: 1920, H: 1080},
 			fromBefore: true,
 			want:       "HDMI-1@0,0 2560x1440 Meta-0@4480,1079 1920x1080 eDP-1@2560,0 1920x1080*",
@@ -1522,7 +1522,7 @@ func TestObserveMutterMonitor(t *testing.T) {
 	obs := observeMutterMonitor(st, "Meta-0")
 	if !obs.Present || !obs.Enabled || obs.Rect != (displayRect{X: 1920, Y: 0, W: 2560, H: 1440}) ||
 		obs.ModeW != 2560 || obs.ModeH != 1440 || !obs.AutoMode || obs.Mirrored ||
-		!obs.Placed || obs.Placement != (x11Placement{Side: "right"}) {
+		!obs.Placed || obs.Placement != (displayPlacement{Side: "right"}) {
 		t.Errorf("as GNOME added it: %+v", obs)
 	}
 
@@ -1807,7 +1807,7 @@ func TestMutterVirtualMonitorGoesAfterTheGracePeriod(t *testing.T) {
 	if n := f.applyCount(); n != 1 {
 		t.Errorf("%d configurations applied, want 1 (GNOME restores the stored arrangement)", n)
 	}
-	if p := lastMutterPlacement(); p == nil || *p != (x11Placement{Side: "right"}) {
+	if p := lastMutterPlacement(); p == nil || *p != (displayPlacement{Side: "right"}) {
 		t.Errorf("remembered placement = %v, want right", p)
 	}
 }
@@ -1957,7 +1957,7 @@ func TestMutterVirtualMonitorFollowsAMove(t *testing.T) {
 	mutterExt.mu.Lock()
 	seen := mutterExt.seen
 	mutterExt.mu.Unlock()
-	if seen == nil || *seen != (x11Placement{Side: "below"}) {
+	if seen == nil || *seen != (displayPlacement{Side: "below"}) {
 		t.Errorf("seen = %v, want below", seen)
 	}
 }

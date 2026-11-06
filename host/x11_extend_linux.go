@@ -45,7 +45,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -442,14 +441,16 @@ func (t cvtTimings) xrandrArgs() []string {
 	}
 }
 
-// x11Placement is where the extended display sits relative to the bounding
+// displayPlacement is where the extended display sits relative to the bounding
 // box of the other displays: on which side, and how far along that edge.
-type x11Placement struct {
+type displayPlacement struct {
 	Side   string // "right", "left", "below" or "above"
 	Offset int
 }
 
-type x11OutputPos struct {
+// outputPos moves another output to X, Y while laying out the extended display
+// (X11 and the wlroots compositors).
+type outputPos struct {
 	Name string
 	X, Y int
 }
@@ -460,7 +461,7 @@ type x11Layout struct {
 	Keep bool
 	Rect displayRect
 	// Moves shift other outputs so the desktop keeps its origin at 0,0.
-	Moves []x11OutputPos
+	Moves []outputPos
 }
 
 func boundsOf(rects []displayRect) displayRect {
@@ -480,23 +481,23 @@ func boundsOf(rects []displayRect) displayRect {
 
 // placementOf describes r relative to the bounds b, or reports false when r
 // overlaps b (e.g. it mirrors another display).
-func placementOf(r, b displayRect) (x11Placement, bool) {
+func placementOf(r, b displayRect) (displayPlacement, bool) {
 	switch {
 	case r.X >= b.X+b.W:
-		return x11Placement{Side: "right", Offset: r.Y - b.Y}, true
+		return displayPlacement{Side: "right", Offset: r.Y - b.Y}, true
 	case r.X+r.W <= b.X:
-		return x11Placement{Side: "left", Offset: r.Y - b.Y}, true
+		return displayPlacement{Side: "left", Offset: r.Y - b.Y}, true
 	case r.Y >= b.Y+b.H:
-		return x11Placement{Side: "below", Offset: r.X - b.X}, true
+		return displayPlacement{Side: "below", Offset: r.X - b.X}, true
 	case r.Y+r.H <= b.Y:
-		return x11Placement{Side: "above", Offset: r.X - b.X}, true
+		return displayPlacement{Side: "above", Offset: r.X - b.X}, true
 	}
-	return x11Placement{}, false
+	return displayPlacement{}, false
 }
 
 // placeAt puts a w x h display against the given side of b, keeping the
 // offset within the shared edge so the two always touch.
-func placeAt(p x11Placement, b displayRect, w, h int) displayRect {
+func placeAt(p displayPlacement, b displayRect, w, h int) displayRect {
 	along := func(offset, size, edge int) int {
 		return max(-(size - 1), min(offset, edge-1))
 	}
@@ -522,7 +523,7 @@ type extendOutput struct {
 // planX11Layout decides where the w x h extended display goes (see
 // planExtendLayout). An active output that already shows w x h is left
 // alone, even when it mirrors another display.
-func planX11Layout(st xrandrState, name string, w, h int, remembered *x11Placement) (x11Layout, error) {
+func planX11Layout(st xrandrState, name string, w, h int, remembered *displayPlacement) (x11Layout, error) {
 	var cur xrandrOutput
 	var outputs []extendOutput
 	others := 0
@@ -542,7 +543,7 @@ func planX11Layout(st xrandrState, name string, w, h int, remembered *x11Placeme
 		return x11Layout{Keep: true, Rect: cur.Rect}, nil
 	}
 	layout := planExtendLayout(outputs, name, w, h, remembered, true)
-	moved := map[string]x11OutputPos{}
+	moved := map[string]outputPos{}
 	for _, m := range layout.Moves {
 		moved[m.Name] = m
 	}
@@ -570,7 +571,7 @@ func planX11Layout(st xrandrState, name string, w, h int, remembered *x11Placeme
 // was last switched off (remembered), or goes right of the other displays.
 // anchored: the desktop keeps its origin at 0,0, so the other displays move
 // when the extended display goes left of or above them.
-func planExtendLayout(outputs []extendOutput, name string, w, h int, remembered *x11Placement, anchored bool) x11Layout {
+func planExtendLayout(outputs []extendOutput, name string, w, h int, remembered *displayPlacement, anchored bool) x11Layout {
 	var cur extendOutput
 	var others []extendOutput
 	var rects []displayRect
@@ -588,7 +589,7 @@ func planExtendLayout(outputs []extendOutput, name string, w, h int, remembered 
 	}
 	b := boundsOf(rects)
 	var r displayRect
-	side, onSide := x11Placement{}, false
+	side, onSide := displayPlacement{}, false
 	if cur.Active {
 		side, onSide = placementOf(cur.Rect, b)
 	}
@@ -598,7 +599,7 @@ func planExtendLayout(outputs []extendOutput, name string, w, h int, remembered 
 	case remembered != nil:
 		r = placeAt(*remembered, b, w, h)
 	default:
-		r = placeAt(x11Placement{Side: "right"}, b, w, h)
+		r = placeAt(displayPlacement{Side: "right"}, b, w, h)
 	}
 	if !anchored {
 		return x11Layout{Rect: r}
@@ -607,7 +608,7 @@ func planExtendLayout(outputs []extendOutput, name string, w, h int, remembered 
 	layout := x11Layout{Rect: displayRect{X: r.X + dx, Y: r.Y + dy, W: w, H: h}}
 	if dx != 0 || dy != 0 {
 		for _, o := range others {
-			layout.Moves = append(layout.Moves, x11OutputPos{Name: o.Name, X: o.Rect.X + dx, Y: o.Rect.Y + dy})
+			layout.Moves = append(layout.Moves, outputPos{Name: o.Name, X: o.Rect.X + dx, Y: o.Rect.Y + dy})
 		}
 	}
 	return layout
@@ -771,7 +772,7 @@ func configureX11Extended(display, name string, w, h, nativeW, nativeH int) (x11
 // off, it switches one back on rather than leave the screen without a
 // visible display, and it hands the primary role on. It returns where the
 // output was, so the next session can put it back there.
-func switchOffX11Output(display, name string) (placement *x11Placement, switched bool, err error) {
+func switchOffX11Output(display, name string) (placement *displayPlacement, switched bool, err error) {
 	st, err := queryXrandr(display)
 	if err != nil {
 		return nil, false, err
@@ -851,38 +852,24 @@ type x11EnabledOutput struct {
 // x11Ext tracks the outputs the host switched on. mu also serializes every
 // layout change the host makes.
 var x11Ext = struct {
-	mu sync.Mutex
-	// gen identifies the latest session to claim the outputs; claimed is
-	// whether that session still runs.
-	gen     uint64
-	claimed bool
-	timer   *time.Timer
+	heldOutput
 	enabled map[string]x11EnabledOutput // by display/output
 	// placement remembers, per display/output, where the user had the
 	// extended display when it was last switched off (process lifetime).
-	placement map[string]*x11Placement
+	placement map[string]*displayPlacement
 	released  map[string]*x11ReleasedOutput
-	exiting   bool
 }{
 	enabled:   map[string]x11EnabledOutput{},
 	released:  map[string]*x11ReleasedOutput{},
-	placement: map[string]*x11Placement{},
-}
-
-func stopX11ReleaseTimerLocked() {
-	if x11Ext.timer != nil {
-		x11Ext.timer.Stop()
-		x11Ext.timer = nil
-	}
+	placement: map[string]*displayPlacement{},
 }
 
 // releaseX11Locked ends session gen's claim and switches the outputs off
 // after x11ReleaseGrace unless another session claims them first.
 func releaseX11Locked(gen uint64) {
-	if gen != x11Ext.gen {
+	if !x11Ext.unclaimLocked(gen) {
 		return
 	}
-	x11Ext.claimed = false
 	scheduleX11SwitchOffLocked(gen, x11SwitchOffAttempts)
 }
 
@@ -894,7 +881,7 @@ func scheduleX11SwitchOffLocked(gen uint64, attempts int) {
 }
 
 func scheduleX11SwitchOffAfterLocked(gen uint64, attempts int, delay time.Duration) {
-	stopX11ReleaseTimerLocked()
+	x11Ext.stopTimerLocked()
 	if x11Ext.exiting || len(x11Ext.enabled)+len(x11Ext.released) == 0 {
 		return
 	}
@@ -902,13 +889,7 @@ func scheduleX11SwitchOffAfterLocked(gen uint64, attempts int, delay time.Durati
 		log.Printf("X11 extended display: giving up switching the output off; it is switched off when the host exits")
 		return
 	}
-	x11Ext.timer = time.AfterFunc(delay, func() {
-		x11Ext.mu.Lock()
-		defer x11Ext.mu.Unlock()
-		if gen != x11Ext.gen || x11Ext.claimed || x11Ext.exiting {
-			return
-		}
-		x11Ext.timer = nil
+	x11Ext.afterLocked(gen, delay, func() {
 		verifyX11ReleasedLocked()
 		switchOffX11OutputsLocked()
 		scheduleX11SwitchOffAfterLocked(gen, attempts-1, x11SwitchOffRetry)
@@ -975,8 +956,7 @@ func verifyX11ReleasedLocked() {
 // the host exits.
 func releaseVirtualDisplaysOnExit() {
 	x11Ext.mu.Lock()
-	x11Ext.exiting = true
-	stopX11ReleaseTimerLocked()
+	x11Ext.exitLocked()
 	verifyX11ReleasedLocked()
 	switchOffX11OutputsLocked()
 	x11Ext.mu.Unlock()
@@ -987,19 +967,11 @@ func releaseVirtualDisplaysOnExit() {
 
 // x11ExtendedDisplay is one session's use of the virtual output.
 type x11ExtendedDisplay struct {
+	extendSession
 	display          string
 	output           string
-	gen              uint64
 	nativeW, nativeH int
 	tabletMapped     bool // see captureTarget.TabletMapped
-
-	mu         sync.Mutex
-	target     captureTarget
-	reqW, reqH int // configured resolution
-
-	stopWatch chan struct{}
-	watchDone chan struct{}
-	closeOnce sync.Once
 }
 
 // newX11ExtendedDisplay switches the virtual output on for a new session at
@@ -1013,13 +985,10 @@ func newX11ExtendedDisplay(opts videoOptions, display string) (*x11ExtendedDispl
 
 	x11Ext.mu.Lock()
 	defer x11Ext.mu.Unlock()
-	if x11Ext.exiting {
-		return nil, errors.New("host is shutting down")
+	gen, err := x11Ext.claimLocked()
+	if err != nil {
+		return nil, err
 	}
-	x11Ext.gen++
-	gen := x11Ext.gen
-	x11Ext.claimed = true
-	stopX11ReleaseTimerLocked()
 	clear(x11Ext.released)
 
 	res, err := configureX11Extended(display, strings.TrimSpace(os.Getenv(x11OutputEnv)), w, h, ident.NativeWidth, ident.NativeHeight)
@@ -1037,24 +1006,14 @@ func newX11ExtendedDisplay(opts videoOptions, display string) (*x11ExtendedDispl
 	d := &x11ExtendedDisplay{
 		display:      display,
 		output:       res.output,
-		gen:          gen,
 		nativeW:      ident.NativeWidth,
 		nativeH:      ident.NativeHeight,
 		tabletMapped: mapX11Tablet(res.output),
-		reqW:         w,
-		reqH:         h,
-		stopWatch:    make(chan struct{}),
-		watchDone:    make(chan struct{}),
 	}
+	d.init(gen, "X11 extended display", w, h, captureTarget{})
 	d.setTarget(res.target)
 	go d.watch()
 	return d, nil
-}
-
-func (d *x11ExtendedDisplay) Target() captureTarget {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.target
 }
 
 func (d *x11ExtendedDisplay) setTarget(t captureTarget) {
@@ -1096,7 +1055,7 @@ func (d *x11ExtendedDisplay) Recover() error {
 	x11Ext.mu.Lock()
 	defer x11Ext.mu.Unlock()
 	if x11Ext.exiting {
-		return errors.New("host is shutting down")
+		return errHostExiting
 	}
 	res, err := configureX11Extended(d.display, d.output, w, h, d.nativeW, d.nativeH)
 	if res.changed {
@@ -1110,9 +1069,7 @@ func (d *x11ExtendedDisplay) Recover() error {
 }
 
 func (d *x11ExtendedDisplay) Close() {
-	d.closeOnce.Do(func() {
-		close(d.stopWatch)
-		<-d.watchDone
+	d.close(func() {
 		x11Ext.mu.Lock()
 		releaseX11Locked(d.gen)
 		x11Ext.mu.Unlock()
@@ -1192,7 +1149,7 @@ func (d *x11ExtendedDisplay) watch() {
 		// session, or a monitor being plugged in or out. Otherwise the
 		// preferred mode, too, was picked by the user.
 		hotplug := base == nil || base.Outputs != obs.Outputs
-		d.saveUserResolution(obs, obs.AutoMode && hotplug)
+		d.saveUserResolution(obs.Active, obs.Rect.W, obs.Rect.H, obs.AutoMode && hotplug)
 		base = &obs
 		t := d.Target()
 		if obs.Active && obs.Rect == t.Rect && obs.DesktopW == t.DesktopWidth && obs.DesktopH == t.DesktopHeight {
@@ -1209,31 +1166,6 @@ func (d *x11ExtendedDisplay) watch() {
 	}
 }
 
-// saveUserResolution saves the output's size as the configured resolution
-// when the user picked a different one, so the next session (and the
-// restart that follows the change) keeps it. auto: the window manager picked
-// the size by itself, so it is not saved.
-func (d *x11ExtendedDisplay) saveUserResolution(obs x11Observed, auto bool) {
-	d.mu.Lock()
-	reqW, reqH := d.reqW, d.reqH
-	d.mu.Unlock()
-	w, h := obs.Rect.W, obs.Rect.H
-	if !obs.Active || (w == reqW && h == reqH) || auto {
-		return
-	}
-	d.mu.Lock()
-	d.reqW, d.reqH = w, h
-	d.mu.Unlock()
-	if globalSettingsStore == nil {
-		return
-	}
-	if err := globalSettingsStore.updateResolution(w, h); err != nil {
-		log.Printf("Could not save the X11 extended display resolution %dx%d: %v", w, h, err)
-		return
-	}
-	log.Printf("X11 extended display resolution changed in the display settings (%dx%d -> %dx%d); saved as the configured resolution", reqW, reqH, w, h)
-}
-
 // releaseStaleVirtualDisplays switches off the X11 virtual output a previous
 // host process (crashed, killed, or interrupted by a suspend) left on as a
 // ghost display. It does nothing once a session of this process has claimed
@@ -1248,7 +1180,7 @@ func releaseStaleVirtualDisplays() {
 	}
 	x11Ext.mu.Lock()
 	defer x11Ext.mu.Unlock()
-	if x11Ext.claimed || x11Ext.exiting {
+	if !x11Ext.idleLocked() {
 		return
 	}
 	st, err := queryXrandr(display)
@@ -1273,8 +1205,8 @@ func releaseStaleVirtualDisplays() {
 // session) is left alone.
 func releaseIdleVirtualDisplays() {
 	x11Ext.mu.Lock()
-	if !x11Ext.claimed && !x11Ext.exiting {
-		stopX11ReleaseTimerLocked()
+	if x11Ext.idleLocked() {
+		x11Ext.stopTimerLocked()
 		switchOffX11OutputsLocked()
 		verifyX11ReleasedLocked()
 	}
@@ -1287,14 +1219,14 @@ func releaseIdleVirtualDisplays() {
 // finished session still holds during its reconnect grace.
 func releaseIdleWaylandDisplays() {
 	mutterExt.mu.Lock()
-	if !mutterExt.claimed && !mutterExt.exiting {
-		stopMutterReleaseTimerLocked()
+	if mutterExt.idleLocked() {
+		mutterExt.stopTimerLocked()
 		stopHeldMutterLocked()
 	}
 	mutterExt.mu.Unlock()
 	wlExt.mu.Lock()
-	if !wlExt.claimed && !wlExt.exiting {
-		stopWlExtReleaseTimerLocked()
+	if wlExt.idleLocked() {
+		wlExt.stopTimerLocked()
 		stopHeldWlExtLocked()
 	}
 	wlExt.mu.Unlock()

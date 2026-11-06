@@ -122,7 +122,7 @@ func TestSwayBackendSpeaksIPC(t *testing.T) {
 	}
 	f.takeCmds()
 	err = hd.Configure(wlExtConfig{ModeW: 1848, ModeH: 2960, X: 0, Y: 0, Transform: wlOutputTransform90, Scale: 1.5,
-		Moves: []x11OutputPos{{Name: "eDP-1", X: 1973, Y: 0}}})
+		Moves: []outputPos{{Name: "eDP-1", X: 1973, Y: 0}}})
 	if err != nil {
 		t.Fatalf("Configure: %v", err)
 	}

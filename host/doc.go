@@ -46,7 +46,9 @@
 //     Linux (display_linux.go chooses): X11 (x11_extend_linux.go), GNOME
 //     (mutter_extend_linux.go), sway, Hyprland or KWin (wl_extend_linux.go
 //     with sway_extend_linux.go, hypr_extend_linux.go, kwin_extend_linux.go),
-//     or a mirror. Windows: display_windows.go with the IddCx driver
+//     or a mirror. The three extend backends share the hold-and-release
+//     life cycle in held_display_linux.go. Windows: display_windows.go with
+//     the IddCx driver
 //     (idd_*.go), Parsec (parsec_*.go) or a mirror.
 //  2. Build ranked capture and encode pipelines (pipeline.go,
 //     pipeline_linux.go, pipeline_windows.go, native_media*.go) and run one

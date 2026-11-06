@@ -135,7 +135,7 @@ func (h *fakeWlExtHandle) Configure(cfg wlExtConfig) error {
 	return nil
 }
 
-func (h *fakeWlExtHandle) Remove(moves []x11OutputPos, fallback string) error {
+func (h *fakeWlExtHandle) Remove(moves []outputPos, fallback string) error {
 	c := h.c
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -173,7 +173,7 @@ func withFakeWlExt(t *testing.T, c *fakeWlExt) {
 func resetWlExt() {
 	wlExt.mu.Lock()
 	defer wlExt.mu.Unlock()
-	stopWlExtReleaseTimerLocked()
+	wlExt.stopTimerLocked()
 	wlExt.gen, wlExt.claimed, wlExt.exiting = 0, false, false
 	wlExt.held, wlExt.backend = nil, nil
 	wlExt.seen, wlExt.placement, wlExt.look = nil, nil, nil
@@ -392,7 +392,7 @@ func TestWlExtRecreatesOutputTurnedByCompositor(t *testing.T) {
 
 func TestPlanExtendLayoutUnanchoredLeavesOthers(t *testing.T) {
 	outs := []extendOutput{{Name: "DP-1", Active: true, Rect: displayRect{W: 1920, H: 1080}}}
-	l := planExtendLayout(outs, "Drawsplay", 1280, 800, &x11Placement{Side: "left"}, false)
+	l := planExtendLayout(outs, "Drawsplay", 1280, 800, &displayPlacement{Side: "left"}, false)
 	if l.Rect != (displayRect{X: -1280, Y: 0, W: 1280, H: 800}) || len(l.Moves) != 0 {
 		t.Fatalf("layout = %+v", l)
 	}

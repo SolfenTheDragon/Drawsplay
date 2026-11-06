@@ -288,7 +288,7 @@ func (s *hyprOutput) MapTablet() error {
 		fmt.Sprintf(`hl.device({ name = %q, output = %q })`, pen, hyprOutputName))
 }
 
-func (s *hyprOutput) Remove(moves []x11OutputPos, fallback string) error {
+func (s *hyprOutput) Remove(moves []outputPos, fallback string) error {
 	s.mu.Lock()
 	if s.events != nil {
 		s.events.Close()
