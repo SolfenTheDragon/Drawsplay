@@ -70,7 +70,7 @@ Target profile for pen/touch interactions:
   - **Windows**: `SendInput` with virtual-key codes; unmapped keys that carry text fall back to per-character `KEYEVENTF_UNICODE` injection on key-down.
   - **Linux**: a second `/dev/uinput` device ("DrawSplay Keyboard") advertising every mapped evdev code; unmapped keys are dropped (uinput has no Unicode path).
   - **Security control**: persisted `keyboardEnabled` can disable all keyboard packet injection while keeping display and pen/touch input active.
-- Accepts newline-delimited JSON packets from Android client on the input channel.
+- Accepts mux-v1 framed JSON packets from the Android client on the input channel. A connection that does not open with the mux magic (an app from before mux framing, or not DrawSplay) is closed, and the settings page shows "Update DrawSplay on the tablet".
 - Enables low-latency TCP behavior (`TCP_NODELAY`) on host connection.
 - Enforces maximum packet size (`64 KiB`) and closes oversized packets.
 - Requires an initial `hello` packet within `5s` and closes sessions that do not send it; the read deadline is cleared once after `hello` (no per-packet deadline syscalls).
@@ -237,7 +237,7 @@ Per-host preferences: newer tablets send `"hostPrefs":true` in hello instead of 
 
 `screenRefreshRates` (optional, additive) lists the refresh rates in Hz, rounded, ascending, that the tablet panel supports at its native resolution. The host keeps values in 24–240 and uses the highest as the panel rate: on Windows the virtual monitor is created at that rate, so it defaults to the tablet's refresh (for example 120 Hz), and capture fps is capped at it. Clients that omit it default to 120 Hz.
 
-`videoCodecs` is optional for backward compatibility; its absence means a legacy H.264 client. Current negotiation selects the best common codec from the host/client advertised lists (today: `h264`, and `hevc` when both sides support it on the active host path).
+`videoCodecs` lists the codecs the tablet decodes; every released app sends it. When it is missing or matches nothing the host selects H.264. Current negotiation selects the best common codec from the host/client advertised lists (today: `h264`, and `hevc` when both sides support it on the active host path).
 
 ### 3.2 `input`
 
@@ -265,12 +265,13 @@ Per-host preferences: newer tablets send `"hostPrefs":true` in hello instead of 
 
 Field notes:
 
-- `tilt`: pen tilt from the surface normal, radians (`0` = perpendicular). `0` for tools without tilt.
-- `orientation`: tool orientation, radians, as reported by Android (`getOrientation`).
-- `buttons`: Android `MotionEvent` button-state bitmask (e.g., stylus primary/secondary buttons); `0` when none pressed.
-- `timestamp`: epoch ms derived from the input driver event time (per historical sample), not the app delivery time.
-- All three fields are additive; packets without them decode as zero values on the host.
-- For backward compatibility the host accepts both compact keys above and the legacy long keys (`type`, `action`, `pressure`, `toolType`, `pointerId`, ...).
+- `ti` (tilt): pen tilt from the surface normal, radians (`0` = perpendicular). `0` for tools without tilt.
+- `o` (orientation): tool orientation, radians, as reported by Android (`getOrientation`).
+- `b` (buttons): Android `MotionEvent` button-state bitmask (e.g., stylus primary/secondary buttons); `0` when none pressed.
+- `ts` (timestamp): epoch ms derived from the input driver event time (per historical sample), not the app delivery time.
+- `sq`: per-session input sequence the host echoes in frame metadata.
+- Missing fields decode as zero values on the host.
+- Input and key packets use only these compact keys. Control packets (`hello`, `modePrefs`) name their type in `type`; the host reads `type` or `t`. The long key names some early drafts used (`action`, `pressure`, `toolType`, ...) are not accepted; no released app sent them.
 
 ### 3.3 `key` (M5, tablet → host)
 
@@ -285,10 +286,9 @@ Field notes:
 }
 ```
 
-- `keycode`: Android `KeyEvent` keycode. Mapped through `keymap.go` to VK / evdev codes.
-- `meta`: Android meta-state bitmask (diagnostic; modifiers are tracked by the host OS from the forwarded modifier keys themselves).
-- `chars`: character(s) this key produces with the current meta state; used only as the Windows Unicode fallback for unmapped keycodes.
-- Host decoding remains backward-compatible with the legacy key names (`type`, `action`, `keycode`, `meta`, `chars`, `timestamp`).
+- `k` (keycode): Android `KeyEvent` keycode. Mapped through `keymap.go` to VK / evdev codes.
+- `m` (meta): Android meta-state bitmask (diagnostic; modifiers are tracked by the host OS from the forwarded modifier keys themselves).
+- `c` (chars): character(s) this key produces with the current meta state; used only as the Windows Unicode fallback for unmapped keycodes.
 
 ### 3.4 Notes
 
@@ -449,7 +449,7 @@ before parameter sets and mid-session SPS/PPS changes fail the sink closed
 (the first implementation reconnects). `wifiInputConn` presents the control
 socket as a byte stream: tablet-to-host and host-to-tablet bytes travel in
 `FrameInput` payloads of at most 4096 bytes, each direction authenticated by
-the session epoch with strictly increasing sequence numbers. `wifiVideoConn` wraps the bridge as the `net.Conn` the video session writes to. Without the negotiated video-stats feature (bit 1) its read side blocks until close and adaptive bitrate stays idle. With it, the tablet sends control records on the video socket (same epoch, sequence 2 upward after the attach record) and the read side turns each one into the newline-delimited JSON the USB stats reader already parses:
+the session epoch with strictly increasing sequence numbers; the bytes are the same mux frames as on USB. `wifiVideoConn` is the video socket as the session sees it, and its `wifiFeedback` is the session's feedback source. Without the negotiated video-stats feature (bit 1) the feedback source stays silent until close and adaptive bitrate stays idle. With it, the tablet sends control records on the video socket (same epoch, sequence 2 upward after the attach record), each read as one tablet message:
 
 | Control subtype | Payload | Meaning |
 | --- | --- | --- |
@@ -619,7 +619,7 @@ When behavior changes:
 
 1. Update this file in the same change.
 2. Keep protocol examples in sync with code.
-3. Document backward compatibility expectations for packet changes.
+3. Document backward compatibility expectations for packet changes. Protocol changes are additive. A field or framing may be removed only once no released tablet app uses it; an input connection the host cannot read is refused with an "Update DrawSplay on the tablet" warning on the settings page.
 
 ### 7.1 Windows IddCx driver: connector slots
 

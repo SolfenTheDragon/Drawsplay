@@ -20,8 +20,9 @@ const (
 	muxStreamStats   byte = 4
 )
 
-// muxFrame is the fixed header + payload record described in
-// UPGRADE_PLAN_CUSTOM_USB_TRANSPORT.md section 4.2.
+// muxFrame is one input-channel frame: a 13-byte big-endian header (magic,
+// version, stream, flags, sequence, length) and its payload, one JSON packet.
+// Every transport carries the input channel this way (FUNCTIONALITY.md §3.0).
 type muxFrame struct {
 	StreamID byte
 	Flags    byte

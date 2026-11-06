@@ -7,7 +7,8 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * Fixed-header mux codec for the planned single-session USB transport.
+ * Mux-v1 framing of the input channel, on every transport (AOA, ADB and paired Wi-Fi).
+ * Mirrors host/usbmux.go.
  *
  * Header layout (big-endian):
  *  magic(2) version(1) stream(1) flags(1) seq(4) len(4)

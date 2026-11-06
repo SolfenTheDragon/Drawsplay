@@ -21,7 +21,7 @@ Thanks for your interest in DrawSplay. Contributions are welcome, with one impor
 - Pin any new GitHub Action to a full commit SHA with a version comment, like the existing ones.
 - Keep Windows and Linux builds both compiling. Platform-specific host code uses `_windows.go`, `_linux.go` and `_other.go` filename suffixes.
 - Input and video paths are latency-sensitive: avoid per-event handshakes, unbounded queues and socket I/O on the Android main thread.
-- Protocol changes must be additive. Don't commit secrets or signing keys.
+- Protocol changes must be additive. Remove a field or framing only once no released tablet app uses it (see `FUNCTIONALITY.md` §7). Don't commit secrets or signing keys.
 - Update `README.md` if setup or usage changes, `FUNCTIONALITY.md` if behaviour changes, and `PRIVACY.md` if what is stored or sent changes.
 
 ## Licensing

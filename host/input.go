@@ -24,13 +24,6 @@ var initialHelloTimeout = 5 * time.Second
 
 var globalInputConnID atomic.Uint64
 
-type inputWireMode int
-
-const (
-	inputWireLegacyJSON inputWireMode = iota
-	inputWireMuxV1
-)
-
 func runInputListener(ctx context.Context, ln net.Listener, store *settingsStore, transport string) {
 	events := newEventLogger(eventLogBuffer)
 	inj := newInjector()
@@ -103,11 +96,19 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 		log.Printf("Read deadline error (session=%d): %v", id, err)
 		return
 	}
-	mode, err := detectInputWireMode(reader)
+	muxFramed, err := startsWithMuxFrame(reader)
 	if err != nil {
 		log.Printf("Connection probe failed (session=%d): %v", id, err)
 		return
 	}
+	if !muxFramed {
+		// Every DrawSplay tablet app frames its input; a stream that does not
+		// is an app from before mux framing or not a DrawSplay app at all.
+		log.Printf("Input connection without mux framing refused (session=%d): the tablet app is too old or not DrawSplay", id)
+		setOperationalWarning("tablet-app", "A tablet tried to connect with an app too old for this host. Update DrawSplay on the tablet.")
+		return
+	}
+	setOperationalWarning("tablet-app", "")
 	if err := conn.SetReadDeadline(time.Time{}); err != nil {
 		log.Printf("Read deadline reset error (session=%d): %v", id, err)
 		return
@@ -123,18 +124,8 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 		writeMu.Lock()
 		defer writeMu.Unlock()
 		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		switch mode {
-		case inputWireMuxV1:
-			err = writeMuxFrame(conn, muxFrame{
-				StreamID: muxStreamControl,
-				Flags:    0,
-				Seq:      txSeq,
-				Payload:  payload,
-			})
-			txSeq++
-		default:
-			_, err = conn.Write(append(payload, '\n'))
-		}
+		err = writeMuxFrame(conn, muxFrame{StreamID: muxStreamControl, Seq: txSeq, Payload: payload})
+		txSeq++
 		return err == nil
 	}
 
@@ -164,8 +155,7 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 
 	helloSeen := false
 	onMsg := func(msg packet) bool {
-		msg.normalizeAliases()
-		switch msg.Type {
+		switch msg.kind() {
 		case "hello":
 			if helloSeen {
 				log.Printf("Duplicate hello ignored (session=%d)", id)
@@ -229,75 +219,43 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			}
 			return true
 		default:
-			log.Printf("Unknown packet type (session=%d): %s", id, msg.Type)
+			log.Printf("Unknown packet type (session=%d): %s", id, msg.kind())
 			return true
 		}
 	}
 
-	switch mode {
-	case inputWireMuxV1:
-		if err := conn.SetReadDeadline(time.Now().Add(initialHelloTimeout)); err != nil {
-			log.Printf("Read deadline error (session=%d): %v", id, err)
-			return
-		}
-		for {
-			frame, err := readMuxFrame(reader)
-			if err != nil {
-				if ne, ok := err.(net.Error); ok && ne.Timeout() && !helloSeen {
-					log.Printf("Initial hello timeout, closing connection (session=%d)", id)
-					return
-				}
-				if errors.Is(err, net.ErrClosed) {
-					break
-				}
-				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-					return
-				}
-				if err.Error() == "EOF" {
-					break
-				}
-				log.Printf("Read error (session=%d): %v", id, err)
-				return
-			}
-			if frame.StreamID != muxStreamInput && frame.StreamID != muxStreamControl {
-				continue
-			}
-			var msg packet
-			if err := json.Unmarshal(frame.Payload, &msg); err != nil {
-				log.Printf("Decode error (session=%d): %v", id, err)
-				return
-			}
-			if !onMsg(msg) {
-				return
-			}
-		}
-	default:
-		if err := conn.SetReadDeadline(time.Now().Add(initialHelloTimeout)); err != nil {
-			log.Printf("Read deadline error (session=%d): %v", id, err)
-			return
-		}
-		scanner := bufio.NewScanner(reader)
-		scanner.Buffer(make([]byte, 0, 8*1024), maxPacketBytes)
-		for scanner.Scan() {
-			var msg packet
-			if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
-				log.Printf("Decode error (session=%d): %v", id, err)
-				return
-			}
-			if !onMsg(msg) {
-				return
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			if errors.Is(err, bufio.ErrTooLong) {
-				log.Printf("Packet exceeded %d bytes, closing connection (session=%d)", maxPacketBytes, id)
-				return
-			}
+	if err := conn.SetReadDeadline(time.Now().Add(initialHelloTimeout)); err != nil {
+		log.Printf("Read deadline error (session=%d): %v", id, err)
+		return
+	}
+	for {
+		frame, err := readMuxFrame(reader)
+		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() && !helloSeen {
 				log.Printf("Initial hello timeout, closing connection (session=%d)", id)
 				return
 			}
+			if errors.Is(err, net.ErrClosed) {
+				break
+			}
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				return
+			}
+			if err.Error() == "EOF" {
+				break
+			}
 			log.Printf("Read error (session=%d): %v", id, err)
+			return
+		}
+		if frame.StreamID != muxStreamInput && frame.StreamID != muxStreamControl {
+			continue
+		}
+		var msg packet
+		if err := json.Unmarshal(frame.Payload, &msg); err != nil {
+			log.Printf("Decode error (session=%d): %v", id, err)
+			return
+		}
+		if !onMsg(msg) {
 			return
 		}
 	}
@@ -316,15 +274,13 @@ func underlyingTCPConn(conn net.Conn) *net.TCPConn {
 	return nil
 }
 
-func detectInputWireMode(reader *bufio.Reader) (inputWireMode, error) {
+// startsWithMuxFrame reports whether the stream opens with the mux magic.
+func startsWithMuxFrame(reader *bufio.Reader) (bool, error) {
 	hdr, err := reader.Peek(2)
 	if err != nil {
-		return inputWireLegacyJSON, err
+		return false, err
 	}
-	if len(hdr) == 2 && hdr[0] == byte(usbMuxMagic>>8) && hdr[1] == byte(usbMuxMagic&0xFF) {
-		return inputWireMuxV1, nil
-	}
-	return inputWireLegacyJSON, nil
+	return hdr[0] == byte(usbMuxMagic>>8) && hdr[1] == byte(usbMuxMagic&0xFF), nil
 }
 
 func handleHello(msg packet, id uint64) {

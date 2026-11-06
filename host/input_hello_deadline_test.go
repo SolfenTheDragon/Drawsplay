@@ -40,7 +40,7 @@ func runHelloDeadlineCase(t *testing.T, first string, wantClosed bool) {
 			}
 		}
 	}()
-	if _, err := client.Write([]byte(first + "\n")); err != nil {
+	if err := writeMuxFrame(client, muxFrame{StreamID: muxStreamControl, Seq: 1, Payload: []byte(first)}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -67,4 +67,24 @@ func TestModePrefsBeforeHelloDoesNotLiftHelloDeadline(t *testing.T) {
 
 func TestHelloLiftsHelloDeadline(t *testing.T) {
 	runHelloDeadlineCase(t, `{"type":"hello","device":"test"}`, false)
+}
+
+func TestInputWithoutMuxFramingIsRefusedWithAnUpdateHint(t *testing.T) {
+	t.Cleanup(func() { setOperationalWarning("tablet-app", "") })
+	client, server := net.Pipe()
+	defer client.Close()
+	done := make(chan struct{})
+	go func() {
+		handleConnection(context.Background(), 2, server, newEventLogger(16), nopInjector{}, newSettingsStore(defaultSettings()), "test-transport")
+		close(done)
+	}()
+	go client.Write([]byte(`{"type":"hello","device":"old app"}` + "\n"))
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("newline-delimited JSON input was accepted")
+	}
+	if !containsWarning(currentOperationalWarnings(), "Update DrawSplay on the tablet") {
+		t.Fatalf("warnings = %v, want an update hint", currentOperationalWarnings())
+	}
 }
