@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"drawsplay/host/internal/h264"
 	"encoding/binary"
 	"errors"
 	"net"
@@ -46,10 +47,10 @@ func (d *testMirrorFallbackDisplay) FallbackToMirror() (virtualDisplay, error) {
 	return d.fallback, d.err
 }
 
-// mustUnits asserts the exact NAL units and remainder produced by splitAnnexB.
+// mustUnits asserts the exact NAL units and remainder produced by h264.Split.
 func mustUnits(t *testing.T, buf []byte, wantUnits [][]byte, wantRest []byte) {
 	t.Helper()
-	units, rest := splitAnnexB(buf)
+	units, rest := h264.Split(buf)
 	if len(units) != len(wantUnits) {
 		t.Fatalf("got %d units, want %d", len(units), len(wantUnits))
 	}
@@ -317,17 +318,5 @@ func TestIsStartupPipelineFailure(t *testing.T) {
 	}
 	if isStartupPipelineFailure(true, pipelineStartupFailureWindow+time.Millisecond) {
 		t.Fatal("did not expect long-running pipeline to be treated as startup failure")
-	}
-}
-
-func TestH264NALType(t *testing.T) {
-	if got := h264NALType([]byte{0, 0, 0, 1, 0x67, 0x42}); got != 7 {
-		t.Fatalf("4-byte start code type = %d, want 7", got)
-	}
-	if got := h264NALType([]byte{0, 0, 1, 0x65, 0x88}); got != 5 {
-		t.Fatalf("3-byte start code type = %d, want 5", got)
-	}
-	if got := h264NALType([]byte{0x65, 0x88}); got != -1 {
-		t.Fatalf("non-annexb type = %d, want -1", got)
 	}
 }

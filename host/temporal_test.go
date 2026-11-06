@@ -1,6 +1,7 @@
 package main
 
 import (
+	"drawsplay/host/internal/h264"
 	"testing"
 	"time"
 )
@@ -9,13 +10,13 @@ func TestIsDroppableNonRefNAL(t *testing.T) {
 	nonRefP := []byte{0, 0, 0, 1, 0x01, 0xAA}
 	refP := []byte{0, 0, 0, 1, 0x41, 0xAA}
 	idr := []byte{0, 0, 0, 1, 0x65, 0xAA}
-	if !isDroppableNonRefNAL(nonRefP) {
+	if !h264.IsDroppableNonRef(nonRefP) {
 		t.Fatal("expected non-reference P-slice to be droppable")
 	}
-	if isDroppableNonRefNAL(refP) {
+	if h264.IsDroppableNonRef(refP) {
 		t.Fatal("reference P-slice must not be droppable")
 	}
-	if isDroppableNonRefNAL(idr) {
+	if h264.IsDroppableNonRef(idr) {
 		t.Fatal("IDR must not be droppable")
 	}
 }

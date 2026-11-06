@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"drawsplay/host/internal/h264"
 	"errors"
 	"io"
 	"testing"
@@ -158,7 +159,7 @@ func (f *auTestFeed) feed(reads []auTestRead) {
 // flushTail emits the buffered bytes as runEncodePipeline's idle flush does.
 func (f *auTestFeed) flushTail() {
 	f.t.Helper()
-	tail, ok := flushAnnexBTail(f.buf)
+	tail, ok := h264.FlushTail(f.buf)
 	if !ok {
 		f.t.Fatalf("idle flush found no unit in % x", f.buf)
 	}
@@ -358,53 +359,6 @@ func TestAccessUnitTrackerIgnoresBytesWithoutStartCodes(t *testing.T) {
 	f.feed([]auTestRead{{n: 100, boundary: true}, {n: 200, boundary: true}})
 	if len(f.units) != 0 || len(f.buf) != len(data) {
 		t.Fatalf("emitted %d units, buffered %d bytes; want none and all", len(f.units), len(f.buf))
-	}
-}
-
-func TestLeadingStartCode(t *testing.T) {
-	cases := []struct {
-		in   []byte
-		want startCodeCheck
-	}{
-		{nil, startCodeIncomplete},
-		{[]byte{0}, startCodeIncomplete},
-		{[]byte{0, 0, 0}, startCodeIncomplete},
-		{[]byte{0, 0, 1}, startCodePresent},
-		{[]byte{0, 0, 0, 1, 0x41}, startCodePresent},
-		{[]byte{0, 0, 0, 0, 1, 0x41}, startCodePresent},
-		{[]byte{0, 1, 0x41}, startCodeAbsent},
-		{[]byte{0, 0, 3, 1}, startCodeAbsent},
-		{[]byte{1, 0x41}, startCodeAbsent},
-		{[]byte{0xA5, 0, 0, 1}, startCodeAbsent},
-	}
-	for _, c := range cases {
-		if got := leadingStartCode(c.in); got != c.want {
-			t.Errorf("leadingStartCode(% x) = %d, want %d", c.in, got, c.want)
-		}
-	}
-}
-
-func TestOpensAccessUnit(t *testing.T) {
-	for _, nalType := range []byte{6, 7, 8, 9, 14, 15, 16, 17, 18} {
-		if !opensAccessUnit(nalType, nil) {
-			t.Errorf("type %d after a slice must open an access unit", nalType)
-		}
-	}
-	for _, nalType := range []byte{2, 3, 4, 10, 11, 12, 13, 19, 20} {
-		if opensAccessUnit(nalType, []byte{0x88}) {
-			t.Errorf("type %d must not open an access unit", nalType)
-		}
-	}
-	for _, nalType := range []byte{1, 5} {
-		if !opensAccessUnit(nalType, []byte{0x88}) {
-			t.Errorf("type %d with first_mb_in_slice 0 must open an access unit", nalType)
-		}
-		if opensAccessUnit(nalType, []byte{0x40}) {
-			t.Errorf("type %d continuing a picture must not open an access unit", nalType)
-		}
-		if opensAccessUnit(nalType, nil) {
-			t.Errorf("type %d without slice header must not open an access unit", nalType)
-		}
 	}
 }
 

@@ -54,7 +54,7 @@ type pipelineSpec struct {
 	AUWriteChunk int
 	// SignalBT709Limited rewrites each H.264 SPS that lacks a
 	// video_signal_type to declare BT.709 limited range (see
-	// withBT709LimitedVUI), for encoders that leave colour unspecified.
+	// h264.WithBT709LimitedVUI), for encoders that leave colour unspecified.
 	SignalBT709Limited bool
 	// Input, when set, feeds the process's standard input (raw frames for
 	// an ffmpeg "pipe:0" input) until ctx ends or it fails; its standard

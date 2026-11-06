@@ -8,6 +8,7 @@ import (
 	"io"
 	"time"
 
+	"drawsplay/host/internal/h264"
 	"drawsplay/host/internal/wifilan"
 )
 
@@ -134,7 +135,7 @@ func (b *wifiVideoBridge) maybeSendConfig() error {
 	if !ok {
 		return nil
 	}
-	width, height, err := wifilan.SPSDimensions(sets.SPS)
+	width, height, err := h264.SPSDimensions(sets.SPS)
 	if err != nil {
 		return fmt.Errorf("%w: %v", errWiFiVideoStream, err)
 	}

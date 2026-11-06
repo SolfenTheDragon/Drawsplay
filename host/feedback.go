@@ -18,6 +18,7 @@ package main
 
 import (
 	"bufio"
+	"drawsplay/host/internal/h264"
 	"encoding/json"
 	"log"
 	"net"
@@ -98,7 +99,7 @@ func noteFrameForwarded() { frameAcks.forwarded.Add(1) }
 // first_slice_segment_in_pic_flag set. Both are the first bit after the NAL
 // header (ue(v) zero encodes as a single 1 bit).
 func nalStartsPicture(codec string, unit []byte) bool {
-	off := annexBNALHeaderOffset(unit)
+	off := h264.HeaderOffset(unit)
 	if off < 0 {
 		return false
 	}
@@ -109,11 +110,8 @@ func nalStartsPicture(codec string, unit []byte) bool {
 		nalType := (unit[off] >> 1) & 0x3F
 		return nalType <= 31 && unit[off+2]&0x80 != 0
 	}
-	if off+1 >= len(unit) {
-		return false
-	}
 	nalType := unit[off] & 0x1F
-	return (nalType == 1 || nalType == 5) && unit[off+1]&0x80 != 0
+	return (nalType == h264.TypeSlice || nalType == h264.TypeIDR) && h264.IsFirstSlice(unit[off+1:])
 }
 
 // resetFrameAcks marks every frame forwarded so far as settled: frames sent

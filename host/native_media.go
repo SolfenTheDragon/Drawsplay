@@ -10,6 +10,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"drawsplay/host/internal/h264"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -106,22 +107,12 @@ func frameMetaPayload(inputSeq, pipeUs uint32) []byte {
 // decodable stream: SPS, PPS and an IDR slice.
 func auIsDecodableStart(au []byte) bool {
 	seen := 0
-	for _, nal := range splitAnnexBAll(au) {
-		if t := h264NALType(nal); t > 0 && t < 32 {
+	for _, nal := range h264.SplitAll(au) {
+		if t := h264.NALType(nal); t > 0 && t < 32 {
 			seen |= 1 << t
 		}
 	}
 	return seen&nativeFirstFrameNALMask == nativeFirstFrameNALMask
-}
-
-// splitAnnexBAll splits a complete buffer into NAL units, including the
-// trailing one.
-func splitAnnexBAll(b []byte) [][]byte {
-	units, rest := splitAnnexB(b)
-	if tail, ok := flushAnnexBTail(rest); ok {
-		units = append(units, tail)
-	}
-	return units
 }
 
 // Client-advertised video-channel extensions.
@@ -496,11 +487,11 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 					return true, fmt.Errorf("client write: %w", err)
 				}
 			}
-			units := splitAnnexBAll(payload)
+			units := h264.SplitAll(payload)
 			telemetry.addUnits(len(units))
 			for _, unit := range units {
-				if spec.SignalBT709Limited && h264NALType(unit) == 7 {
-					unit = withBT709LimitedVUI(unit)
+				if spec.SignalBT709Limited && h264.NALType(unit) == 7 {
+					unit = h264.WithBT709LimitedVUI(unit)
 				}
 				if err := writeVideoPacket(w, videoPacketNAL, unit); err != nil {
 					return true, fmt.Errorf("client write: %w", err)

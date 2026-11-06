@@ -9,13 +9,14 @@ package main
 // Data flow per session:
 //
 //	ffmpeg stdout (Annex-B byte stream)
-//	  -> splitAnnexB (reassemble into complete NAL units; accessUnitTracker
+//	  -> h264.Split (reassemble into complete NAL units; accessUnitTracker
 //	     sends a frame's last unit as soon as the frame's last write is read)
 //	  -> writeVideoPacket (type+length framing, see protocol.go)
 //	  -> TCP -> adb reverse -> tablet MediaCodec
 
 import (
 	"context"
+	"drawsplay/host/internal/h264"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -1058,18 +1059,18 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 		configSent = true
 		return nil
 	}
-	var taggedSPS spsVUICache
+	var taggedSPS h264.VUICache
 	emitUnit := func(unit []byte) error {
 		if err := sendConfig(); err != nil {
 			return err
 		}
 		if sentNALs < 5 {
-			log.Printf("Video NAL[%d] %s: len=%d type=%d", sentNALs, spec.Name, len(unit), h264NALType(unit))
+			log.Printf("Video NAL[%d] %s: len=%d type=%d", sentNALs, spec.Name, len(unit), h264.NALType(unit))
 		}
-		if spec.SignalBT709Limited && h264NALType(unit) == 7 {
-			unit = taggedSPS.rewrite(unit)
+		if spec.SignalBT709Limited && h264.NALType(unit) == 7 {
+			unit = taggedSPS.Rewrite(unit)
 		}
-		if temporal.droppingNonRef() && spec.SupportsTemporalDrop && isDroppableNonRefNAL(unit) {
+		if temporal.droppingNonRef() && spec.SupportsTemporalDrop && h264.IsDroppableNonRef(unit) {
 			telemetry.addDropped(1)
 			return nil
 		}
@@ -1137,7 +1138,7 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 			}
 			updateCapturePriority()
 			if len(buf) > 0 && !lastChunkAt.IsZero() && time.Since(lastChunkAt) >= nalTailFlushInterval {
-				tail, ok := flushAnnexBTail(buf)
+				tail, ok := h264.FlushTail(buf)
 				if ok {
 					telemetry.addUnits(1)
 					if err := emitUnit(tail); err != nil {
@@ -1192,7 +1193,7 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 						return produced.Load(), splitErr
 					}
 				} else {
-					units, rest = splitAnnexB(buf)
+					units, rest = h264.Split(buf)
 				}
 				telemetry.addUnits(len(units))
 				for _, unit := range units {
@@ -1229,7 +1230,7 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 				}
 			}
 			if chunk.err != nil {
-				tail, ok := flushAnnexBTail(buf)
+				tail, ok := h264.FlushTail(buf)
 				if ok {
 					telemetry.addUnits(1)
 					if err := emitUnit(tail); err != nil {
@@ -1280,22 +1281,6 @@ func refreshClass(refreshHz float64) string {
 	return "high"
 }
 
-func h264NALType(nal []byte) int {
-	offset := 0
-	switch {
-	case len(nal) >= 4 && nal[0] == 0 && nal[1] == 0 && nal[2] == 0 && nal[3] == 1:
-		offset = 4
-	case len(nal) >= 3 && nal[0] == 0 && nal[1] == 0 && nal[2] == 1:
-		offset = 3
-	default:
-		return -1
-	}
-	if len(nal) <= offset {
-		return -1
-	}
-	return int(nal[offset] & 0x1F)
-}
-
 // writeVideoPacket frames one payload per the video channel wire format.
 func writeVideoPacket(w io.Writer, pktType byte, payload []byte) error {
 	var header [5]byte
@@ -1308,50 +1293,4 @@ func writeVideoPacket(w io.Writer, pktType byte, payload []byte) error {
 	parts := net.Buffers{header[:], payload}
 	_, err := parts.WriteTo(w)
 	return err
-}
-
-// splitAnnexB extracts complete NAL units from buf. Units keep their leading
-// start code (3- or 4-byte) so the decoder receives standard Annex-B input.
-// The final, possibly incomplete unit is returned as rest — a unit is only
-// "complete" once the next start code (or EOF) is seen.
-func splitAnnexB(buf []byte) (units [][]byte, rest []byte) {
-	starts := make([]int, 0, 8)
-	i := 0
-	for i+2 < len(buf) {
-		if buf[i] == 0 && buf[i+1] == 0 && buf[i+2] == 1 {
-			start := i
-			// Fold a preceding zero into a 4-byte start code, but never
-			// steal the tail byte of the previous unit's start code.
-			if i > 0 && buf[i-1] == 0 && (len(starts) == 0 || starts[len(starts)-1] < i-1) {
-				start = i - 1
-			}
-			starts = append(starts, start)
-			i += 3
-			continue
-		}
-		i++
-	}
-	if len(starts) == 0 {
-		return nil, buf
-	}
-	for j := 0; j+1 < len(starts); j++ {
-		unit := buf[starts[j]:starts[j+1]]
-		units = append(units, unit)
-	}
-	return units, buf[starts[len(starts)-1]:]
-}
-
-// flushAnnexBTail emits a trailing unit when no new bytes have arrived for
-// a short interval, avoiding an extra frame interval of host-side hold-back.
-func flushAnnexBTail(buf []byte) ([]byte, bool) {
-	if len(buf) < 5 {
-		return nil, false
-	}
-	offset := annexBNALHeaderOffset(buf)
-	if offset < 0 {
-		return nil, false
-	}
-	unit := make([]byte, len(buf))
-	copy(unit, buf)
-	return unit, true
 }

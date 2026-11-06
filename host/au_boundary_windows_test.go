@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"drawsplay/host/internal/h264"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -43,7 +44,7 @@ func auPipelineTestStream() auTestStream {
 }
 
 func auStampOffset(unit []byte) int {
-	return annexBNALHeaderOffset(unit) + 2
+	return h264.HeaderOffset(unit) + 2
 }
 
 // TestAccessUnitWriterProcess is not a real test: it is the stand-in encoder
@@ -264,7 +265,7 @@ func TestRunEncodePipelineEarlyEmissionWithRealFFmpeg(t *testing.T) {
 	var audAt time.Time
 	var slices, early, big int
 	for _, n := range out.nals() {
-		h := annexBNALHeaderOffset(n.payload)
+		h := h264.HeaderOffset(n.payload)
 		if h < 0 {
 			continue
 		}

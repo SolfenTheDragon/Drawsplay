@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"drawsplay/host/internal/h264"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -44,7 +45,7 @@ func auPipelineTestStream() auTestStream {
 
 // auStampOffset locates the write-time stamp in a slice NAL unit.
 func auStampOffset(unit []byte) int {
-	return annexBNALHeaderOffset(unit) + 2
+	return h264.HeaderOffset(unit) + 2
 }
 
 // TestAccessUnitWriterProcess is not a real test: it is the stand-in encoder
