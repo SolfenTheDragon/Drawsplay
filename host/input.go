@@ -17,8 +17,11 @@ import (
 const (
 	maxPacketBytes                      = 64 * 1024
 	maxConcurrentConnectionsPerListener = 1
-	initialHelloTimeout                 = 5 * time.Second
 )
+
+// initialHelloTimeout is how long a new input connection may take to send its
+// hello (a variable so tests can shorten it).
+var initialHelloTimeout = 5 * time.Second
 
 var globalInputConnID atomic.Uint64
 
@@ -179,6 +182,10 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			}
 			inputOwned = true
 			helloSeen = true
+			// Only a valid hello lifts the initial deadline: a peer that sends
+			// anything else and then goes quiet must not keep the single input
+			// slot (see initialHelloTimeout).
+			_ = conn.SetReadDeadline(time.Time{})
 			handleHello(msg, id)
 			if msg.HostPrefs {
 				if !writeControl(hostInfoMsg{Type: "hostInfo", HostID: hostID(), HostName: hostDisplayName()}) {
@@ -254,9 +261,6 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 				log.Printf("Read error (session=%d): %v", id, err)
 				return
 			}
-			if !helloSeen {
-				_ = conn.SetReadDeadline(time.Time{})
-			}
 			if frame.StreamID != muxStreamInput && frame.StreamID != muxStreamControl {
 				continue
 			}
@@ -277,9 +281,6 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 		scanner := bufio.NewScanner(reader)
 		scanner.Buffer(make([]byte, 0, 8*1024), maxPacketBytes)
 		for scanner.Scan() {
-			if !helloSeen {
-				_ = conn.SetReadDeadline(time.Time{})
-			}
 			var msg packet
 			if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
 				log.Printf("Decode error (session=%d): %v", id, err)
