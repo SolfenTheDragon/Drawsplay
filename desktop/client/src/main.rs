@@ -2,6 +2,7 @@
 //! mouse, keyboard, touch and pen input back.
 
 mod keys;
+mod pen;
 mod session;
 
 use dd_proto::{Message, PointerPhase, PointerSource, DEFAULT_PORT};
@@ -147,7 +148,14 @@ fn main() {
             std::process::exit(1);
         }
     }
-    let event_loop = EventLoop::<UiEvent>::with_user_event().build().expect("cannot create event loop");
+    let mut builder = EventLoop::<UiEvent>::with_user_event();
+    #[cfg(windows)]
+    {
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+        // Reads pen tilt, barrel and eraser, which winit 0.30 drops (see `pen`).
+        builder.with_msg_hook(pen::windows_hook);
+    }
+    let event_loop = builder.build().expect("cannot create event loop");
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = App::new(args, event_loop.create_proxy());
     if let Err(e) = event_loop.run_app(&mut app) {
@@ -179,6 +187,8 @@ struct App {
     pressed: HashSet<u16>,
     /// Touch/pen contacts that went down on the video and have not lifted yet.
     touches: HashSet<u64>,
+    /// The subset of `touches` that are pens.
+    pens: HashSet<u64>,
     /// Last normalized position of each held touch, so a forced lift happens where the finger was.
     touch_pos: std::collections::HashMap<u64, (f32, f32)>,
     // stats
@@ -203,6 +213,7 @@ impl App {
             pos: PhysicalPosition::new(0.0, 0.0),
             pressed: HashSet::new(),
             touches: HashSet::new(),
+            pens: HashSet::new(),
             touch_pos: std::collections::HashMap::new(),
             shown: 0,
             stats_at: Instant::now(),
@@ -272,9 +283,11 @@ impl App {
         for id in self.touches.drain().collect::<Vec<_>>() {
             // Lift where the finger last was: some hosts (Windows) act on the position of the Up.
             let (x, y) = self.touch_pos.remove(&id).unwrap_or((0.0, 0.0));
+            let source = if self.pens.remove(&id) { PointerSource::Pen } else { PointerSource::Touch };
+            pen::forget(id);
             self.send(Message::Pointer {
                 id: (id & 0xFF) as u8,
-                source: PointerSource::Touch,
+                source,
                 phase: PointerPhase::Up,
                 x,
                 y,
@@ -526,25 +539,39 @@ impl ApplicationHandler<UiEvent> for App {
                     TouchPhase::Moved => PointerPhase::Move,
                     TouchPhase::Ended | TouchPhase::Cancelled => PointerPhase::Up,
                 };
-                // A pen reports an altitude angle; fingers do not.
-                let (source, pressure, tilt) = match t.force {
-                    Some(Force::Calibrated { force, max_possible_force, altitude_angle }) => {
-                        let p = if max_possible_force > 0.0 { (force / max_possible_force) as f32 } else { 1.0 };
-                        match altitude_angle {
-                            // 90 degrees = upright; report the lean away from upright.
-                            Some(alt) => (PointerSource::Pen, p, (90.0 - alt.to_degrees()).clamp(0.0, 90.0) as i8),
-                            None => (PointerSource::Touch, p, 0),
+                let touch_pressure = match t.force {
+                    Some(Force::Calibrated { force, max_possible_force, .. }) => {
+                        if max_possible_force > 0.0 {
+                            (force / max_possible_force) as f32
+                        } else {
+                            1.0
                         }
                     }
-                    Some(Force::Normalized(p)) => (PointerSource::Touch, p as f32, 0),
-                    None => (PointerSource::Touch, if phase == PointerPhase::Up { 0.0 } else { 1.0 }, 0),
+                    Some(Force::Normalized(p)) => p as f32,
+                    None if phase == PointerPhase::Up => 0.0,
+                    None => 1.0,
                 };
+                // winit 0.30 reports a pen as a touch. On Windows the message hook in `pen` records
+                // which touches are pens, with their tilt and buttons; elsewhere this is always None.
+                let (source, pressure, tilt_x, tilt_y, buttons) = match pen::sample(t.id) {
+                    Some(s) => {
+                        (PointerSource::Pen, s.pressure.unwrap_or(touch_pressure), s.tilt_x, s.tilt_y, s.buttons())
+                    }
+                    None => (PointerSource::Touch, touch_pressure, 0, 0, 0),
+                };
+                if phase == PointerPhase::Up {
+                    pen::forget(t.id);
+                }
                 match phase {
                     PointerPhase::Down if !self.over_video(t.location) => return,
                     PointerPhase::Down => {
                         self.touches.insert(t.id);
+                        if source == PointerSource::Pen {
+                            self.pens.insert(t.id);
+                        }
                     }
                     PointerPhase::Up => {
+                        self.pens.remove(&t.id);
                         if !self.touches.remove(&t.id) {
                             return;
                         }
@@ -568,9 +595,9 @@ impl ApplicationHandler<UiEvent> for App {
                         x,
                         y,
                         pressure: pressure.clamp(0.0, 1.0),
-                        buttons: if source == PointerSource::Pen { 1 } else { 0 },
-                        tilt_x: tilt,
-                        tilt_y: 0,
+                        buttons,
+                        tilt_x,
+                        tilt_y,
                         wheel_x: 0.0,
                         wheel_y: 0.0,
                     });

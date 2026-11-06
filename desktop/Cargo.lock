@@ -627,6 +627,7 @@ dependencies = [
  "bytemuck",
  "dd-proto",
  "softbuffer",
+ "windows",
  "winit",
 ]
 
