@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getlantern/systray"
+	"fyne.io/systray"
 )
 
 //go:embed drawsplay-host.ico
