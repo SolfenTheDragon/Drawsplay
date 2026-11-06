@@ -34,5 +34,32 @@ The Rust components link the following direct dependencies, each under its own p
 | `evdev` (Linux uinput) | Apache-2.0 OR MIT |
 | `ctrlc` (Linux signal handling) | MIT/Apache-2.0 |
 | `windows` (Win32 bindings) | MIT OR Apache-2.0 |
+| `getrandom` (OS random numbers) | MIT OR Apache-2.0 |
+| `zeroize` (key wiping) | Apache-2.0 OR MIT |
+| `serde`, `serde_json` (control endpoint and state files) | MIT OR Apache-2.0 |
+| `libc` | MIT OR Apache-2.0 |
+| `zbus` (Linux D-Bus, Wayland displays) | MIT |
 
 `ffmpeg` is not bundled; it is installed separately and used as an external program.
+
+## DrawSplay host (`host/`) Go modules
+
+The host binary statically links these Go modules (versions in `host/go.mod`):
+
+| Module | License |
+|--------|---------|
+| `fyne.io/systray` (Windows/Linux tray icon) | Apache-2.0 |
+| `github.com/1Password/srp` (Wi-Fi pairing PAKE) | Apache-2.0 |
+| `github.com/godbus/dbus/v5` (Linux D-Bus) | BSD-2-Clause |
+| `github.com/miekg/dns` (Wi-Fi discovery, mDNS) | BSD-3-Clause |
+| `golang.org/x/net`, `golang.org/x/sys`, `golang.org/x/text` | BSD-3-Clause |
+
+The Go standard library and runtime are BSD-3-Clause.
+
+## Android app (`android/`) libraries
+
+| Library | License |
+|---------|---------|
+| Bouncy Castle `bcprov-jdk18on` (Wi-Fi pairing SRP) | Bouncy Castle License (MIT style) |
+| AndroidX `core-ktx`, `appcompat`; Material Components | Apache-2.0 |
+| Kotlin standard library | Apache-2.0 |

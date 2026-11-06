@@ -10,8 +10,8 @@ It also covers where to obtain each key/certificate and how to store them safely
 
 ## Virtual-display driver signing is a separate process
 
-For beginner-friendly instructions, see
-[Signing the Windows virtual-display driver](docs/windows-driver-signing.md).
+Beginner-friendly instructions are in the maintainers' driver signing guide
+(`docs/windows-driver-signing.md`, kept out of the public repository).
 That guide covers certificate/account setup, Microsoft submission, installation,
 and the prerequisites for automation.
 
