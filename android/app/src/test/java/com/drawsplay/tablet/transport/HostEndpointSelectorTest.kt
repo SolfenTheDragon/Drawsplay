@@ -5,6 +5,28 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+class HostEndpointSelectorTest {
+    @Test
+    fun loopbackIsOfferedOnlyWhileUsbDebuggingIsOn() {
+        var adb = false
+        val selector = HostEndpointSelector { adb }
+        assertTrue(selector.inputCandidates().none { it.host == "127.0.0.1" })
+        assertTrue(selector.videoCandidates().none { it.host == "127.0.0.1" })
+        adb = true
+        assertEquals("127.0.0.1", selector.videoCandidates().single().host)
+        assertEquals(HostEndpointSelector.ADB_INPUT_PORT, selector.inputCandidates().single().inputPort)
+    }
+
+    @Test
+    fun accessoryComesBeforeTheAdbTunnel() {
+        val selector = HostEndpointSelector { true }
+        selector.updateAccessoryAttached(true)
+        val hosts = selector.videoCandidates().map { it.host }
+        assertEquals(listOf("usb-accessory", "127.0.0.1"), hosts)
+        assertFalse(selector.videoCandidates().first().host == "127.0.0.1")
+    }
+}
+
 class HostEndpointSelectorPairedTest {
     private val paired = java.net.Socket()
 

@@ -73,7 +73,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var inputChannel: InputChannel
     private lateinit var videoChannel: VideoChannel
-    private val endpointSelector = HostEndpointSelector()
+    // The adb loopback tunnel is only tried while USB debugging is on (see HostEndpointSelector).
+    private val endpointSelector = HostEndpointSelector { usbDebuggingEnabled() }
     private lateinit var pairedWifiHost: WiFiPairedSessionHost
     private lateinit var waitingGroup: View
     private lateinit var wifiPairPanel: View
@@ -837,9 +838,15 @@ class MainActivity : AppCompatActivity() {
         if (wifiHostReset.reconnectBlocked) return false
         val battery = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val usbPowered = battery?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) == android.os.BatteryManager.BATTERY_PLUGGED_USB
-        val adbEnabled = android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.ADB_ENABLED, 0) == 1
-        return UsbPriorityPolicy.allowWifi(endpointSelector.isAccessoryAttached(), usbPowered, adbEnabled)
+        return UsbPriorityPolicy.allowWifi(endpointSelector.isAccessoryAttached(), usbPowered, usbDebuggingEnabled())
     }
+
+    private fun usbDebuggingEnabled(): Boolean =
+        try {
+            android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.ADB_ENABLED, 0) == 1
+        } catch (e: Exception) {
+            false
+        }
 
     private fun maybeStartForegroundVideo() {
         val surface = pendingForegroundSurface ?: return
