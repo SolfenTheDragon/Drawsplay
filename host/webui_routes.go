@@ -74,6 +74,31 @@ func (api webUIAPI) register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/wifi/pairing/cancel", securePost(api.csrfToken, api.handleWifiPairCancel))
 	mux.HandleFunc("/api/desktop/disconnect", securePost(api.csrfToken, api.handleDesktopDisconnect))
 	mux.HandleFunc("/api/session/reconnect-video", securePost(api.csrfToken, api.handleSessionReconnectVideo))
+	mux.HandleFunc("/api/update", getOnly(api.handleUpdate))
+	mux.HandleFunc("/api/update/check", securePost(api.csrfToken, api.handleUpdateCheck))
+	mux.HandleFunc("/api/update/install", securePost(api.csrfToken, api.handleUpdateInstall))
+}
+
+func (api webUIAPI) handleUpdate(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, hostUpdater.status(api.store.get().UpdateCheck))
+}
+
+func (api webUIAPI) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	hostUpdater.checkNow(r.Context())
+	writeJSON(w, hostUpdater.status(api.store.get().UpdateCheck))
+}
+
+func (api webUIAPI) handleUpdateInstall(w http.ResponseWriter, _ *http.Request) {
+	stop := api.stop
+	if exitHost != nil {
+		stop = exitHost
+	}
+	if err := hostUpdater.startInstall(stop); err != nil {
+		httpError(w, http.StatusConflict, "%v", err)
+		return
+	}
+	log.Printf("Update install requested via web UI")
+	writeJSON(w, hostUpdater.status(api.store.get().UpdateCheck))
 }
 
 func (api webUIAPI) handleCSRF(w http.ResponseWriter, _ *http.Request) {

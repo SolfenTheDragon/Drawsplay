@@ -16,6 +16,12 @@ package main
 //	                      — asks connected client sessions to clear their
 //	                        stored preferred display resolution
 //	POST /api/stop        — gracefully shuts the host process down
+//	GET  /api/update      — update state (also starts a due automatic check)
+//	POST /api/update/check
+//	                      — checks GitHub for a newer release now
+//	POST /api/update/install
+//	                      — downloads, verifies and installs the newer
+//	                        release, then restarts the host (update.go)
 //
 // Security model: bound to 127.0.0.1 only. State changes additionally require
 // a per-process CSRF header token, and browser origins must match the loopback

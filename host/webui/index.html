@@ -271,6 +271,13 @@
             </label>
           </div>
           <div class="toggle-row">
+            <span>Check for DrawSplay updates automatically</span>
+            <label class="switch">
+              <input id="update-check" data-setting="updateCheck" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
             <span>Allow automatic tool download/install</span>
             <label class="switch">
               <input id="allow-tool-auto-install" data-setting="allowToolAutoInstall" type="checkbox">
@@ -320,6 +327,24 @@
       <h2>Setup checklist</h2>
       <div id="setup-checklist" class="hint">Checking setup…</div>
       <button id="run-setup-remediation-btn" type="button">Run setup repair checks</button>
+    </div>
+    <div class="panel dashboard-card update-card" id="update-panel">
+      <div class="eyebrow">SOFTWARE</div>
+      <h2>Updates</h2>
+      <div id="update-summary" class="update-summary">Not checked yet.</div>
+      <div id="update-progress" class="update-progress" hidden><span id="update-progress-bar"></span></div>
+      <details id="update-notes-box" class="update-notes" hidden>
+        <summary>What's new in <span id="update-notes-version"></span></summary>
+        <pre id="update-notes"></pre>
+      </details>
+      <div id="update-note" class="hint"></div>
+      <div id="update-result" hidden></div>
+      <div id="update-error" class="update-error" hidden></div>
+      <button id="update-install-btn" type="button" hidden>Install update</button>
+      <div class="update-links">
+        <button id="update-check-btn" type="button" class="link-button">Check now</button>
+        <a id="update-release-link" target="_blank" rel="noopener noreferrer" hidden>Release page</a>
+      </div>
     </div>
     </div>
 
@@ -414,7 +439,7 @@
     </div>
   </section>
 </main>
-<footer id="app-footer">DrawSplay <a id="host-version" target="_blank" rel="noopener noreferrer"></a></footer>
+<footer id="app-footer">DrawSplay <a id="host-version" target="_blank" rel="noopener noreferrer"></a><a id="footer-update" href="#update-panel" hidden></a></footer>
 <script src="app.js"></script>
 </body>
 </html>

@@ -87,6 +87,10 @@ type settings struct {
 	// IdleDisplayTimeoutSec removes the virtual display once no tablet has
 	// been connected for this many seconds (0 disables the check).
 	IdleDisplayTimeoutSec int `json:"idleDisplayTimeoutSec"`
+	// UpdateCheck lets the settings page ask GitHub for a newer release
+	// while it is open (at most every few hours). Installing always needs a
+	// click.
+	UpdateCheck bool `json:"updateCheck"`
 }
 
 // defaultSettings is the built-in configuration; the command-line flags
@@ -117,6 +121,7 @@ func defaultSettings() settings {
 		AOAAutoSwitch:         true,
 		ADBTunnelEnabled:      false,
 		IdleDisplayTimeoutSec: defaultIdleDisplayTimeoutSec,
+		UpdateCheck:           true,
 	}
 }
 

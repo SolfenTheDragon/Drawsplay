@@ -158,7 +158,10 @@ function applyTheme(theme) {
   if (label) label.textContent = isLight ? "Light mode" : "Dark mode";
 }
 
+let hostOSName = "";
+
 function applyPlatformVisibility(hostOS) {
+  hostOSName = hostOS || "";
   const showWindowsOnly = hostOS === "windows";
   for (const el of document.querySelectorAll("[data-windows-only]")) {
     el.hidden = !showWindowsOnly;
@@ -1117,6 +1120,163 @@ $("save-calibration-btn").addEventListener("click", async () => {
   }
 });
 
+// ---- Updates (update.go) ----
+const UPDATE_BUSY = new Set(["checking", "downloading", "installing", "restarting"]);
+let updateView = null;
+// Set while an install runs: the version that was running when it started,
+// and whether the host has gone away since (it restarts into the new one).
+let updateInstallFrom = "";
+let updateHostWentAway = false;
+
+function formatMiB(bytes) {
+  return (Number(bytes || 0) / 1048576).toFixed(1) + " MB";
+}
+
+function updateSummaryText(v) {
+  switch (v.state) {
+    case "checking": return ["Checking for updates…", ""];
+    case "current": return [`${v.current} is the latest version.`, "ok"];
+    case "available": return [`DrawSplay ${v.latest} is available. You have ${v.current}.`, "available"];
+    case "dev": return [`Development build ${v.current}. The latest release is ${v.latest}.`, ""];
+    case "downloading": {
+      const of = v.total ? ` of ${formatMiB(v.total)}` : "";
+      return [`Downloading ${v.latest}… ${formatMiB(v.downloaded)}${of}`, "available"];
+    }
+    case "installing": return [`Installing ${v.latest}…`, "available"];
+    case "restarting": return [`Restarting into ${v.latest}…`, "available"];
+    case "failed": return [`You have ${v.current}.`, ""];
+    default: return [v.autoCheck ? "Checking for updates…" : `You have ${v.current}. Not checked yet.`, ""];
+  }
+}
+
+function renderUpdate(v) {
+  updateView = v;
+  const busy = UPDATE_BUSY.has(v.state);
+  const [text, tone] = updateSummaryText(v);
+  $("update-summary").textContent = text;
+  $("update-summary").className = "update-summary" + (tone ? " " + tone : "");
+
+  const progress = $("update-progress");
+  progress.hidden = !(v.state === "downloading" || v.state === "installing" || v.state === "restarting");
+  const pct = v.state === "downloading" && v.total ? Math.min(100, (100 * v.downloaded) / v.total) : 0;
+  progress.classList.toggle("indeterminate", !progress.hidden && !pct);
+  $("update-progress-bar").style.width = pct ? pct.toFixed(1) + "%" : "";
+
+  const showNotes = !!v.notes && v.latest && v.state !== "current";
+  $("update-notes-box").hidden = !showNotes;
+  if (showNotes) {
+    $("update-notes-version").textContent = v.latest;
+    if ($("update-notes").textContent !== v.notes) $("update-notes").textContent = v.notes;
+  }
+
+  let note = v.state === "available" || v.state === "dev" ? (v.installNote || "") : "";
+  if (v.state === "current" && v.checkedAt) {
+    note = "Last checked " + new Date(v.checkedAt).toLocaleString() + ".";
+  }
+  if (v.state === "available" && v.canInstall) {
+    note += (note ? " " : "") + "Update the tablet app too, with DrawSplay.APK from the release page.";
+  }
+  $("update-note").textContent = note;
+
+  const result = $("update-result");
+  result.replaceChildren();
+  const r = v.lastResult;
+  if (r) {
+    const line = document.createElement("div");
+    line.className = r.ok ? "update-summary ok" : "update-error";
+    line.textContent = r.ok
+      ? `Updated from ${r.from} to ${r.to}.`
+      : `The update to ${r.to} did not finish, so ${v.current} is still running. If Windows asked for approval, it may have been declined.`;
+    result.append(line);
+    for (const w of r.warnings || []) {
+      const el = document.createElement("div");
+      el.className = "update-warning";
+      el.textContent = w;
+      result.append(el);
+    }
+  }
+  result.hidden = !r;
+
+  $("update-error").hidden = !v.error;
+  $("update-error").textContent = v.error || "";
+
+  const install = $("update-install-btn");
+  install.hidden = !(v.canInstall && (v.state === "available" || busy));
+  install.disabled = busy;
+  install.textContent = v.latest ? `Install ${v.latest}` : "Install update";
+
+  const link = $("update-release-link");
+  link.hidden = !v.releaseURL;
+  if (v.releaseURL) link.href = v.releaseURL;
+  link.textContent = v.state === "available" && !v.canInstall ? "Download from the release page" : "Release page";
+
+  $("update-check-btn").disabled = busy;
+
+  const footer = $("footer-update");
+  footer.hidden = v.state !== "available";
+  footer.textContent = v.latest ? `· ${v.latest} available` : "";
+}
+
+async function refreshUpdate() {
+  let v;
+  try {
+    v = await api("/api/update");
+  } catch (_e) {
+    if (updateInstallFrom) {
+      // The host is restarting into the new version.
+      updateHostWentAway = true;
+      $("update-summary").textContent = "Restarting DrawSplay… this page reloads when it is back.";
+    }
+    return;
+  }
+  if (updateInstallFrom && (updateHostWentAway || v.current !== updateInstallFrom)) {
+    location.reload();
+    return;
+  }
+  if (updateInstallFrom && !UPDATE_BUSY.has(v.state)) updateInstallFrom = ""; // the install failed
+  renderUpdate(v);
+}
+
+function scheduleUpdateRefresh() {
+  const busy = updateInstallFrom || (updateView && UPDATE_BUSY.has(updateView.state));
+  setTimeout(async () => {
+    await refreshUpdate();
+    scheduleUpdateRefresh();
+  }, busy ? 1000 : 15000);
+}
+
+$("update-check-btn").addEventListener("click", async () => {
+  $("update-check-btn").disabled = true;
+  $("update-summary").textContent = "Checking for updates…";
+  try {
+    renderUpdate(await api("/api/update/check", { method: "POST" }));
+  } catch (e) {
+    $("update-error").hidden = false;
+    $("update-error").textContent = e.message;
+    $("update-check-btn").disabled = false;
+  }
+});
+
+$("update-install-btn").addEventListener("click", async () => {
+  const v = updateView;
+  if (!v || !v.latest) return;
+  const ok = window.confirm(
+    `Install DrawSplay ${v.latest} now?\n\nDrawSplay restarts to finish the update, so a connected tablet disconnects for a few seconds.` +
+    (hostOSName === "windows" ? " Windows asks for administrator approval." : ""));
+  if (!ok) return;
+  $("update-install-btn").disabled = true;
+  try {
+    updateInstallFrom = v.current;
+    updateHostWentAway = false;
+    renderUpdate(await api("/api/update/install", { method: "POST" }));
+  } catch (e) {
+    updateInstallFrom = "";
+    $("update-error").hidden = false;
+    $("update-error").textContent = e.message;
+    $("update-install-btn").disabled = false;
+  }
+});
+
 ensureCSRF().catch((e) => showMsg(e.message, false));
 try {
   initializeTheme();
@@ -1142,6 +1302,7 @@ if (window.EventSource) {
     window.addEventListener("focus", clear);
   });
 }
+refreshUpdate().finally(scheduleUpdateRefresh);
 setInterval(refreshStatus, 2000);
 setInterval(refreshWifiPairing, 2000);
 setInterval(renderWifiPairing, 1000);

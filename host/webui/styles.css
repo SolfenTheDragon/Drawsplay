@@ -341,3 +341,34 @@ body[data-kind="pc"] #form { opacity: .5; pointer-events: none; filter: grayscal
 .pc-trusted-list { margin: 8px 0; padding-left: 18px; font-size: .85rem; }
 .pc-trusted-list code { color: var(--muted); }
 .pc-settings-note { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--warn); border-radius: 8px; }
+.update-summary { margin-top: 7px; font-weight: 600; }
+.update-summary.available { color: var(--accent); }
+.update-summary.ok { color: var(--ok); }
+.update-progress {
+  height: 6px; margin-top: 10px; overflow: hidden;
+  border-radius: 999px; background: var(--border);
+}
+.update-progress span {
+  display: block; height: 100%; width: 0;
+  background: var(--accent); transition: width .3s;
+}
+.update-progress.indeterminate span { width: 35%; animation: update-slide 1.2s ease-in-out infinite; }
+@keyframes update-slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+@media (prefers-reduced-motion: reduce) { .update-progress.indeterminate span { animation: none; width: 100%; opacity: .5; } }
+.update-notes { margin-top: 10px; }
+.update-notes summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
+.update-notes pre {
+  max-height: 14rem; overflow: auto; margin: 8px 0 0; padding: 10px;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--console-bg);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.update-error { margin-top: 8px; color: var(--err); font-size: .82rem; }
+.update-warning { margin-top: 8px; color: var(--warn); font-size: .82rem; }
+.update-links { display: flex; align-items: center; gap: 16px; margin-top: 10px; font-size: .82rem; }
+.update-links a { color: var(--accent); }
+button.link-button {
+  width: auto; margin: 0; padding: 0; border: 0; background: none;
+  color: var(--accent); font-weight: 600; text-decoration: underline;
+}
+#footer-update { margin-left: 8px; color: var(--accent); }

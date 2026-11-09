@@ -1,6 +1,6 @@
 # DrawSplay Privacy Policy
 
-_Last updated: 2026-10-15_
+_Last updated: 2026-11-08_
 
 DrawSplay turns an Android tablet into a touch/pen-enabled secondary display for a Windows or Linux computer. It is built to work locally: no account is required, and DrawSplay does not collect, sell, or share personal data.
 
@@ -28,6 +28,7 @@ On the computer, DrawSplay stores settings (bitrate, resolution, input toggles, 
 - The settings web page listens only on localhost (`127.0.0.1`). The tablet reaches the host over USB (USB accessory mode, no network port); only the optional ADB tunnel opens two localhost ports, and only while it is enabled.
 - **Wi-Fi mode is off by default.** If you enable it and pair a tablet with the code shown on the computer, the tablet advertises itself on your local network via DNS-SD (`_drawsplay-tablet._tcp`) and the host connects to it over mutually authenticated TLS, using the keys exchanged during pairing. Traffic stays on your local network.
 - On Windows only, the installer downloads the newest ffmpeg release compatible with your Windows version and CPU architecture from GitHub (gyan.dev essentials builds, or BtbN builds as a fallback / for ARM64), verifying the SHA-256 published with the release. The host does the same at runtime if ffmpeg is missing and automatic tool download is enabled. adb is never downloaded. Your IP address is visible to those servers as with any download; no DrawSplay data is sent. You can disable automatic downloads in the settings page.
+- **Update checks.** While the settings page is open, the host asks GitHub's API (`api.github.com`) for the latest DrawSplay release, at most every 6 hours, and when you click "Check now". Only a standard HTTPS request is sent (with a `DrawSplay-host/<version>` user agent); GitHub sees your IP address. Turn this off with "Check for DrawSplay updates automatically" in Advanced settings. Updates are downloaded from GitHub only when you click "Install", and are verified against the SHA-256 checksums published with the release.
 - On Linux, the install script may use your package manager (`apt`) to install dependencies.
 
 ## Permissions

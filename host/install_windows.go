@@ -37,6 +37,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -189,6 +190,12 @@ func runInstall(exe string, o installerOptions) int {
 	dir := defaultInstallDir()
 	fmt.Printf("Installing DrawSplay to %s\n", dir)
 
+	// An update started from the settings page names the host that started
+	// it; let that host shut down cleanly (releasing its virtual display)
+	// before stopping whatever is left.
+	if pid, err := strconv.Atoi(os.Getenv(updateWaitPIDEnv)); err == nil && pid > 0 {
+		waitForProcessExit(uint32(pid), 30*time.Second)
+	}
 	// Release the installed binaries if an older copy is running.
 	stopProcessesInDir(dir)
 
@@ -221,6 +228,15 @@ func runInstall(exe string, o installerOptions) int {
 			detail += "\n\n" + strings.Join(m.Warnings, "\n")
 		}
 		installerReport(o.Quiet, "DrawSplay setup failed", detail, showError)
+		// Setup stopped the installed copy above; start it again so a
+		// declined approval does not leave DrawSplay off.
+		if previous.HostExe != "" && fileExists(previous.HostExe) {
+			relaunch := exec.Command(previous.HostExe)
+			relaunch.Dir = filepath.Dir(previous.HostExe)
+			if relaunch.Start() == nil {
+				_ = relaunch.Process.Release()
+			}
+		}
 		return 1
 	}
 
@@ -859,6 +875,16 @@ func stopProcessesInDir(dir string) {
 
 // installWantsAutostart is the sign-in autostart choice when not asking: the
 // explicit flag, else the current state on a reinstall, else enabled.
+// waitForProcessExit waits up to timeout for process pid to end.
+func waitForProcessExit(pid uint32, timeout time.Duration) {
+	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
+	if err != nil {
+		return // already gone
+	}
+	defer windows.CloseHandle(h)
+	_, _ = windows.WaitForSingleObject(h, uint32(timeout.Milliseconds()))
+}
+
 func installWantsAutostart(o installerOptions, reinstall bool) bool {
 	switch {
 	case o.NoAutostart:

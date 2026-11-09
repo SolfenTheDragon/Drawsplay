@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -30,9 +31,14 @@ func main() {
 	installElevated := flag.String("install-elevated", "", "internal: elevated install phase (result file path)")
 	uninstallElevated := flag.String("uninstall-elevated", "", "internal: elevated uninstall phase (result file path)")
 	uninstallRemoveVDD := flag.Bool("uninstall-remove-vdd", false, "internal: elevated uninstall phase also removes the Parsec virtual display driver")
+	printVersion := flag.Bool("version", false, "print the host version and exit")
 	uninstallRemoveZadig := flag.Bool("uninstall-remove-zadig", false, "internal: elevated uninstall phase also removes Zadig WinUSB bindings")
 	flag.Parse()
 	attachParentConsole()
+	if *printVersion {
+		fmt.Println(hostVersion())
+		return
+	}
 
 	if handled, code := runInstallerMode(installerOptions{
 		Install:           *install,
@@ -103,6 +109,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	exitHost = cancel
 
 	// Ctrl+C / SIGTERM triggers a coordinated shutdown of all listeners.
 	go func() {
@@ -115,6 +122,7 @@ func main() {
 	if runBackgroundTrayController(*background, ctx, cancel, store) {
 		releaseVirtualDisplaysOnExit()
 		log.Println("Shutting down")
+		execPendingRestart()
 		return
 	}
 	err := runHostRuntime(ctx, store, cancel)
@@ -123,4 +131,5 @@ func main() {
 		log.Fatalf("%v", err)
 	}
 	log.Println("Shutting down")
+	execPendingRestart()
 }
