@@ -105,8 +105,8 @@ func TestSettingsAPIPreservesWiFiFieldsWhenFeatureDisabled(t *testing.T) {
 	t.Setenv(wifiFeatureFlagEnv, "0")
 	store := newTestStore(t)
 	initial := defaultSettings()
-	initial.PairedWifiEnabled = true
-	initial.PairedWifiInterface = "wlan0"
+	initial.PairedWiFiEnabled = true
+	initial.PairedWiFiInterface = "wlan0"
 	if err := store.update(initial); err != nil {
 		t.Fatalf("store.update(initial): %v", err)
 	}
@@ -124,10 +124,10 @@ func TestSettingsAPIPreservesWiFiFieldsWhenFeatureDisabled(t *testing.T) {
 	}
 
 	got := store.get()
-	if got.PairedWifiInterface != "wlan0" {
+	if got.PairedWiFiInterface != "wlan0" {
 		t.Fatalf("wifi interface was unexpectedly changed: %+v", got)
 	}
-	if got.PairedWifiEnabled {
+	if got.PairedWiFiEnabled {
 		t.Fatalf("pairedWifiEnabled should be forced off while feature is disabled")
 	}
 }

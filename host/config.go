@@ -74,11 +74,11 @@ type settings struct {
 	// (videoScalingFill, videoScalingFit or videoScalingOriginal).
 	VideoScaling    string `json:"videoScaling"`
 	NoDriverInstall bool   `json:"noDriverInstall"`
-	// PairedWifiEnabled turns on the paired mutual-TLS Wi-Fi transport (needs
+	// PairedWiFiEnabled turns on the paired mutual-TLS Wi-Fi transport (needs
 	// DRAWSPLAY_FEATURE_WIFI).
-	PairedWifiEnabled bool `json:"pairedWifiEnabled"`
-	// PairedWifiInterface is the explicit LAN interface for paired Wi-Fi.
-	PairedWifiInterface string `json:"pairedWifiInterface,omitempty"`
+	PairedWiFiEnabled bool `json:"pairedWifiEnabled"`
+	// PairedWiFiInterface is the explicit LAN interface for paired Wi-Fi.
+	PairedWiFiInterface string `json:"pairedWifiInterface,omitempty"`
 	AOAEnabled          bool   `json:"aoaEnabled"`
 	// AOAAutoSwitch makes the host switch an attached tablet into accessory mode on its own; when off, only the web UI button does.
 	AOAAutoSwitch bool `json:"aoaAutoSwitch"`

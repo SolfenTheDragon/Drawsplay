@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestWifiPairingAPIHiddenWithoutFeatureFlag(t *testing.T) {
+func TestWiFiPairingAPIHiddenWithoutFeatureFlag(t *testing.T) {
 	t.Setenv(wifiFeatureFlagEnv, "0")
 	srv := httptest.NewServer(newWebUIHandler(newTestStore(t), func() {}))
 	defer srv.Close()
@@ -22,7 +22,7 @@ func TestWifiPairingAPIHiddenWithoutFeatureFlag(t *testing.T) {
 	}
 }
 
-func TestWifiPairingAPIMutationsRequireCSRF(t *testing.T) {
+func TestWiFiPairingAPIMutationsRequireCSRF(t *testing.T) {
 	t.Setenv(wifiFeatureFlagEnv, "1")
 	srv := httptest.NewServer(newWebUIHandler(newTestStore(t), func() {}))
 	defer srv.Close()
@@ -38,9 +38,9 @@ func TestWifiPairingAPIMutationsRequireCSRF(t *testing.T) {
 	}
 }
 
-func TestPairedWifiSettingForcedOffWithoutFeatureFlag(t *testing.T) {
+func TestPairedWiFiSettingForcedOffWithoutFeatureFlag(t *testing.T) {
 	t.Setenv(wifiFeatureFlagEnv, "0")
-	if got := applyFeatureFlags(settings{PairedWifiEnabled: true, AOAEnabled: true}); got.PairedWifiEnabled {
+	if got := applyFeatureFlags(settings{PairedWiFiEnabled: true, AOAEnabled: true}); got.PairedWiFiEnabled {
 		t.Fatal("paired Wi-Fi stayed on with the feature flag off")
 	}
 }

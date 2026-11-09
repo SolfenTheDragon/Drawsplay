@@ -253,7 +253,7 @@ func wifiPairingTrustDir() (string, error) {
 // DRAWSPLAY_WIFI_INTERFACE environment variable.
 func wifiPairedIface(store *settingsStore) string {
 	if store != nil {
-		if v := strings.TrimSpace(store.get().PairedWifiInterface); v != "" {
+		if v := strings.TrimSpace(store.get().PairedWiFiInterface); v != "" {
 			return v
 		}
 	}

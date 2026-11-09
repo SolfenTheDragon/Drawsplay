@@ -49,7 +49,7 @@ func lanInterfaceNames() []string {
 func (api webUIAPI) wifiView() wifiPairingView {
 	cfg := api.store.get()
 	view := wifiPairingView{
-		Enabled:    cfg.PairedWifiEnabled && wifiFeatureEnabled(),
+		Enabled:    cfg.PairedWiFiEnabled && wifiFeatureEnabled(),
 		Interface:  wifiPairedIface(api.store),
 		Interfaces: lanInterfaceNames(),
 		Pairing:    wifiPairingState{Phase: "idle"},
@@ -69,14 +69,14 @@ func (api webUIAPI) wifiAvailable(w http.ResponseWriter) bool {
 	return true
 }
 
-func (api webUIAPI) handleWifiPairing(w http.ResponseWriter, _ *http.Request) {
+func (api webUIAPI) handleWiFiPairing(w http.ResponseWriter, _ *http.Request) {
 	if !api.wifiAvailable(w) {
 		return
 	}
 	writeJSON(w, api.wifiView())
 }
 
-func (api webUIAPI) handleWifiPairStart(w http.ResponseWriter, r *http.Request) {
+func (api webUIAPI) handleWiFiPairStart(w http.ResponseWriter, r *http.Request) {
 	if !api.wifiAvailable(w) {
 		return
 	}
@@ -89,7 +89,7 @@ func (api webUIAPI) handleWifiPairStart(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	if !api.store.get().PairedWifiEnabled {
+	if !api.store.get().PairedWiFiEnabled {
 		httpError(w, http.StatusConflict, "turn Wi-Fi on first")
 		return
 	}
@@ -100,7 +100,7 @@ func (api webUIAPI) handleWifiPairStart(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, api.wifiView())
 }
 
-func (api webUIAPI) handleWifiPairApprove(w http.ResponseWriter, _ *http.Request) {
+func (api webUIAPI) handleWiFiPairApprove(w http.ResponseWriter, _ *http.Request) {
 	if !api.wifiAvailable(w) {
 		return
 	}
@@ -111,7 +111,7 @@ func (api webUIAPI) handleWifiPairApprove(w http.ResponseWriter, _ *http.Request
 	writeJSON(w, api.wifiView())
 }
 
-func (api webUIAPI) handleWifiPairDeny(w http.ResponseWriter, _ *http.Request) {
+func (api webUIAPI) handleWiFiPairDeny(w http.ResponseWriter, _ *http.Request) {
 	if !api.wifiAvailable(w) {
 		return
 	}
@@ -122,7 +122,7 @@ func (api webUIAPI) handleWifiPairDeny(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, api.wifiView())
 }
 
-func (api webUIAPI) handleWifiPairCancel(w http.ResponseWriter, _ *http.Request) {
+func (api webUIAPI) handleWiFiPairCancel(w http.ResponseWriter, _ *http.Request) {
 	if !api.wifiAvailable(w) {
 		return
 	}
@@ -130,10 +130,10 @@ func (api webUIAPI) handleWifiPairCancel(w http.ResponseWriter, _ *http.Request)
 	writeJSON(w, api.wifiView())
 }
 
-// applyPairedWifiSettings reconciles the paired runtime after a settings save
+// applyPairedWiFiSettings reconciles the paired runtime after a settings save
 // and starts pairing when the toggle was just turned on with nobody paired.
-func applyPairedWifiSettings(store *settingsStore, old, now settings) {
-	if old.PairedWifiEnabled == now.PairedWifiEnabled && old.PairedWifiInterface == now.PairedWifiInterface {
+func applyPairedWiFiSettings(store *settingsStore, old, now settings) {
+	if old.PairedWiFiEnabled == now.PairedWiFiEnabled && old.PairedWiFiInterface == now.PairedWiFiInterface {
 		return
 	}
 	if wifiPairing != nil {
@@ -142,7 +142,7 @@ func applyPairedWifiSettings(store *settingsStore, old, now settings) {
 		}
 	}
 	pairedWiFiRuntime.reconcile()
-	if !now.PairedWifiEnabled || wifiPairing == nil {
+	if !now.PairedWiFiEnabled || wifiPairing == nil {
 		return
 	}
 	if _, paired := pairedWiFiRuntime.paired(); !paired {
