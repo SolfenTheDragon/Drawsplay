@@ -1237,12 +1237,20 @@ async function refreshUpdate() {
   renderUpdate(v);
 }
 
-function scheduleUpdateRefresh() {
+// Runs every second like the other panels, but asks the host only every 15 s
+// unless an update is under way.
+let updateLastRefresh = 0;
+let updateRefreshing = false;
+async function tickUpdate() {
   const busy = updateInstallFrom || (updateView && UPDATE_BUSY.has(updateView.state));
-  setTimeout(async () => {
+  if (updateRefreshing || (!busy && Date.now() - updateLastRefresh < 15000)) return;
+  updateRefreshing = true;
+  updateLastRefresh = Date.now();
+  try {
     await refreshUpdate();
-    scheduleUpdateRefresh();
-  }, busy ? 1000 : 15000);
+  } finally {
+    updateRefreshing = false;
+  }
 }
 
 $("update-check-btn").addEventListener("click", async () => {
@@ -1260,7 +1268,7 @@ $("update-check-btn").addEventListener("click", async () => {
 $("update-install-btn").addEventListener("click", async () => {
   const v = updateView;
   if (!v || !v.latest) return;
-  const ok = window.confirm(
+  const ok = confirm(
     `Install DrawSplay ${v.latest} now?\n\nDrawSplay restarts to finish the update, so a connected tablet disconnects for a few seconds.` +
     (hostOSName === "windows" ? " Windows asks for administrator approval." : ""));
   if (!ok) return;
@@ -1302,8 +1310,9 @@ if (window.EventSource) {
     window.addEventListener("focus", clear);
   });
 }
-refreshUpdate().finally(scheduleUpdateRefresh);
+tickUpdate();
 setInterval(refreshStatus, 2000);
+setInterval(tickUpdate, 1000);
 setInterval(refreshWifiPairing, 2000);
 setInterval(renderWifiPairing, 1000);
 $("wifi-pair-start").addEventListener("click", () => wifiPairAction("start", { replace: !!(wifiView && wifiView.paired) }));
