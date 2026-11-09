@@ -224,11 +224,10 @@ func validateConfiguredExecutable(value, tool string) error {
 // configDir returns the DrawSplay per-user config directory, creating it if
 // needed.
 func configDir() (string, error) {
-	base, err := os.UserConfigDir()
+	dir, err := userStateDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(base, "DrawSplay")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}

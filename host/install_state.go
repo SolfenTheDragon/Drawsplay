@@ -94,8 +94,9 @@ type winusbAttemptState struct {
 	Attempts map[string]winusbAttempt `json:"attempts"`
 }
 
-// userStateDir returns %APPDATA%\DrawSplay (os.UserConfigDir()/DrawSplay)
-// without creating it.
+// userStateDir returns the per-user DrawSplay directory (os.UserConfigDir()/
+// DrawSplay: %APPDATA%\DrawSplay on Windows) without creating it. configDir
+// is the same directory, created on demand.
 func userStateDir() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {

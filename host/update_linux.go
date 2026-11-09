@@ -231,7 +231,7 @@ func installLinuxUserFiles(files map[string][]byte) []string {
 			target := filepath.Join(home, ".local", "share", "icons", "hicolor", "64x64", "apps", "drawsplay-host.png")
 			if old, err := os.ReadFile(target); err == nil && !bytes.Equal(old, icon) {
 				if err := writeFileAtomic(target, icon, 0o644); err != nil {
-					log.Printf("Update: menu icon: %v", err)
+					log.Printf("Update could not replace the menu icon: %v", err)
 				}
 			}
 		}

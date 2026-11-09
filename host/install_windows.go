@@ -393,7 +393,7 @@ func runInstallElevated(resultPath string, skipVDD bool) int {
 		m.Warnings = append(m.Warnings, fmt.Sprintf("Apps & Features entry: %v", err))
 	}
 	if err := writeJSONAtomic(resultPath, m); err != nil {
-		log.Printf("write install result: %v", err)
+		log.Printf("Could not write the install result: %v", err)
 		return 1
 	}
 	return 0
