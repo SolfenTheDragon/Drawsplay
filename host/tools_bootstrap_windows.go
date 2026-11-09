@@ -4,6 +4,7 @@ package main
 
 import (
 	"archive/zip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,7 +13,6 @@ import (
 	"io"
 	"io/fs"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -53,17 +53,6 @@ type runtimeArchive struct {
 	URL     string
 	SHA256  string
 	Source  string
-}
-
-type githubRelease struct {
-	TagName string        `json:"tag_name"`
-	Assets  []githubAsset `json:"assets"`
-}
-
-type githubAsset struct {
-	Name   string `json:"name"`
-	URL    string `json:"browser_download_url"`
-	Digest string `json:"digest"`
 }
 
 // runtimeManifest records what was installed and the SHA-256 of every
@@ -172,7 +161,7 @@ func latestFFmpegArchives(arch string) ([]runtimeArchive, error) {
 	var found []runtimeArchive
 	var errs []error
 	for _, s := range sources {
-		rel, err := fetchGitHubRelease(s.api)
+		rel, err := fetchGitHubRelease(context.Background(), s.api)
 		if err == nil {
 			var archive runtimeArchive
 			if archive, err = s.choose(rel); err == nil {
@@ -190,28 +179,6 @@ func latestFFmpegArchives(arch string) ([]runtimeArchive, error) {
 	return found, nil
 }
 
-func fetchGitHubRelease(url string) (githubRelease, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return githubRelease{}, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "DrawSplay")
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		return githubRelease{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return githubRelease{}, fmt.Errorf("release lookup failed: %s", resp.Status)
-	}
-	var rel githubRelease
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&rel); err != nil {
-		return githubRelease{}, fmt.Errorf("decode release: %w", err)
-	}
-	return rel, nil
-}
-
 var gyanEssentialsAsset = regexp.MustCompile(`^ffmpeg-(\d+(?:\.\d+)*)-essentials_build\.zip$`)
 
 // selectGyanEssentials picks the essentials zip from gyan's latest release.
@@ -223,7 +190,7 @@ func selectGyanEssentials(rel githubRelease) (runtimeArchive, error) {
 		}
 		return archiveFromAsset(a, m[1])
 	}
-	return runtimeArchive{}, fmt.Errorf("release %s has no essentials zip", rel.TagName)
+	return runtimeArchive{}, fmt.Errorf("release %s has no essentials zip", rel.Tag)
 }
 
 var btbnStableAsset = regexp.MustCompile(`^ffmpeg-n(\d+(?:\.\d+)*)-latest-(win64|winarm64)-gpl-(\d+(?:\.\d+)*)\.zip$`)
@@ -244,7 +211,7 @@ func selectBtbNStable(rel githubRelease, arch string) (runtimeArchive, error) {
 		}
 	}
 	if bestVersion == "" {
-		return runtimeArchive{}, fmt.Errorf("release %s has no stable %s GPL build", rel.TagName, platform)
+		return runtimeArchive{}, fmt.Errorf("release %s has no stable %s GPL build", rel.Tag, platform)
 	}
 	return archiveFromAsset(best, bestVersion)
 }
@@ -430,32 +397,21 @@ func runtimeExpectedHashes(runtimeRoot, candidate, tool string) (map[string]stri
 	return want, nil
 }
 
+// maxRuntimeArchiveBytes bounds an ffmpeg build download (about 200 MiB today).
+const maxRuntimeArchiveBytes = 1 << 30
+
 func downloadArchive(prefix, url, expectedSHA256 string) (string, error) {
 	tmp, err := os.CreateTemp(os.TempDir(), prefix+"-*.zip")
 	if err != nil {
 		return "", err
 	}
 	tmpPath := tmp.Name()
-
-	client := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := client.Get(url)
+	d := download{URL: url, Allowed: githubURLAllowed, Timeout: 10 * time.Minute, Limit: maxRuntimeArchiveBytes}
+	err = d.to(context.Background(), tmp)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
 	if err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("download failed: %s", resp.Status)
-	}
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return "", err
-	}
-	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
 		return "", err
 	}

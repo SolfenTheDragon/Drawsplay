@@ -18,7 +18,7 @@ func testAsset(name string) githubAsset {
 }
 
 func TestSelectGyanEssentials(t *testing.T) {
-	rel := githubRelease{TagName: "9.0.2", Assets: []githubAsset{
+	rel := githubRelease{Tag: "9.0.2", Assets: []githubAsset{
 		testAsset("ffmpeg-9.0.2-essentials_build.7z"),
 		testAsset("ffmpeg-9.0.2-full_build.zip"),
 		testAsset("ffmpeg-9.0.2-essentials_build.zip"),
@@ -33,7 +33,7 @@ func TestSelectGyanEssentials(t *testing.T) {
 }
 
 func TestSelectBtbNStablePicksNewestForArch(t *testing.T) {
-	rel := githubRelease{TagName: "latest", Assets: []githubAsset{
+	rel := githubRelease{Tag: "latest", Assets: []githubAsset{
 		testAsset("ffmpeg-master-latest-win64-gpl.zip"),
 		testAsset("ffmpeg-n8.1-latest-win64-gpl-8.1.zip"),
 		testAsset("ffmpeg-n9.0-latest-win64-gpl-9.0.zip"),

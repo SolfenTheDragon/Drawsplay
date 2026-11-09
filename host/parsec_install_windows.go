@@ -6,9 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,30 +114,24 @@ func installParsecFallback() (bool, error) {
 
 func downloadParsecInstaller(path string) error {
 	log.Printf("Downloading fallback driver only after DrawSplay driver failure: %s", parsecInstallerURL)
-	client := &http.Client{Timeout: 2 * time.Minute}
-	resp, err := client.Get(parsecInstallerURL)
-	if err != nil {
-		return fmt.Errorf("download Parsec fallback: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download Parsec fallback: HTTP %s", resp.Status)
-	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	const limit = 64 << 20
-	n, copyErr := io.Copy(file, io.LimitReader(resp.Body, limit+1))
-	closeErr := file.Close()
-	if copyErr != nil {
-		return fmt.Errorf("download Parsec fallback: %w", copyErr)
+	d := download{
+		URL: parsecInstallerURL,
+		// The file is pinned by SHA-256 and its publisher's signature, so any
+		// HTTPS mirror Parsec redirects to will do.
+		Allowed: func(u *url.URL) bool { return u.Scheme == "https" },
+		Timeout: 2 * time.Minute,
+		Limit:   64 << 20,
 	}
-	if closeErr != nil {
-		return closeErr
+	err = d.to(context.Background(), file)
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
 	}
-	if n > limit {
-		return errors.New("Parsec installer exceeds 64 MiB limit")
+	if err != nil {
+		return fmt.Errorf("download Parsec fallback: %w", err)
 	}
 	return nil
 }

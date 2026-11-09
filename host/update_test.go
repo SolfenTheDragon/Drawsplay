@@ -51,9 +51,9 @@ func fakeReleaseServer(t *testing.T, tag, bundleBody, sumOf string) *httptest.Se
 	mux := http.NewServeMux()
 	var srv *httptest.Server
 	mux.HandleFunc("/latest", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(releaseInfo{
+		_ = json.NewEncoder(w).Encode(githubRelease{
 			Tag: tag, Body: "notes", HTMLURL: srv.URL + "/page",
-			Assets: []releaseAsset{
+			Assets: []githubAsset{
 				{Name: bundle, URL: srv.URL + "/bundle", Size: int64(len(bundleBody))},
 				{Name: updateChecksumsName, URL: srv.URL + "/sums"},
 			},
@@ -66,10 +66,10 @@ func fakeReleaseServer(t *testing.T, tag, bundleBody, sumOf string) *httptest.Se
 	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	oldURL, oldAllowed := latestReleaseURL, updateURLAllowed
+	oldURL, oldAllowed := latestReleaseURL, githubURLAllowed
 	latestReleaseURL = srv.URL + "/latest"
-	updateURLAllowed = func(u *url.URL) bool { return u.Host == strings.TrimPrefix(srv.URL, "http://") }
-	t.Cleanup(func() { latestReleaseURL, updateURLAllowed = oldURL, oldAllowed })
+	githubURLAllowed = func(u *url.URL) bool { return u.Host == strings.TrimPrefix(srv.URL, "http://") }
+	t.Cleanup(func() { latestReleaseURL, githubURLAllowed = oldURL, oldAllowed })
 	return srv
 }
 
@@ -127,8 +127,8 @@ func TestUpdateRefusesOtherHosts(t *testing.T) {
 		"http://github.com/x", "https://example.com/x", "https://github.com.evil.test/x",
 	} {
 		u, _ := url.Parse(raw)
-		if updateURLAllowed(u) {
-			t.Errorf("updateURLAllowed(%s) = true", raw)
+		if githubURLAllowed(u) {
+			t.Errorf("githubURLAllowed(%s) = true", raw)
 		}
 	}
 	for _, raw := range []string{
@@ -136,8 +136,8 @@ func TestUpdateRefusesOtherHosts(t *testing.T) {
 		"https://objects.githubusercontent.com/github-production-release-asset/1",
 	} {
 		u, _ := url.Parse(raw)
-		if !updateURLAllowed(u) {
-			t.Errorf("updateURLAllowed(%s) = false", raw)
+		if !githubURLAllowed(u) {
+			t.Errorf("githubURLAllowed(%s) = false", raw)
 		}
 	}
 }

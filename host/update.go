@@ -26,8 +26,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -45,48 +43,12 @@ const (
 	updateManualMinInterval = 30 * time.Second
 	updateChecksumsName     = "SHA256SUMS.txt"
 	updatePendingName       = "update-pending.json"
-	maxReleaseJSONBytes     = 2 << 20
 	maxChecksumsBytes       = 64 << 10
 	maxBundleBytes          = 1 << 30
 )
 
 // latestReleaseURL is a variable so tests can point it at a local server.
 var latestReleaseURL = "https://api.github.com/repos/" + releaseRepo + "/releases/latest"
-
-// updateURLAllowed limits downloads to GitHub. Tests replace it.
-var updateURLAllowed = func(u *url.URL) bool {
-	if u.Scheme != "https" {
-		return false
-	}
-	host := strings.ToLower(u.Hostname())
-	return host == "github.com" || host == "api.github.com" ||
-		strings.HasSuffix(host, ".githubusercontent.com")
-}
-
-type releaseAsset struct {
-	Name string `json:"name"`
-	URL  string `json:"browser_download_url"`
-	Size int64  `json:"size"`
-}
-
-type releaseInfo struct {
-	Tag         string         `json:"tag_name"`
-	Body        string         `json:"body"`
-	HTMLURL     string         `json:"html_url"`
-	PublishedAt time.Time      `json:"published_at"`
-	Draft       bool           `json:"draft"`
-	Prerelease  bool           `json:"prerelease"`
-	Assets      []releaseAsset `json:"assets"`
-}
-
-func (r releaseInfo) asset(name string) (releaseAsset, bool) {
-	for _, a := range r.Assets {
-		if a.Name == name {
-			return a, true
-		}
-	}
-	return releaseAsset{}, false
-}
 
 // Update states shown by the settings page.
 const (
@@ -139,10 +101,9 @@ type updatePending struct {
 type updater struct {
 	mu        sync.Mutex
 	st        updateStatus
-	release   releaseInfo
+	release   githubRelease
 	lastCheck time.Time
 	busy      bool // a check or install is running
-	client    *http.Client
 	loaded    bool // update-pending.json has been read
 }
 
@@ -151,18 +112,6 @@ var hostUpdater = newUpdater()
 func newUpdater() *updater {
 	return &updater{
 		st: updateStatus{State: updateIdle, Current: hostVersion()},
-		client: &http.Client{
-			Timeout: 30 * time.Minute,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 10 {
-					return errors.New("too many redirects")
-				}
-				if !updateURLAllowed(req.URL) {
-					return fmt.Errorf("refusing redirect to %s", req.URL.Redacted())
-				}
-				return nil
-			},
-		},
 	}
 }
 
@@ -244,7 +193,7 @@ func (u *updater) runCheck(ctx context.Context) {
 }
 
 // installability says whether this copy can install rel itself.
-func (u *updater) installability(rel releaseInfo) (bool, string) {
+func (u *updater) installability(rel githubRelease) (bool, string) {
 	ok, note := updateInstallSupport()
 	if !ok {
 		return false, note
@@ -259,32 +208,13 @@ func (u *updater) installability(rel releaseInfo) (bool, string) {
 	return true, note
 }
 
-func (u *updater) fetchLatestRelease(ctx context.Context) (releaseInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestReleaseURL, nil)
+func (u *updater) fetchLatestRelease(ctx context.Context) (githubRelease, error) {
+	rel, err := fetchGitHubRelease(ctx, latestReleaseURL)
 	if err != nil {
-		return releaseInfo{}, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "DrawSplay-host/"+hostVersion())
-	resp, err := u.client.Do(req)
-	if err != nil {
-		return releaseInfo{}, err
-	}
-	defer resp.Body.Close()
-	switch {
-	case resp.StatusCode == http.StatusNotFound:
-		return releaseInfo{}, errors.New("no release has been published yet")
-	case resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests:
-		return releaseInfo{}, fmt.Errorf("GitHub is limiting requests (HTTP %d); try again later", resp.StatusCode)
-	case resp.StatusCode != http.StatusOK:
-		return releaseInfo{}, fmt.Errorf("GitHub answered HTTP %s", resp.Status)
-	}
-	var rel releaseInfo
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxReleaseJSONBytes)).Decode(&rel); err != nil {
-		return releaseInfo{}, fmt.Errorf("read release information: %w", err)
+		return githubRelease{}, err
 	}
 	if rel.Draft || rel.Prerelease {
-		return releaseInfo{}, errors.New("the latest release is a draft or pre-release")
+		return githubRelease{}, errors.New("the latest release is a draft or pre-release")
 	}
 	return rel, nil
 }
@@ -321,7 +251,7 @@ func (u *updater) startInstall(stop func()) error {
 	return nil
 }
 
-func (u *updater) install(rel releaseInfo, stop func()) error {
+func (u *updater) install(rel githubRelease, stop func()) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	bundleName := updateBundleName(rel.Tag)
@@ -329,7 +259,7 @@ func (u *updater) install(rel releaseInfo, stop func()) error {
 	sums, _ := rel.asset(updateChecksumsName)
 
 	var sumsText strings.Builder
-	if err := u.download(ctx, sums, &sumsText, maxChecksumsBytes, false); err != nil {
+	if err := u.download(sums, maxChecksumsBytes).to(ctx, &sumsText); err != nil {
 		return fmt.Errorf("download %s: %w", updateChecksumsName, err)
 	}
 	want, ok := parseSHA256Sums(sumsText.String())[bundleName]
@@ -355,7 +285,10 @@ func (u *updater) install(rel releaseInfo, stop func()) error {
 	if err != nil {
 		return err
 	}
-	err = u.download(ctx, bundle, f, maxBundleBytes, true)
+	u.mu.Lock()
+	u.st.Total = bundle.Size
+	u.mu.Unlock()
+	err = u.download(bundle, maxBundleBytes).to(ctx, &progressWriter{w: f, u: u})
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
 	}
@@ -412,45 +345,9 @@ type applyResult struct {
 	restart  func(func()) // shuts this host down into the new version
 }
 
-// download fetches a release asset into w, refusing anything over limit.
-func (u *updater) download(ctx context.Context, a releaseAsset, w io.Writer, limit int64, progress bool) error {
-	src, err := url.Parse(a.URL)
-	if err != nil || !updateURLAllowed(src) {
-		return fmt.Errorf("unexpected download address %q", a.URL)
-	}
-	if a.Size > limit {
-		return fmt.Errorf("%s is larger than %d MiB", a.Name, limit>>20)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, src.String(), nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", "DrawSplay-host/"+hostVersion())
-	resp, err := u.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %s", resp.Status)
-	}
-	if progress {
-		u.mu.Lock()
-		u.st.Total = max(a.Size, resp.ContentLength, 0)
-		u.mu.Unlock()
-		w = &progressWriter{w: w, u: u}
-	}
-	n, err := io.Copy(w, io.LimitReader(resp.Body, limit+1))
-	if err != nil {
-		return err
-	}
-	if n > limit {
-		return fmt.Errorf("%s is larger than %d MiB", a.Name, limit>>20)
-	}
-	if a.Size > 0 && n != a.Size {
-		return fmt.Errorf("got %d bytes, expected %d", n, a.Size)
-	}
-	return nil
+// download is a release asset, from GitHub only and at most limit bytes.
+func (u *updater) download(a githubAsset, limit int64) download {
+	return download{URL: a.URL, Allowed: githubURLAllowed, Timeout: 30 * time.Minute, Limit: limit, Size: a.Size}
 }
 
 type progressWriter struct {
