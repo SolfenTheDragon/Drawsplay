@@ -16,7 +16,7 @@ import (
 
 func SelectInterface(name string) (net.Interface, []netip.Prefix, error) {
 	if name == "" {
-		return net.Interface{}, nil, fmt.Errorf("select a LAN interface explicitly; refusing all-interface discovery")
+		return net.Interface{}, nil, errors.New("select a LAN interface explicitly; refusing all-interface discovery")
 	}
 	iface, err := net.InterfaceByName(name)
 	if err != nil {
@@ -53,7 +53,7 @@ func Browse(ctx context.Context, interfaceName string, found func(Candidate), re
 		return err
 	}
 	if found == nil || rejected == nil {
-		return fmt.Errorf("discovery requires candidate and rejection handlers")
+		return errors.New("discovery requires candidate and rejection handlers")
 	}
 	iface, prefixes, err := SelectInterface(interfaceName)
 	if err != nil {
@@ -131,7 +131,7 @@ func Browse(ctx context.Context, interfaceName string, found func(Candidate), re
 		peer, ok := source.(*net.UDPAddr)
 		if !ok || peer.Port != 5353 ||
 			(linkChecks && (control == nil || control.IfIndex != iface.Index || control.TTL != 255)) {
-			rejected(fmt.Errorf("mDNS response did not originate on the selected link"))
+			rejected(errors.New("mDNS response did not originate on the selected link"))
 			continue
 		}
 		if err := checkInterface(); err != nil {
@@ -139,7 +139,7 @@ func Browse(ctx context.Context, interfaceName string, found func(Candidate), re
 		}
 		address, ok := netip.AddrFromSlice(peer.IP)
 		if !ok || !onLinkIPv4(address.Unmap(), prefixes) {
-			rejected(fmt.Errorf("mDNS responder is not a peer on the selected IPv4 LAN"))
+			rejected(errors.New("mDNS responder is not a peer on the selected IPv4 LAN"))
 			continue
 		}
 		candidates, err := cache.consume(buffer[:n], time.Now(), prefixes)

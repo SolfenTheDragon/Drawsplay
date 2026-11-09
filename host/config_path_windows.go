@@ -3,7 +3,7 @@
 package main
 
 import (
-	"fmt"
+	"errors"
 	"io/fs"
 	"path/filepath"
 	"strings"
@@ -35,7 +35,7 @@ func isNetworkExecutablePath(path string) bool {
 
 func validateLocalExecutable(path string, _ fs.FileInfo) error {
 	if !strings.EqualFold(filepath.Ext(path), ".exe") {
-		return fmt.Errorf("must name a local .exe file")
+		return errors.New("must name a local .exe file")
 	}
 	return nil
 }

@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,16 +37,16 @@ func (c deviceCalibration) normalized() deviceCalibration {
 func (c deviceCalibration) validate() error {
 	c = c.normalized()
 	if c.ScaleX < 0.5 || c.ScaleX > 1.5 {
-		return fmt.Errorf("scaleX must be between 0.5 and 1.5")
+		return errors.New("scaleX must be between 0.5 and 1.5")
 	}
 	if c.ScaleY < 0.5 || c.ScaleY > 1.5 {
-		return fmt.Errorf("scaleY must be between 0.5 and 1.5")
+		return errors.New("scaleY must be between 0.5 and 1.5")
 	}
 	if c.OffsetX < -0.25 || c.OffsetX > 0.25 {
-		return fmt.Errorf("offsetX must be between -0.25 and 0.25")
+		return errors.New("offsetX must be between -0.25 and 0.25")
 	}
 	if c.OffsetY < -0.25 || c.OffsetY > 0.25 {
-		return fmt.Errorf("offsetY must be between -0.25 and 0.25")
+		return errors.New("offsetY must be between -0.25 and 0.25")
 	}
 	return nil
 }
@@ -127,7 +127,7 @@ func calibrationForDevice(device string) deviceCalibration {
 func setCalibrationForDevice(device string, c deviceCalibration) error {
 	device = strings.TrimSpace(device)
 	if device == "" {
-		return fmt.Errorf("device must not be empty")
+		return errors.New("device must not be empty")
 	}
 	if err := c.validate(); err != nil {
 		return err

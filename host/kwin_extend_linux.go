@@ -285,7 +285,7 @@ func enableKWinOutput(output string) error {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "kscreen-doctor", "output."+output+".enable").CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("kscreen-doctor: %v: %s", err, bytes.TrimSpace(out))
+		return fmt.Errorf("kscreen-doctor: %w: %s", err, bytes.TrimSpace(out))
 	}
 	return nil
 }

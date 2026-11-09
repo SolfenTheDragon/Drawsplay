@@ -177,7 +177,7 @@ func queryDisplayConfigMonitors(c x11TabletCompositor) ([]monitorSpec, error) {
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
 		// Muffin and Mutter run with a session bus.
-		return nil, fmt.Errorf("%w (no D-Bus session bus: %v)", errCompositorAbsent, err)
+		return nil, fmt.Errorf("%w (no D-Bus session bus: %w)", errCompositorAbsent, err)
 	}
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

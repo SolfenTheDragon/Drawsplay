@@ -14,6 +14,7 @@ package main
 //     Wayland windows appear black, and the desktop is not extended.
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -36,7 +37,7 @@ func newVirtualDisplay(opts videoOptions) (virtualDisplay, error) {
 	if currentLinuxSessionBackend() == "x11" {
 		display := os.Getenv("DISPLAY")
 		if display == "" {
-			return nil, fmt.Errorf("no X11 DISPLAY; cannot capture")
+			return nil, errors.New("no X11 DISPLAY; cannot capture")
 		}
 		d, err := newX11ExtendedDisplay(opts, display)
 		if err == nil {
@@ -69,9 +70,9 @@ func newVirtualDisplay(opts videoOptions) (virtualDisplay, error) {
 	display := os.Getenv("DISPLAY")
 	if display == "" {
 		if toolingErr != nil {
-			return nil, fmt.Errorf("PipeWire capture tooling unavailable (%v) and no X11 DISPLAY for the x11grab fallback; cannot capture", toolingErr)
+			return nil, fmt.Errorf("PipeWire capture tooling unavailable (%w) and no X11 DISPLAY for the x11grab fallback; cannot capture", toolingErr)
 		}
-		return nil, fmt.Errorf("no Mutter ScreenCast API and no X11 DISPLAY; cannot capture")
+		return nil, errors.New("no Mutter ScreenCast API and no X11 DISPLAY; cannot capture")
 	}
 	if currentLinuxSessionBackend() == "wayland" {
 		advice := "log into an X11 session, or GNOME, KDE Plasma, sway or Hyprland, for an extended display (see README)"
@@ -157,10 +158,10 @@ func currentLinuxSessionBackend() string {
 // are injected for testability.
 func gstPipeWireCaptureSupport(lookPath func(string) (string, error), inspect func(element string) error) error {
 	if _, err := lookPath("gst-launch-1.0"); err != nil {
-		return fmt.Errorf("gst-launch-1.0 not found (install gstreamer1.0-tools)")
+		return errors.New("gst-launch-1.0 not found (install gstreamer1.0-tools)")
 	}
 	if err := inspect("pipewiresrc"); err != nil {
-		return fmt.Errorf("GStreamer element pipewiresrc unavailable (install gstreamer1.0-pipewire)")
+		return errors.New("GStreamer element pipewiresrc unavailable (install gstreamer1.0-pipewire)")
 	}
 	return nil
 }

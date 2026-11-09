@@ -338,7 +338,7 @@ func runStatusTray(ctx context.Context, quit context.CancelFunc) error {
 
 	name := fmt.Sprintf("org.kde.StatusNotifierItem-%d-1", os.Getpid())
 	if reply, err := conn.RequestName(name, dbus.NameFlagDoNotQueue); err != nil || reply != dbus.RequestNameReplyPrimaryOwner {
-		return fmt.Errorf("could not own %s: %v", name, err)
+		return fmt.Errorf("could not own %s: %w", name, err)
 	}
 
 	registered := false

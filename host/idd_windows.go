@@ -102,7 +102,7 @@ func iddDevicePath() (string, error) {
 		cmGetDeviceInterfaceListPresent,
 	)
 	if ret != 0 || size <= 1 {
-		return "", fmt.Errorf("DrawSplay IddCx device interface not found (driver installed?)")
+		return "", errors.New("DrawSplay IddCx device interface not found (driver installed?)")
 	}
 
 	buf := make([]uint16, size)
@@ -119,7 +119,7 @@ func iddDevicePath() (string, error) {
 
 	path := windows.UTF16ToString(buf)
 	if path == "" {
-		return "", fmt.Errorf("DrawSplay IddCx device interface list empty")
+		return "", errors.New("DrawSplay IddCx device interface list empty")
 	}
 	return path, nil
 }

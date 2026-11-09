@@ -972,7 +972,7 @@ func awaitNewMutterMonitor(c mutterCast, before mutterState, w, h int) (spec mon
 	w, h = w&^1, h&^1
 	stop, perr := primeMutterStream(c.Node(), w, h)
 	if perr != nil {
-		return monitorSpec{}, false, fmt.Errorf("%w, and asking for it with a PipeWire consumer failed: %v", err, perr)
+		return monitorSpec{}, false, fmt.Errorf("%w, and asking for it with a PipeWire consumer failed: %w", err, perr)
 	}
 	defer stop()
 	if spec, err = findNewMutterMonitor(c, before, w, h, mutterPrimeAttempts); err != nil {

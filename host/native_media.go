@@ -415,7 +415,7 @@ func runFramedPipeline(ctx context.Context, sink videoSink, opts videoOptions, s
 				return produced.Load(), ctx.Err()
 			}
 			if !produced.Load() {
-				return false, fmt.Errorf("native helper produced no output: %v (%s)", rerr, pipeline.errorTail())
+				return false, fmt.Errorf("native helper produced no output: %w (%s)", rerr, pipeline.errorTail())
 			}
 			return true, fmt.Errorf("native helper output: %w (%s)", rerr, pipeline.errorTail())
 		}

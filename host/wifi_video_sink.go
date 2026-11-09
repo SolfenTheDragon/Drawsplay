@@ -159,7 +159,7 @@ func (s *wifiVideoSink) maybeSendConfig() error {
 	}
 	width, height, err := h264.SPSDimensions(sets.SPS)
 	if err != nil {
-		return fmt.Errorf("%w: %v", errWiFiVideoStream, err)
+		return fmt.Errorf("%w: %w", errWiFiVideoStream, err)
 	}
 	cfg := make([]byte, 16, 16+len(sets.SPS)+len(sets.PPS))
 	binary.BigEndian.PutUint16(cfg[0:], 1)

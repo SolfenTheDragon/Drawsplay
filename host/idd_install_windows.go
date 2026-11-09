@@ -317,13 +317,13 @@ func createRootDevnodeAndInstall(hardwareID, infPath string) (bool, error) {
 		0,
 	)
 	if r == 0 {
-		return false, fmt.Errorf("SetupDiGetINFClass: %v", callErr)
+		return false, fmt.Errorf("SetupDiGetINFClass: %w", callErr)
 	}
 
 	hDevInfo, _, callErr := procSetupDiCreateDeviceInfoList.Call(
 		uintptr(unsafe.Pointer(&classGUID)), 0)
 	if hDevInfo == invalidHandleValue {
-		return false, fmt.Errorf("SetupDiCreateDeviceInfoList: %v", callErr)
+		return false, fmt.Errorf("SetupDiCreateDeviceInfoList: %w", callErr)
 	}
 	defer procSetupDiDestroyDeviceInfoList.Call(hDevInfo)
 
@@ -338,7 +338,7 @@ func createRootDevnodeAndInstall(hardwareID, infPath string) (bool, error) {
 		uintptr(unsafe.Pointer(&devInfo)),
 	)
 	if r == 0 {
-		return false, fmt.Errorf("SetupDiCreateDeviceInfo: %v", callErr)
+		return false, fmt.Errorf("SetupDiCreateDeviceInfo: %w", callErr)
 	}
 
 	// SPDRP_HARDWAREID is a REG_MULTI_SZ: the id plus a double NUL terminator.
@@ -355,13 +355,13 @@ func createRootDevnodeAndInstall(hardwareID, infPath string) (bool, error) {
 		uintptr(len(hwid)*2),
 	)
 	if r == 0 {
-		return false, fmt.Errorf("SetupDiSetDeviceRegistryProperty(HardwareID): %v", callErr)
+		return false, fmt.Errorf("SetupDiSetDeviceRegistryProperty(HardwareID): %w", callErr)
 	}
 
 	r, _, callErr = procSetupDiCallClassInstaller.Call(
 		uintptr(difRegisterDevice), hDevInfo, uintptr(unsafe.Pointer(&devInfo)))
 	if r == 0 {
-		return false, fmt.Errorf("SetupDiCallClassInstaller(REGISTERDEVICE): %v", callErr)
+		return false, fmt.Errorf("SetupDiCallClassInstaller(REGISTERDEVICE): %w", callErr)
 	}
 
 	// Install the matching driver onto the freshly registered devnode.
@@ -375,7 +375,7 @@ func createRootDevnodeAndInstall(hardwareID, infPath string) (bool, error) {
 		uintptr(unsafe.Pointer(&reboot)),
 	)
 	if r == 0 {
-		return false, fmt.Errorf("UpdateDriverForPlugAndPlayDevices: %v", callErr)
+		return false, fmt.Errorf("UpdateDriverForPlugAndPlayDevices: %w", callErr)
 	}
 	return reboot != 0, nil
 }
@@ -390,7 +390,7 @@ func removeIDDDriver() error {
 	hDevInfo, _, callErr := procSetupDiGetClassDevsW.Call(
 		0, 0, 0, uintptr(digcfAllClasses|digcfPresent))
 	if hDevInfo == invalidHandleValue {
-		return fmt.Errorf("SetupDiGetClassDevs: %v", callErr)
+		return fmt.Errorf("SetupDiGetClassDevs: %w", callErr)
 	}
 	defer procSetupDiDestroyDeviceInfoList.Call(hDevInfo)
 

@@ -62,7 +62,7 @@ func disableLegacyAutostart() error {
 		return nil
 	}
 	if out, err := systemctlUser("disable", unitName); err != nil {
-		return fmt.Errorf("disabling legacy systemd autostart: %v (%s)", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("disabling legacy systemd autostart: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

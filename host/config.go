@@ -18,6 +18,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -152,13 +153,13 @@ func validVideoScaling(mode string) bool {
 // virtual display. Returned errors are user-facing (web UI form feedback).
 func (s settings) validate() error {
 	if s.FPS < 10 || s.FPS > 240 {
-		return fmt.Errorf("fps must be between 10 and 240")
+		return errors.New("fps must be between 10 and 240")
 	}
 	if kbps := parseBitrateKbps(s.Bitrate); kbps < minLadderKbps {
 		return fmt.Errorf("bitrate must be at least %dk (ffmpeg syntax, e.g. 24M)", minLadderKbps)
 	}
 	if s.Width < 640 || s.Width > 7680 || s.Height < 480 || s.Height > 4320 {
-		return fmt.Errorf("resolution must be between 640x480 and 7680x4320")
+		return errors.New("resolution must be between 640x480 and 7680x4320")
 	}
 	if s.IdleDisplayTimeoutSec < 0 || s.IdleDisplayTimeoutSec > maxIdleDisplayTimeoutSec {
 		return fmt.Errorf("idle display timeout must be between 0 (disabled) and %d seconds", maxIdleDisplayTimeoutSec)
@@ -174,10 +175,10 @@ func (s settings) validate() error {
 	}
 	if strings.IndexFunc(s.PreferredADBSerial, unicode.IsControl) >= 0 ||
 		strings.ContainsAny(s.PreferredADBSerial, " \t\r\n") {
-		return fmt.Errorf("preferred ADB serial must not contain whitespace or control characters")
+		return errors.New("preferred ADB serial must not contain whitespace or control characters")
 	}
 	if s.RequirePreferredADB && strings.TrimSpace(s.PreferredADBSerial) == "" {
-		return fmt.Errorf("preferred ADB serial is required when strict device trust is enabled")
+		return errors.New("preferred ADB serial is required when strict device trust is enabled")
 	}
 	return nil
 }
@@ -185,34 +186,34 @@ func (s settings) validate() error {
 func validateConfiguredExecutable(value, tool string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return fmt.Errorf("must not be empty")
+		return errors.New("must not be empty")
 	}
 	if strings.ContainsRune(value, '\x00') {
-		return fmt.Errorf("contains an invalid NUL character")
+		return errors.New("contains an invalid NUL character")
 	}
 	if strings.EqualFold(value, tool) || strings.EqualFold(value, tool+".exe") {
 		return nil
 	}
 	lower := strings.ToLower(value)
 	if strings.Contains(lower, "://") || strings.HasPrefix(lower, "file:") {
-		return fmt.Errorf("URLs are not allowed")
+		return errors.New("URLs are not allowed")
 	}
 	if strings.HasPrefix(value, `\\`) || strings.HasPrefix(value, `//`) {
-		return fmt.Errorf("UNC/network paths are not allowed")
+		return errors.New("UNC/network paths are not allowed")
 	}
 	if !filepath.IsAbs(value) {
 		return fmt.Errorf("use the default bare name %q or an absolute local executable path", tool)
 	}
 	clean := filepath.Clean(value)
 	if isNetworkExecutablePath(clean) {
-		return fmt.Errorf("network-backed paths are not allowed")
+		return errors.New("network-backed paths are not allowed")
 	}
 	info, err := os.Stat(clean)
 	if err != nil {
 		return fmt.Errorf("executable is not accessible: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("must name a regular executable file")
+		return errors.New("must name a regular executable file")
 	}
 	if err := validateLocalExecutable(clean, info); err != nil {
 		return err

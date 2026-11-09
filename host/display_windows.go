@@ -565,7 +565,7 @@ func newMirrorDisplayForBaseline(outputs []displayOutput, baseline map[string]bo
 		}
 	}
 	if chosen == nil {
-		return nil, fmt.Errorf("no attached display output found")
+		return nil, errors.New("no attached display output found")
 	}
 	return &mirrorDisplay{output: *chosen}, nil
 }

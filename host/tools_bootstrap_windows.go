@@ -490,7 +490,7 @@ func extractZipSubset(zipPath, destRoot string, mapName func(name string) (rel s
 		extractedAny = true
 	}
 	if !extractedAny {
-		return fmt.Errorf("archive did not contain expected files")
+		return errors.New("archive did not contain expected files")
 	}
 	return nil
 }

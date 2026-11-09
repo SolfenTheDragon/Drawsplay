@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -51,7 +52,7 @@ func installWindowsDisplayDriver() windowsDriverSetupResult {
 // selection never downloads, installs or restarts a shared Parsec adapter.
 func installParsecFallback() (bool, error) {
 	if !isProcessElevated() {
-		return false, fmt.Errorf("Parsec fallback installation requires administrator approval")
+		return false, errors.New("Parsec fallback installation requires administrator approval")
 	}
 	if _, err := parsecDevicePath(); err == nil {
 		log.Println("Using existing Parsec VDD fallback; no download or install needed")
@@ -59,10 +60,10 @@ func installParsecFallback() (bool, error) {
 	}
 	_, _, haveUninstaller := parsecVDDUninstaller()
 	if haveUninstaller || len(scanParsecVDDInfs()) > 0 {
-		return false, fmt.Errorf("Parsec VDD is installed but unavailable; repair it or restart Windows (existing shared driver was not replaced)")
+		return false, errors.New("Parsec VDD is installed but unavailable; repair it or restart Windows (existing shared driver was not replaced)")
 	}
 	if !loadSettings().AllowToolAutoInstall {
-		return false, fmt.Errorf("Parsec VDD is missing and automatic tool installation is disabled")
+		return false, errors.New("Parsec VDD is missing and automatic tool installation is disabled")
 	}
 	dir, err := driverStageDir()
 	if err != nil {
@@ -106,7 +107,7 @@ func installParsecFallback() (bool, error) {
 			return owned, nil
 		}
 		if time.Now().After(deadline) {
-			return owned, fmt.Errorf("Parsec installed but its control interface is unavailable; restart Windows and retry")
+			return owned, errors.New("Parsec installed but its control interface is unavailable; restart Windows and retry")
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -137,7 +138,7 @@ func downloadParsecInstaller(path string) error {
 		return closeErr
 	}
 	if n > limit {
-		return fmt.Errorf("Parsec installer exceeds 64 MiB limit")
+		return errors.New("Parsec installer exceeds 64 MiB limit")
 	}
 	return nil
 }

@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -119,7 +118,7 @@ func runSession(controlAddress, videoAddress, encodedPin string, output io.Write
 	}
 	if header.Type != wifilan.FrameControl || header.Epoch != epoch || header.Sequence != 2 ||
 		len(body) != 4 || answer != ping {
-		return fmt.Errorf("incorrect authenticated control response")
+		return errors.New("incorrect authenticated control response")
 	}
 	_, err = output.Write([]byte{1})
 	return err
