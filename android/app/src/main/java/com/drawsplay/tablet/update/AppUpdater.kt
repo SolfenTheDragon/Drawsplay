@@ -61,7 +61,7 @@ private fun downloadError(message: String) = UpdateException(UpdateFailure.DOWNL
  * MAJOR.MINOR.PATCH) update themselves.
  */
 object AppUpdater {
-    private const val TAG = "DrawSplayUpdate"
+    private const val TAG = "AppUpdater"
     private const val LATEST_URL = "https://api.github.com/repos/SolfenTheDragon/Drawsplay/releases/latest"
     private const val APK_ASSET = "DrawSplay.APK"
     private const val SUMS_ASSET = "SHA256SUMS.txt"

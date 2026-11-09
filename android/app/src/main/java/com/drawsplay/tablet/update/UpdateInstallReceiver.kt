@@ -23,7 +23,7 @@ class UpdateInstallReceiver : BroadcastReceiver() {
                     intent.getParcelableExtra(Intent.EXTRA_INTENT)
                 }
                 if (confirm == null) {
-                    Log.w("DrawSplayUpdate", "Update install failed: no confirmation screen")
+                    Log.w(TAG, "Update install failed: no confirmation screen")
                     AppUpdater.installFailed()
                     return
                 }
@@ -31,18 +31,22 @@ class UpdateInstallReceiver : BroadcastReceiver() {
                 try {
                     context.startActivity(confirm)
                 } catch (e: Exception) {
-                    Log.w("DrawSplayUpdate", "Update install failed: $e")
+                    Log.w(TAG, "Update install failed: $e")
                     AppUpdater.installFailed()
                 }
             }
             // The app is replaced and this process ends; nothing to do.
-            PackageInstaller.STATUS_SUCCESS -> Log.i("DrawSplayUpdate", "Update installed")
+            PackageInstaller.STATUS_SUCCESS -> Log.i(TAG, "Update installed")
             PackageInstaller.STATUS_FAILURE_ABORTED -> AppUpdater.installCancelled()
             else -> {
                 val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "status $status"
-                Log.w("DrawSplayUpdate", "Update install failed: $message")
+                Log.w(TAG, "Update install failed: $message")
                 AppUpdater.installFailed()
             }
         }
+    }
+
+    companion object {
+        private const val TAG = "UpdateInstallReceiver"
     }
 }

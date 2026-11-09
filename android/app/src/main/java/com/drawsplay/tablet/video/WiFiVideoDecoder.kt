@@ -198,7 +198,7 @@ class WiFiVideoDecoder(
         get() = pendingSlot != null || csdIndex < 2
 
     companion object {
-        private const val TAG = "DS-WiFiDecoder"
+        private const val TAG = "WiFiVideoDecoder"
 
         fun drained(ended: Boolean, queueDepth: Int, pendingFrames: Int, holdingRecoverySlot: Boolean): Boolean =
             ended && queueDepth == 0 && pendingFrames == 0 && !holdingRecoverySlot

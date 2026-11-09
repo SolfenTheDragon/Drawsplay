@@ -173,6 +173,6 @@ class WiFiPairingSession(
     }
 
     companion object {
-        private const val TAG = "WiFiPairing"
+        private const val TAG = "WiFiPairingSession"
     }
 }

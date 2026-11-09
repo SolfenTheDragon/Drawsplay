@@ -206,7 +206,7 @@ class WiFiPairedSessionHost(
     }
 
     companion object {
-        private const val TAG = "WiFiPairedHost"
+        private const val TAG = "WiFiPairedSessionHost"
         private const val IDLE_MS = 3000L
         private const val RETRY_MS = 2000L
         private const val WATCH_MS = 1000L
