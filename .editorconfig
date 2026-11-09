@@ -9,6 +9,7 @@ insert_final_newline = true
 [*.go]
 indent_style = tab
 
-# Windows-only files keep CRLF.
+# Windows-only files keep CRLF (.gitattributes applies the same rule on
+# checkout; INF files are never converted, because driver catalogs sign them).
 [*.{bat,cmd,ps1,inf}]
 end_of_line = crlf

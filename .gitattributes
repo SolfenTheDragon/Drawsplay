@@ -1,0 +1,12 @@
+# Line endings, matching .editorconfig: LF everywhere, CRLF for the files
+# Windows tools read. Git stores text files with LF and writes CRLF on checkout
+# where listed below.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Driver INF files are CRLF and are left exactly as committed: a driver's
+# catalog (.cat) signs the INF's bytes, so git must never convert them.
+*.inf -text
+*.cat binary
