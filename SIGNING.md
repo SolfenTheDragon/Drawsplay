@@ -109,6 +109,12 @@ This command prompts for:
 
 Keep this keystore backed up securely. Losing it can prevent future in-place Android updates.
 
+The app's in-app updater installs a release only when it is signed with the
+same key as the installed app. Releases built without these secrets are
+signed with the CI runner's temporary debug key, which changes between runs,
+so their in-app updates fail and users must reinstall by hand. Configure the
+keystore secrets before relying on in-app updates.
+
 ---
 
 ## 3. Local signing setup

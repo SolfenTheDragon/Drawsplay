@@ -1174,7 +1174,7 @@ function renderUpdate(v) {
     note = "Last checked " + new Date(v.checkedAt).toLocaleString() + ".";
   }
   if (v.state === "available" && v.canInstall) {
-    note += (note ? " " : "") + "Update the tablet app too, with DrawSplay.APK from the release page.";
+    note += (note ? " " : "") + "The tablet app offers its own update on its waiting screen.";
   }
   $("update-note").textContent = note;
 

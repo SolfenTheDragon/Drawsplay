@@ -48,4 +48,13 @@
     <string name="status_connecting_usb">USB accessory connected. Waiting for the computer to start the display…</string>
     <string name="status_usb_priority">Wireless reconnect is paused because USB has priority. To test Wi-Fi, unplug USB. USB power with USB debugging enabled also pauses wireless.</string>
     <string name="status_reconnecting_wifi">Looking for the saved wireless computer… Check DrawSplay is running, Wi-Fi is enabled in its settings, and both devices are on the same network. To switch computers, use Forget wireless host.</string>
+    <string name="update_available">DrawSplay %1$s is available.</string>
+    <string name="update_download">Download and install</string>
+    <string name="update_downloading">Downloading DrawSplay %1$s…</string>
+    <string name="update_ready">DrawSplay %1$s is ready to install. DrawSplay closes while it updates; open it again afterwards.</string>
+    <string name="update_install">Install update</string>
+    <string name="update_needs_permission">To install DrawSplay %1$s, allow \"Install unknown apps\" for DrawSplay, then come back and tap Install.</string>
+    <string name="update_installing">Installing DrawSplay %1$s…</string>
+    <string name="update_failed">Could not update to DrawSplay %1$s: %2$s</string>
+    <string name="update_retry">Try again</string>
 </resources>

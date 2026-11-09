@@ -124,6 +124,43 @@
                 android:textAllCaps="false"
                 android:textColor="@color/ds_button_text"
                 android:visibility="gone" />
+
+            <!-- App update (update/AppUpdater.kt); hidden when there is none. -->
+            <LinearLayout
+                android:id="@+id/updateCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:background="@drawable/ds_panel"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/updateText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite"
+                    android:textColor="@color/ds_text"
+                    android:textSize="16sp" />
+
+                <ProgressBar
+                    android:id="@+id/updateProgress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:max="100"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/updateButton"
+                    style="@style/DrawSplay.SecondaryButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:visibility="gone" />
+            </LinearLayout>
         </LinearLayout>
         </ScrollView>
 

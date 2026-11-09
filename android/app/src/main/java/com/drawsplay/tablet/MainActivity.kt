@@ -25,6 +25,7 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.media.ImageReader
 import androidx.appcompat.app.AppCompatActivity
@@ -36,6 +37,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.drawsplay.tablet.input.InputChannel
 import com.drawsplay.tablet.input.InputPadView
+import com.drawsplay.tablet.update.AppUpdater
+import com.drawsplay.tablet.update.UpdateState
 import com.drawsplay.tablet.transport.AccessoryTransport
 import com.drawsplay.tablet.transport.HostEndpointSelector
 import com.drawsplay.tablet.video.CursorPacket
@@ -70,6 +73,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusOverlay: FrameLayout
     private lateinit var statusText: TextView
     private lateinit var inputPad: InputPadView
+    private lateinit var updateCard: View
+    private lateinit var updateText: TextView
+    private lateinit var updateProgress: ProgressBar
+    private lateinit var updateButton: Button
 
     private lateinit var inputChannel: InputChannel
     private lateinit var videoChannel: VideoChannel
@@ -145,6 +152,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
         statusText = findViewById(R.id.statusText)
+        updateCard = findViewById(R.id.updateCard)
+        updateText = findViewById(R.id.updateText)
+        updateProgress = findViewById(R.id.updateProgress)
+        updateButton = findViewById(R.id.updateButton)
+        updateButton.setOnClickListener { AppUpdater.onAction(this) }
+        AppUpdater.setListener { renderUpdate(it) }
         ViewCompat.setAccessibilityHeading(statusText, true)
         ViewCompat.setAccessibilityHeading(findViewById(R.id.wifiPairTitle), true)
         inputPad = findViewById(R.id.inputPad)
@@ -337,6 +350,7 @@ class MainActivity : AppCompatActivity() {
         AccessoryTransport.refresh()
         AccessoryTransport.setPolling(true)
         inputChannel.start()
+        AppUpdater.onForeground(this)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -361,6 +375,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        AppUpdater.setListener(null)
         AccessoryTransport.stop()
         releaseBackgroundVideoSink()
         videoChannel.stop()
@@ -727,6 +742,28 @@ class MainActivity : AppCompatActivity() {
         }
         connectionBack.isEnabled = localPanel || picture
         enterImmersiveMode()
+    }
+
+    /** The update card on the waiting screen; never shown over the picture. */
+    private fun renderUpdate(state: UpdateState) {
+        if (isDestroyed) return
+        val (text, button) = when (state) {
+            is UpdateState.None -> null to null
+            is UpdateState.Available -> getString(R.string.update_available, state.version) to R.string.update_download
+            is UpdateState.Downloading -> getString(R.string.update_downloading, state.version) to null
+            is UpdateState.Ready -> getString(R.string.update_ready, state.version) to R.string.update_install
+            is UpdateState.NeedsPermission -> getString(R.string.update_needs_permission, state.version) to R.string.update_install
+            is UpdateState.Installing -> getString(R.string.update_installing, state.version) to null
+            is UpdateState.Failed -> getString(R.string.update_failed, state.version, state.message) to R.string.update_retry
+        }
+        updateCard.visibility = if (text == null) View.GONE else View.VISIBLE
+        if (text != null && updateText.text.toString() != text) updateText.text = text
+        updateButton.visibility = if (button == null) View.GONE else View.VISIBLE
+        if (button != null) updateButton.setText(button)
+        val downloading = state as? UpdateState.Downloading
+        updateProgress.visibility = if (downloading != null || state is UpdateState.Installing) View.VISIBLE else View.GONE
+        updateProgress.isIndeterminate = downloading == null || downloading.percent == 0
+        if (downloading != null) updateProgress.progress = downloading.percent
     }
 
     private fun showConnectionOptions() {
