@@ -6,6 +6,8 @@ import "os/exec"
 
 func applyCaptureProcessPriority(cmd *exec.Cmd) {}
 
+func setCaptureProcessPriority(cmd *exec.Cmd, foreground bool) error { return nil }
+
 // applyCaptureProcessPriorityPostStart is a no-op here; see
 // ffmpeg_priority_linux.go for the Linux implementation, which needs the
 // process's pid and so must run after Start() rather than before it.
