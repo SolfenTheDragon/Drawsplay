@@ -4,10 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-bytemuck = "1.25.2"
-dd-proto = { path = "../proto" }
+bytemuck = "1"
+dd-proto.workspace = true
 softbuffer = "0.4"
 winit = "0.30"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_Input_Pointer", "Win32_UI_WindowsAndMessaging"] }
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_Input_Pointer", "Win32_UI_WindowsAndMessaging"] }

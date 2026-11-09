@@ -7,6 +7,13 @@ version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-only"
 
+# Dependencies more than one crate uses. Every version here and in the crates
+# names a compatible series ("1", "0.3"); Cargo.lock pins the exact release.
+[workspace.dependencies]
+dd-proto = { path = "proto" }
+getrandom = "0.3"
+windows = "0.58"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
