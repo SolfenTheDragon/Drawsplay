@@ -55,6 +55,11 @@
     <string name="update_install">Install update</string>
     <string name="update_needs_permission">To install DrawSplay %1$s, allow \"Install unknown apps\" for DrawSplay, then come back and tap Install.</string>
     <string name="update_installing">Installing DrawSplay %1$s…</string>
-    <string name="update_failed">Could not update to DrawSplay %1$s: %2$s</string>
+    <string name="update_failed">Could not update to DrawSplay %1$s. %2$s</string>
+    <string name="update_failed_download">The download failed. Check the connection and try again.</string>
+    <string name="update_failed_damaged">The download was damaged. Try again.</string>
+    <string name="update_failed_wrong_apk">The release\'s APK is not a newer version of this app. Install it from the release page.</string>
+    <string name="update_failed_different_key">It is signed with a different key than this app, so Android cannot update it. Uninstall DrawSplay, then install DrawSplay.APK from the release page.</string>
+    <string name="update_failed_install">Android could not install it. Try again.</string>
     <string name="update_retry">Try again</string>
 </resources>

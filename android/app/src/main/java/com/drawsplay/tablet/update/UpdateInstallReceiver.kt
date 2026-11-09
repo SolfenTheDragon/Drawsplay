@@ -23,14 +23,16 @@ class UpdateInstallReceiver : BroadcastReceiver() {
                     intent.getParcelableExtra(Intent.EXTRA_INTENT)
                 }
                 if (confirm == null) {
-                    AppUpdater.installFailed("Android did not show the install confirmation")
+                    Log.w("DrawSplayUpdate", "Update install failed: no confirmation screen")
+                    AppUpdater.installFailed()
                     return
                 }
                 confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 try {
                     context.startActivity(confirm)
                 } catch (e: Exception) {
-                    AppUpdater.installFailed(e.message ?: e.toString())
+                    Log.w("DrawSplayUpdate", "Update install failed: $e")
+                    AppUpdater.installFailed()
                 }
             }
             // The app is replaced and this process ends; nothing to do.
@@ -39,7 +41,7 @@ class UpdateInstallReceiver : BroadcastReceiver() {
             else -> {
                 val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "status $status"
                 Log.w("DrawSplayUpdate", "Update install failed: $message")
-                AppUpdater.installFailed(message)
+                AppUpdater.installFailed()
             }
         }
     }

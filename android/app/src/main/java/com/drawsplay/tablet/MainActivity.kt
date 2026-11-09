@@ -37,6 +37,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.drawsplay.tablet.input.InputChannel
 import com.drawsplay.tablet.input.InputPadView
 import com.drawsplay.tablet.update.AppUpdater
+import com.drawsplay.tablet.update.UpdateFailure
 import com.drawsplay.tablet.update.UpdateState
 import com.drawsplay.tablet.transport.AccessoryTransport
 import com.drawsplay.tablet.transport.HostEndpointSelector
@@ -753,7 +754,8 @@ class MainActivity : AppCompatActivity() {
             is UpdateState.Ready -> getString(R.string.update_ready, state.version) to R.string.update_install
             is UpdateState.NeedsPermission -> getString(R.string.update_needs_permission, state.version) to R.string.update_install
             is UpdateState.Installing -> getString(R.string.update_installing, state.version) to null
-            is UpdateState.Failed -> getString(R.string.update_failed, state.version, state.message) to R.string.update_retry
+            is UpdateState.Failed -> getString(R.string.update_failed, state.version, getString(updateFailureText(state.reason))) to
+                R.string.update_retry
         }
         updateCard.visibility = if (text == null) View.GONE else View.VISIBLE
         if (text != null && updateText.text.toString() != text) updateText.text = text
@@ -763,6 +765,14 @@ class MainActivity : AppCompatActivity() {
         updateProgress.visibility = if (downloading != null || state is UpdateState.Installing) View.VISIBLE else View.GONE
         updateProgress.isIndeterminate = downloading == null || downloading.percent == 0
         if (downloading != null) updateProgress.progress = downloading.percent
+    }
+
+    private fun updateFailureText(reason: UpdateFailure): Int = when (reason) {
+        UpdateFailure.DOWNLOAD -> R.string.update_failed_download
+        UpdateFailure.DAMAGED -> R.string.update_failed_damaged
+        UpdateFailure.WRONG_APK -> R.string.update_failed_wrong_apk
+        UpdateFailure.DIFFERENT_KEY -> R.string.update_failed_different_key
+        UpdateFailure.INSTALL -> R.string.update_failed_install
     }
 
     private fun showConnectionOptions() {

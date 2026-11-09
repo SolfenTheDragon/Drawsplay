@@ -36,8 +36,16 @@ sealed class UpdateState {
     /** Android needs "Install unknown apps" allowed for DrawSplay first. */
     data class NeedsPermission(val version: String) : UpdateState()
     data class Installing(val version: String) : UpdateState()
-    data class Failed(val version: String, val message: String) : UpdateState()
+    data class Failed(val version: String, val reason: UpdateFailure) : UpdateState()
 }
+
+/** Why an update stopped. The waiting screen shows a matching string; the log has the details. */
+enum class UpdateFailure { DOWNLOAD, DAMAGED, WRONG_APK, DIFFERENT_KEY, INSTALL }
+
+/** An update error with its [reason]; [message] is for the log only. */
+class UpdateException(val reason: UpdateFailure, message: String) : IOException(message)
+
+private fun downloadError(message: String) = UpdateException(UpdateFailure.DOWNLOAD, message)
 
 /**
  * Updates the app from the project's GitHub releases.
@@ -179,13 +187,13 @@ object AppUpdater {
         try {
             publish(UpdateState.Downloading(version, 0))
             val sums = parseSha256Sums(String(fetch(rel.sumsUrl, MAX_SUMS_BYTES), Charsets.UTF_8))
-            val want = sums[APK_ASSET] ?: throw IOException("$SUMS_ASSET does not list $APK_ASSET")
+            val want = sums[APK_ASSET] ?: throw downloadError("$SUMS_ASSET does not list $APK_ASSET")
             dir.listFiles()?.forEach { it.delete() } // older downloads
             val tmp = File(dir, "download.tmp")
             val digest = MessageDigest.getInstance("SHA-256")
             open(rel.apkUrl).use { (conn, input) ->
                 val total = if (rel.apkSize > 0) rel.apkSize else conn.contentLengthLong
-                if (total > MAX_APK_BYTES) throw IOException("the APK is too large")
+                if (total > MAX_APK_BYTES) throw downloadError("the APK is too large")
                 tmp.outputStream().use { out ->
                     val buf = ByteArray(64 shl 10)
                     var done = 0L
@@ -194,7 +202,7 @@ object AppUpdater {
                         val n = input.read(buf)
                         if (n < 0) break
                         done += n
-                        if (done > MAX_APK_BYTES) throw IOException("the APK is too large")
+                        if (done > MAX_APK_BYTES) throw downloadError("the APK is too large")
                         out.write(buf, 0, n)
                         digest.update(buf, 0, n)
                         val pct = if (total > 0) (100 * done / total).toInt().coerceIn(0, 100) else 0
@@ -203,36 +211,36 @@ object AppUpdater {
                             publish(UpdateState.Downloading(version, pct))
                         }
                     }
-                    if (rel.apkSize > 0 && done != rel.apkSize) throw IOException("the download is incomplete")
+                    if (rel.apkSize > 0 && done != rel.apkSize) throw downloadError("the download is incomplete")
                 }
             }
             val got = digest.digest().joinToString("") { "%02x".format(it) }
-            if (got != want) throw IOException("the download does not match its SHA-256 checksum")
+            if (got != want) throw UpdateException(UpdateFailure.DAMAGED, "the download does not match its SHA-256 checksum")
             verifyApk(app, tmp, rel.version)
-            if (!tmp.renameTo(readyFile(app, rel.version))) throw IOException("cannot store the download")
+            if (!tmp.renameTo(readyFile(app, rel.version))) throw downloadError("cannot store the download")
             Log.i(TAG, "Update ${rel.version} downloaded and verified")
             publish(UpdateState.Ready(version))
         } catch (e: Exception) {
             Log.w(TAG, "Update download failed: $e")
             dir.listFiles()?.forEach { it.delete() }
-            publish(UpdateState.Failed(version, e.message ?: e.toString()))
+            publish(UpdateState.Failed(version, (e as? UpdateException)?.reason ?: UpdateFailure.DOWNLOAD))
         }
     }
 
     /** The APK must be this app, newer, and signed with the same key. */
     private fun verifyApk(app: Context, apk: File, expected: ReleaseVersion) {
         val pm = app.packageManager
-        val candidate = archiveInfo(pm, apk.path) ?: throw IOException("the download is not a valid APK")
+        val candidate = archiveInfo(pm, apk.path) ?: throw UpdateException(UpdateFailure.WRONG_APK, "the download is not a valid APK")
         val installed = packageInfo(pm, app.packageName)
-        if (candidate.packageName != app.packageName) throw IOException("the APK is for another app")
+        if (candidate.packageName != app.packageName) throw UpdateException(UpdateFailure.WRONG_APK, "the APK is for another app")
         if (ReleaseVersion.parse(candidate.versionName) != expected) {
-            throw IOException("the APK reports version ${candidate.versionName}, expected $expected")
+            throw UpdateException(UpdateFailure.WRONG_APK, "the APK reports version ${candidate.versionName}, expected $expected")
         }
-        if (versionCode(candidate) <= versionCode(installed)) throw IOException("the APK is not newer than this app")
+        if (versionCode(candidate) <= versionCode(installed)) throw UpdateException(UpdateFailure.WRONG_APK, "the APK is not newer than this app")
         val (installedSigners, multiple) = signers(installed)
         val (candidateSigners, _) = signers(candidate)
         if (!signersCompatible(installedSigners, candidateSigners, multiple)) {
-            throw IOException("this release is signed with a different key than the installed app, so Android cannot update it. Uninstall DrawSplay and install DrawSplay.APK from the release page")
+            throw UpdateException(UpdateFailure.DIFFERENT_KEY, "the APK is signed with a different key than the installed app")
         }
     }
 
@@ -276,16 +284,16 @@ object AppUpdater {
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Update install failed: $e")
-                publish(UpdateState.Failed(version, e.message ?: e.toString()))
+                publish(UpdateState.Failed(version, UpdateFailure.INSTALL))
             }
         }
     }
 
-    /** From [UpdateInstallReceiver] when the installer gives up. */
-    internal fun installFailed(message: String) {
+    /** From [UpdateInstallReceiver] when the installer gives up (it logs why). */
+    internal fun installFailed() {
         main.post {
             val rel = release ?: return@post
-            publish(UpdateState.Failed(rel.version.toString(), message))
+            publish(UpdateState.Failed(rel.version.toString(), UpdateFailure.INSTALL))
         }
     }
 
@@ -319,7 +327,7 @@ object AppUpdater {
 
     private fun open(url: String): Opened {
         val u = URL(url)
-        if (!updateUrlAllowed(u.protocol, u.host)) throw IOException("unexpected download address")
+        if (!updateUrlAllowed(u.protocol, u.host)) throw downloadError("unexpected download address")
         val conn = u.openConnection() as HttpURLConnection
         conn.connectTimeout = 15_000
         conn.readTimeout = 30_000
@@ -329,18 +337,18 @@ object AppUpdater {
         val code = conn.responseCode
         if (!updateUrlAllowed(conn.url.protocol, conn.url.host)) {
             conn.disconnect()
-            throw IOException("refusing redirect to ${conn.url.host}")
+            throw downloadError("refusing redirect to ${conn.url.host}")
         }
         if (code != HttpURLConnection.HTTP_OK) {
             conn.disconnect()
-            throw IOException("HTTP $code")
+            throw downloadError("HTTP $code")
         }
         return Opened(conn, conn.inputStream)
     }
 
     private fun fetch(url: String, limit: Long): ByteArray = open(url).use { (_, input) ->
         val data = input.readNBytesCompat(limit + 1)
-        if (data.size > limit) throw IOException("response too large")
+        if (data.size > limit) throw downloadError("response too large")
         data
     }
 
