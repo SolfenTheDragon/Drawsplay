@@ -18,11 +18,17 @@ jobs:
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
 
       - name: Check shell script syntax
+        # Every tracked script, found by its #! line and checked with the
+        # shell it names (sh is dash here, so POSIX scripts stay POSIX).
         run: |
-          shopt -s nullglob
-          for script in scripts/*.sh release/*.sh tools/android_wifi_probe/*.sh; do
-            bash -n "$script"
-          done
+          status=0
+          while IFS= read -r script; do
+            case "$(head -n1 "$script")" in
+              '#!/bin/sh'*) sh -n "$script" || status=1 ;;
+              '#!'*bash*) bash -n "$script" || status=1 ;;
+            esac
+          done < <(git grep -lI "^#!")
+          exit "$status"
 
       - name: Test external USB measurement tooling
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/usb_baseline -p 'test_*.py' -v
@@ -40,6 +46,15 @@ jobs:
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: host/go.mod
+
+      - name: Check Go formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Run gofmt -w on:"
+            echo "$unformatted"
+            exit 1
+          fi
 
       - name: Vet host
         run: go vet ./...
