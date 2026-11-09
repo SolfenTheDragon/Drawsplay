@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import com.drawsplay.tablet.AndroidCompat
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -365,20 +366,10 @@ object AppUpdater {
         else @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
 
     private fun packageInfo(pm: PackageManager, name: String): PackageInfo =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            pm.getPackageInfo(name, PackageManager.PackageInfoFlags.of(signingFlags().toLong()))
-        } else {
-            @Suppress("DEPRECATION")
-            pm.getPackageInfo(name, signingFlags())
-        }
+        AndroidCompat.packageInfo(pm, name, signingFlags())
 
     private fun archiveInfo(pm: PackageManager, path: String): PackageInfo? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            pm.getPackageArchiveInfo(path, PackageManager.PackageInfoFlags.of(signingFlags().toLong()))
-        } else {
-            @Suppress("DEPRECATION")
-            pm.getPackageArchiveInfo(path, signingFlags())
-        }
+        AndroidCompat.packageArchiveInfo(pm, path, signingFlags())
 
     private fun versionCode(info: PackageInfo): Long =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode

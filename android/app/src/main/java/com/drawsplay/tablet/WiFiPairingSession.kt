@@ -92,7 +92,7 @@ class WiFiPairingSession(
                     serviceName = "DrawSplay-${Build.MODEL}".take(48)
                     serviceType = "_drawsplay-tablet._tcp."
                     port = listener.localPort
-                    if (Build.VERSION.SDK_INT >= 33) setNetwork(network)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setNetwork(network)
                     setAttribute("v", "2")
                     setAttribute("videoPort", placeholder.localPort.toString())
                     setAttribute("pairing", "1")

@@ -56,7 +56,7 @@ class VideoDecoder(
     private val pictureReady = FirstPictureSignal(onPictureReady = onPictureReady)
     private val initialRefreshHz: Float = try {
         @Suppress("DEPRECATION")
-        val display = if (AndroidCompat.supportsWindowMetrics) {
+        val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             surface.javaClass.getMethod("getDisplay").invoke(surface) as? Display
         } else {
             null
@@ -315,7 +315,7 @@ class VideoDecoder(
                 setInteger(MediaFormat.KEY_PRIORITY, 0)
                 setInteger(MediaFormat.KEY_OPERATING_RATE, Short.MAX_VALUE.toInt())
             }
-            if (tier.lowLatencyHint && AndroidCompat.supportsLowLatencyDecoderHint) {
+            if (tier.lowLatencyHint && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
             }
             if (tier.vendorKeys) {
@@ -407,9 +407,9 @@ class VideoDecoder(
      */
     private fun applySurfaceFrameRateHint() {
         val fps = streamFps
-        if (fps <= 0 || !AndroidCompat.supportsSurfaceFrameRateHint) return
+        if (fps <= 0 || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         try {
-            if (AndroidCompat.supportsSurfaceFrameRateAlways) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 surface.setFrameRate(
                     fps.toFloat(),
                     Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,

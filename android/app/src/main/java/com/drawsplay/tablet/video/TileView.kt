@@ -82,7 +82,7 @@ class TileView @JvmOverloads constructor(
         if (complete) {
             val onPictureReady = g.onPictureReady ?: return
             g.onPictureReady = null
-            if (Build.VERSION.SDK_INT >= 29 && isHardwareAccelerated) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isHardwareAccelerated) {
                 viewTreeObserver.registerFrameCommitCallback {
                     if (grid === g && isAttachedToWindow) onPictureReady()
                 }

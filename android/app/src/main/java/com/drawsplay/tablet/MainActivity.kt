@@ -9,7 +9,6 @@ import java.io.IOException
 import java.util.concurrent.Executors
 import android.content.Intent
 import android.content.SharedPreferences
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -400,7 +399,7 @@ class MainActivity : AppCompatActivity() {
     private fun buildDisplayInfo(): InputChannel.DisplayInfo {
         val mode = currentDisplay()?.mode
         val fallbackBounds =
-            if (AndroidCompat.supportsWindowMetrics) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 windowManager.maximumWindowMetrics.bounds
             } else {
                 @Suppress("DEPRECATION")
@@ -845,7 +844,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun currentDisplay(): Display? =
-        if (AndroidCompat.supportsWindowMetrics) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             display
         } else {
             @Suppress("DEPRECATION")
@@ -941,17 +940,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun appVersionName(): String {
         return try {
-            val pkgInfo =
-                if (AndroidCompat.supportsPackageInfoFlagsApi) {
-                    packageManager.getPackageInfo(
-                        packageName,
-                        PackageManager.PackageInfoFlags.of(0)
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    packageManager.getPackageInfo(packageName, 0)
-                }
-            pkgInfo.versionName ?: "unknown"
+            AndroidCompat.packageInfo(packageManager, packageName).versionName ?: "unknown"
         } catch (_: Exception) {
             "unknown"
         }
