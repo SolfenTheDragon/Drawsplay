@@ -162,7 +162,9 @@ Sign-WindowsExecutable -ExePath "$repoRoot\host\host.exe"
 
 Write-Host "Building Android APK..."
 Set-Location "$repoRoot\android"
-.\gradlew.bat :app:assembleRelease :app:bundleRelease
+# The tag sets the APK's versionName/versionCode (app/build.gradle.kts), so
+# the in-app updater and Android see each release as an upgrade.
+.\gradlew.bat "-PDRAWSPLAY_VERSION=$Version" :app:assembleRelease :app:bundleRelease
 if (-not $?) {
   throw "Android release build failed"
 }
