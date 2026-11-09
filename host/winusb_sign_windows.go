@@ -20,6 +20,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -156,9 +157,7 @@ func signLocalDriverCatalog(dir, infName, catName, subject, friendlyName string)
 		"  throw",
 		"}",
 	}, "\n")
-	cmd := exec.Command(windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
-	cmd.Env = append(os.Environ(), "DRAWSPLAY_DRIVER_SIGN_DIR="+dir)
-	hideChildWindow(cmd)
+	cmd := powerShellCommand(context.Background(), script, "DRAWSPLAY_DRIVER_SIGN_DIR="+dir)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("sign %s: %w (%s)", catName, err, strings.TrimSpace(string(out)))
@@ -197,9 +196,9 @@ func removeWinUSBSigningCertsExcept(keep string) error {
 func removeDriverSigningCertsMatching(filter string) error {
 	script := "$ErrorActionPreference='Stop'; foreach($name in 'Root','TrustedPublisher','My'){ Get-ChildItem ('Cert:\\LocalMachine\\'+$name) | " +
 		"Where-Object { " + filter + " } | ForEach-Object { Remove-Item -LiteralPath $_.PSPath -DeleteKey:($name -eq 'My') } }"
-	out, err := runHiddenCommand(windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
+	out, err := powerShellCommand(context.Background(), script).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%w (%s)", err, strings.TrimSpace(out))
+		return fmt.Errorf("%w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

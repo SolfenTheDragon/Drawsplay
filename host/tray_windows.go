@@ -171,7 +171,7 @@ func runBackgroundTrayController(background bool, parent context.Context, cancel
 
 func openSettingsWebUI() {
 	url := fmt.Sprintf("http://127.0.0.1:%d", webuiPort)
-	if err := exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start(); err != nil {
+	if err := exec.Command(system32Path("rundll32.exe"), "url.dll,FileProtocolHandler", url).Start(); err != nil {
 		log.Printf("Open Web UI failed: %v", err)
 	}
 }

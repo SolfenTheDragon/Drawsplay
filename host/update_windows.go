@@ -75,9 +75,7 @@ func verifyUpdateInstallerSigner(current, installer string) error {
 		"{ throw ('the installer is not signed by the publisher of this copy ('+$new.Status+')') }"
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
-	cmd.Env = append(os.Environ(), "DRAWSPLAY_CURRENT_EXE="+current, "DRAWSPLAY_UPDATE_INSTALLER="+installer)
-	hideChildWindow(cmd)
+	cmd := powerShellCommand(ctx, script, "DRAWSPLAY_CURRENT_EXE="+current, "DRAWSPLAY_UPDATE_INSTALLER="+installer)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("verify the installer's signature: %w (%s)", err, strings.TrimSpace(string(out)))
 	}

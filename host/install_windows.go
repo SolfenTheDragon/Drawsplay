@@ -27,6 +27,7 @@ package main
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"encoding/xml"
@@ -782,8 +783,8 @@ func runUninstallElevated(resultPath string, req uninstallRequest) int {
 		}
 	}
 	// Remove the task folder too (ignore failure: it may hold other tasks).
-	_, _ = runHiddenCommand(windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-		"$s=New-Object -ComObject Schedule.Service; $s.Connect(); try { $s.GetFolder('\\').DeleteFolder('DrawSplay',0) } catch {}")
+	_ = powerShellCommand(context.Background(),
+		"$s=New-Object -ComObject Schedule.Service; $s.Connect(); try { $s.GetFolder('\\').DeleteFolder('DrawSplay',0) } catch {}").Run()
 	if err := registry.DeleteKey(registry.LOCAL_MACHINE, uninstallRegKeyPath); err != nil && !errors.Is(err, registry.ErrNotExist) {
 		res.Errors = append(res.Errors, fmt.Sprintf("remove Apps & Features entry: %v", err))
 	}
@@ -825,8 +826,7 @@ func elevatedUninstallerExe(exe, dir string) string {
 func scheduleTreeDelete(dir string) {
 	q := "'" + strings.ReplaceAll(dir, "'", "''") + "'"
 	script := "for($i=0;$i -lt 300;$i++){Remove-Item -LiteralPath " + q + " -Recurse -Force -ErrorAction SilentlyContinue; if(-not (Test-Path -LiteralPath " + q + ")){break}; Start-Sleep -Seconds 1}"
-	cmd := exec.Command(windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
-	hideChildWindow(cmd)
+	cmd := powerShellCommand(context.Background(), script)
 	if err := cmd.Start(); err == nil {
 		_ = cmd.Process.Release()
 	}
@@ -836,8 +836,7 @@ func scheduleTreeDelete(dir string) {
 func scheduleSelfDelete(exe string) {
 	q := "'" + strings.ReplaceAll(exe, "'", "''") + "'"
 	script := "for($i=0;$i -lt 300;$i++){Remove-Item -LiteralPath " + q + " -Force -ErrorAction SilentlyContinue; if(-not (Test-Path -LiteralPath " + q + ")){break}; Start-Sleep -Seconds 1}"
-	cmd := exec.Command(windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
-	hideChildWindow(cmd)
+	cmd := powerShellCommand(context.Background(), script)
 	if err := cmd.Start(); err == nil {
 		_ = cmd.Process.Release()
 	}

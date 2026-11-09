@@ -152,9 +152,7 @@ func verifyParsecInstaller(path string) error {
 		"{ throw ('Parsec installer publisher verification failed: '+$s.Status) }"
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
-	cmd.Env = append(os.Environ(), "DRAWSPLAY_PARSEC_INSTALLER="+path)
-	hideChildWindow(cmd)
+	cmd := powerShellCommand(ctx, script, "DRAWSPLAY_PARSEC_INSTALLER="+path)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("verify Parsec Authenticode signature: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
