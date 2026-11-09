@@ -58,7 +58,7 @@ func protectedRequest(t *testing.T, method, serverURL, path, body, token string)
 
 func TestSettingsAPIRoundTrip(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -111,7 +111,7 @@ func TestSettingsAPIPreservesWiFiFieldsWhenFeatureDisabled(t *testing.T) {
 		t.Fatalf("store.update(initial): %v", err)
 	}
 
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -167,7 +167,7 @@ func TestLegacyWiFiSettingsAreDroppedFromConfig(t *testing.T) {
 
 func TestStatusAPIExposesWarningsAndMetrics(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 
 	res, err := http.Get(srv.URL + "/api/status")
@@ -206,7 +206,7 @@ func TestAutostartImplementationNamesLinuxXDGAutostart(t *testing.T) {
 
 func TestLogsAPIExposesBufferedConsoleOutput(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 
 	logLine := "webui-log-test-line"
@@ -244,7 +244,7 @@ func TestLogsAPIExposesBufferedConsoleOutput(t *testing.T) {
 
 func TestDiagnosticsAPIIncludesSnapshot(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 
 	res, err := http.Get(srv.URL + "/api/diagnostics")
@@ -268,7 +268,7 @@ func TestDiagnosticsAPIIncludesSnapshot(t *testing.T) {
 
 func TestSessionInputLockAPI(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -285,7 +285,7 @@ func TestSessionInputLockAPI(t *testing.T) {
 
 func TestSessionReconnectVideoAndSetupRemediationAPIs(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -348,7 +348,7 @@ func TestInputAllowedBySettings(t *testing.T) {
 
 func TestSettingsAPIRejectsInvalid(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -384,7 +384,7 @@ func TestCalibrationAPIRoundTrip(t *testing.T) {
 	calibrationState.mu.Unlock()
 
 	store := newSettingsStore(defaultSettings())
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -430,7 +430,7 @@ func TestCalibrationAPIRoundTrip(t *testing.T) {
 
 func TestStateChangingAPIRequiresCSRFAndLocalOrigin(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 	body := `{"fps":30}`
@@ -460,7 +460,7 @@ func TestStateChangingAPIRequiresCSRFAndLocalOrigin(t *testing.T) {
 
 func TestSettingsAPIRejectsUnsafeToolPaths(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -481,7 +481,7 @@ func TestSettingsAPIRejectsUnsafeToolPaths(t *testing.T) {
 
 func TestWebUIRefusesRebindedHostNames(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	for _, path := range []string{"/api/wifi/pairing", "/api/logs", "/api/csrf", "/api/settings", "/"} {
 		req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)

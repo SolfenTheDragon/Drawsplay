@@ -7,8 +7,9 @@ import (
 )
 
 // runHostRuntime starts all host listeners and blocks until the runtime
-// stops. The stop callback is wired into the Web UI /api/stop endpoint.
-func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) error {
+// stops. stop ends the runtime (the Web UI's /api/stop); exit ends the whole
+// process, which an update needs (in Windows tray mode the two differ).
+func runHostRuntime(ctx context.Context, store *settingsStore, stop, exit func()) error {
 	if ok, err := acquireInstanceLock(); !ok {
 		return fmt.Errorf("another DrawSplay host is already running (settings UI at http://127.0.0.1:%d)", webuiPort)
 	} else if err != nil {
@@ -25,7 +26,7 @@ func runHostRuntime(ctx context.Context, store *settingsStore, stop func()) erro
 	go maintainADBReverse(ctx, store, inputPort, videoPort)
 
 	// Settings web UI (localhost only; best-effort like the video channel).
-	go runWebUI(ctx, store, stop)
+	go runWebUI(ctx, store, stop, exit)
 	startSessionLockMonitor(ctx)
 	go releaseStaleVirtualDisplays()
 	startDisplayWatchdog(ctx, store)

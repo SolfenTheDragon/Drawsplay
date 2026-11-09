@@ -89,7 +89,7 @@ func TestConnectionKind(t *testing.T) {
 func TestStatusAPIReportsPCClient(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(desktopConfigEnv, dir)
-	srv := httptest.NewServer(newWebUIHandler(newTestStore(t), func() {}))
+	srv := httptest.NewServer(newWebUIHandler(newTestStore(t), func() {}, func() {}))
 	defer srv.Close()
 
 	get := func() (kind string, desktop map[string]any) {
@@ -122,7 +122,7 @@ func TestStatusAPIReportsPCClient(t *testing.T) {
 func TestDesktopDisconnectEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(desktopConfigEnv, dir)
-	srv := httptest.NewServer(newWebUIHandler(newTestStore(t), func() {}))
+	srv := httptest.NewServer(newWebUIHandler(newTestStore(t), func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 

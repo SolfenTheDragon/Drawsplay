@@ -159,7 +159,7 @@ func TestUpdatePendingBecomesLastResult(t *testing.T) {
 }
 
 func TestUpdateAPI(t *testing.T) {
-	srv := httptest.NewServer(newWebUIHandler(newTestStore(t), func() {}))
+	srv := httptest.NewServer(newWebUIHandler(newTestStore(t), func() {}, func() {}))
 	defer srv.Close()
 	res, err := http.Get(srv.URL + "/api/update")
 	if err != nil {

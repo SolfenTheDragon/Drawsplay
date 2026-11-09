@@ -148,11 +148,6 @@ type updater struct {
 
 var hostUpdater = newUpdater()
 
-// exitHost ends the whole host process gracefully (main's root context). An
-// update uses it instead of the web UI's stop, which in Windows tray mode
-// stops only the runtime and leaves the tray process running.
-var exitHost func()
-
 func newUpdater() *updater {
 	return &updater{
 		st: updateStatus{State: updateIdle, Current: hostVersion()},

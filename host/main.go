@@ -109,7 +109,6 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	exitHost = cancel
 
 	// Ctrl+C / SIGTERM triggers a coordinated shutdown of all listeners.
 	go func() {
@@ -125,7 +124,7 @@ func main() {
 		execPendingRestart()
 		return
 	}
-	err := runHostRuntime(ctx, store, cancel)
+	err := runHostRuntime(ctx, store, cancel, cancel)
 	releaseVirtualDisplaysOnExit()
 	if err != nil {
 		log.Fatalf("%v", err)

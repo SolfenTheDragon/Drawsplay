@@ -42,8 +42,8 @@ var webuiFS embed.FS
 
 // runWebUI serves the settings UI until ctx is cancelled. Best-effort like
 // the video listener: a busy port disables the UI but the host keeps working.
-// stop triggers a graceful process shutdown (the /api/stop endpoint).
-func runWebUI(ctx context.Context, store *settingsStore, stop func()) {
+// stop and exit are as for newWebUIHandler.
+func runWebUI(ctx context.Context, store *settingsStore, stop, exit func()) {
 	addr := fmt.Sprintf("127.0.0.1:%d", webuiPort)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -53,7 +53,7 @@ func runWebUI(ctx context.Context, store *settingsStore, stop func()) {
 	log.Printf("Web UI on http://%s", addr)
 
 	server := &http.Server{
-		Handler:           newWebUIHandler(store, stop),
+		Handler:           newWebUIHandler(store, stop, exit),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {

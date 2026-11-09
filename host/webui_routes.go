@@ -15,12 +15,14 @@ type webUIAPI struct {
 	store     *settingsStore
 	csrfToken string
 	stop      func()
+	exit      func()
 }
 
 // newWebUIHandler builds the web UI routes (separate from runWebUI so tests
 // can drive the handler with httptest). stop is invoked, shortly after the
-// response is written, by POST /api/stop.
-func newWebUIHandler(store *settingsStore, stop func()) http.Handler {
+// response is written, by POST /api/stop. exit ends the whole host process
+// gracefully, for an update to restart it.
+func newWebUIHandler(store *settingsStore, stop, exit func()) http.Handler {
 	mux := http.NewServeMux()
 	csrfToken := newCSRFToken()
 
@@ -30,7 +32,7 @@ func newWebUIHandler(store *settingsStore, stop func()) http.Handler {
 	}
 	mux.Handle("/", http.FileServer(http.FS(static)))
 
-	api := webUIAPI{store: store, csrfToken: csrfToken, stop: stop}
+	api := webUIAPI{store: store, csrfToken: csrfToken, stop: stop, exit: exit}
 	api.register(mux)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,11 +91,7 @@ func (api webUIAPI) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api webUIAPI) handleUpdateInstall(w http.ResponseWriter, _ *http.Request) {
-	stop := api.stop
-	if exitHost != nil {
-		stop = exitHost
-	}
-	if err := hostUpdater.startInstall(stop); err != nil {
+	if err := hostUpdater.startInstall(api.exit); err != nil {
 		httpError(w, http.StatusConflict, "%v", err)
 		return
 	}

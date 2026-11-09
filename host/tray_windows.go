@@ -23,7 +23,8 @@ type trayRuntimeController struct {
 	done   chan struct{}
 }
 
-func (c *trayRuntimeController) start(parent context.Context, store *settingsStore) bool {
+// exit ends the whole process (the tray included), for an update.
+func (c *trayRuntimeController) start(parent context.Context, store *settingsStore, exit func()) bool {
 	c.mu.Lock()
 	if c.cancel != nil {
 		c.mu.Unlock()
@@ -37,7 +38,7 @@ func (c *trayRuntimeController) start(parent context.Context, store *settingsSto
 
 	go func() {
 		defer close(done)
-		if err := runHostRuntime(ctx, store, func() { c.stop() }); err != nil && ctx.Err() == nil {
+		if err := runHostRuntime(ctx, store, func() { c.stop() }, exit); err != nil && ctx.Err() == nil {
 			log.Printf("Host runtime stopped with error: %v", err)
 		}
 		c.mu.Lock()
@@ -79,7 +80,7 @@ func runBackgroundTrayController(background bool, parent context.Context, cancel
 	}
 
 	ctrl := &trayRuntimeController{}
-	ctrl.start(parent, store)
+	ctrl.start(parent, store, cancel)
 
 	var (
 		menuStatus *systray.MenuItem
@@ -140,7 +141,7 @@ func runBackgroundTrayController(background bool, parent context.Context, cancel
 				case <-menuOpen.ClickedCh:
 					openSettingsWebUI()
 				case <-menuStart.ClickedCh:
-					if ctrl.start(parent, store) {
+					if ctrl.start(parent, store, cancel) {
 						log.Printf("Host runtime started from tray")
 					}
 					updateMenu()
