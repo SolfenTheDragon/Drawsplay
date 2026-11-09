@@ -6,6 +6,8 @@ $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 if ($Version) {
     $version = $Version.TrimStart('v')
+    # Built into dd-host, which reports it in its status file (unset: "dev").
+    $env:DRAWSPLAY_VERSION = "v$version"
 } else {
     $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
 }

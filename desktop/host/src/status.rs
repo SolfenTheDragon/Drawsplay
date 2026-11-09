@@ -62,12 +62,20 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
+/// The release tag ("v1.2.3") when the build set DRAWSPLAY_VERSION, as the
+/// release scripts do; "dev" otherwise. The Go host and the Android app report
+/// their versions the same way.
+const VERSION: &str = match option_env!("DRAWSPLAY_VERSION") {
+    Some(v) => v,
+    None => "dev",
+};
+
 /// Start publishing. `dir` is the host's config folder.
 pub fn init(dir: &Path, listen: &str, encoder: &str, source: &str) {
     let st = State {
         dir: dir.to_path_buf(),
         listen: listen.to_string(),
-        version: env!("CARGO_PKG_VERSION"),
+        version: VERSION,
         default_encoder: encoder.to_string(),
         source: source.to_string(),
         sessions: Vec::new(),

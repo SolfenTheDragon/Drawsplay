@@ -7,6 +7,10 @@ set -eu
 cd "$(dirname "$0")/.."
 version=${1:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}
 version=${version#v}
+# Built into dd-host, which reports it in its status file (unset: "dev").
+if [ -n "${1:-}" ]; then
+    export DRAWSPLAY_VERSION="v$version"
+fi
 if [ -n "${TARGET:-}" ]; then
     cargo build --release --locked --target "$TARGET"
     bin="${CARGO_TARGET_DIR:-target}/$TARGET/release"
