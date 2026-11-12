@@ -2,12 +2,17 @@ name: CI
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
@@ -33,6 +38,12 @@ jobs:
       - name: Test external USB measurement tooling
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/usb_baseline -p 'test_*.py' -v
 
+      - name: Test Linux installer dependency detection
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Test browser calibration
+        run: node --test host/webui_calibration_test.cjs
+
   host:
     runs-on: ubuntu-latest
     defaults:
@@ -41,6 +52,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
@@ -81,15 +94,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup Rust
-        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --component clippy
+          rustup override set 1.90.0
 
       - name: Install build libraries and ffmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ffmpeg pkg-config libx11-dev libxkbcommon-dev \
-            libwayland-dev libxcursor-dev libxi-dev libxrandr-dev libxdo-dev libxtst-dev libudev-dev
+            libwayland-dev libxcursor-dev libxi-dev libxrandr-dev libxdo-dev libxtst-dev libudev-dev \
+            xvfb xauth xdotool
 
       - name: Check formatting
         run: cargo fmt --check
@@ -100,6 +118,9 @@ jobs:
       - name: Test DrawSplay Desktop
         run: cargo test --release --locked
 
+      - name: Test X11 scroll forwarding
+        run: xvfb-run -a env DD_TEST_X11_SCROLL=1 cargo test --release --locked -p dd-client --test x11_scroll -- --ignored
+
   host-windows:
     runs-on: windows-latest
     defaults:
@@ -108,11 +129,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: host/go.mod
+
+      - name: Setup NuGet
+        uses: nuget/setup-nuget@d105a947828025cd7a980103c35ba2bfae586d0f # v2.0.2
+
+      - name: Build the Windows virtual display driver
+        working-directory: .
+        run: .\scripts\build-idd-driver.ps1 -RequireBuild
 
       - name: Test host (windows)
         run: go test ./...
@@ -129,6 +159,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install build libraries
         run: |
@@ -147,6 +179,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
