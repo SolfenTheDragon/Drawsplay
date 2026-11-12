@@ -1,0 +1,13 @@
+# Lets the user logged in at this computer create virtual pens, touchscreens and keyboards through
+# /dev/uinput. Both the DrawSplay host (Android tablets) and DrawSplay Desktop's dd-host inject input
+# this way, and both installers install this same file.
+#
+# "uaccess" grants access to the active local session only, through an ACL that systemd-logind adds
+# and removes; nobody needs to join a group. Do not put users in the "input" group for this: that
+# group can also read every keyboard and mouse on the machine (keystrokes included). Only if the host
+# must run without a local login session (over ssh, as a system service) give /dev/uinput to a group
+# of your own instead, for example:
+#   KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="drawsplay-uinput", MODE="0660", OPTIONS+="static_node=uinput"
+#
+# Install: sudo install -m 0644 99-drawsplay-uinput.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger --name-match=uinput
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

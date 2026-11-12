@@ -28,7 +28,8 @@
 //     forwarded as small cursor frames (kind 4) for the tablet to draw, so
 //     cursor motion costs no encode and never waits behind a video frame.
 //
-// Output and control protocol are those of native/drawsplay-media (Linux):
+// Output and control protocol are those of native/drawsplay-media (Linux),
+// specified in FUNCTIONALITY.md section 3.5:
 // stdout carries frames with a 16-byte little-endian header
 //   u32 payload length, u8 kind (1 = H.264 access unit), u8 flags
 //   (1 = keyframe), u16 reserved, u32 input sequence, u32 pipeline us
@@ -68,6 +69,7 @@
 #include <cstring>
 #include <deque>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -1064,13 +1066,15 @@ int RunSelftest(const Options& o)
             FAILED(conv.Init(g, tex.Get(), w, h, w, h, o.fps))) {
             continue;
         }
-        Encoder enc;
+        auto encoder = std::make_shared<Encoder>();
+        Encoder& enc = *encoder;
         if (FAILED(CreateEncoder(g, d.AdapterLuid, w, h, o.fps, o.kbps, o.gop, 8, enc, o.intraRefresh,
                 o.keyframesOnDemand))) continue;
         Log("selftest: %s on %s (%s, intra refresh %s, %s)", enc.name.c_str(), g.description.c_str(),
             enc.async ? "async" : "sync", enc.intraRefresh ? "on" : "unsupported/off",
             (enc.intraRefresh || o.keyframesOnDemand) ? "keyframes on request" : "periodic keyframes");
-        if (enc.async) std::thread([&enc] { enc.EventLoop(); }).detach();
+        // A blocked MFT worker must retain its state until ExitProcess.
+        if (enc.async) std::thread([encoder] { encoder->EventLoop(); }).detach();
 
         // Long enough to span the periodic-keyframe interval (2 s at 60 fps).
         // DRAWSPLAY_SELFTEST_SPACING_MS paces submissions like a mostly
@@ -1208,7 +1212,8 @@ int RunCapture(const Options& o)
         Log("GPU colour conversion unavailable (0x%08lx)", (unsigned long)hr);
         return 1;
     }
-    Encoder enc;
+    auto encoder = std::make_shared<Encoder>();
+    Encoder& enc = *encoder;
     const int pool = std::max(o.maxInflight, 4) + 4;
     if (FAILED(hr = CreateEncoder(g, luid, encW, encH, o.fps, o.kbps, o.gop, pool, enc, o.intraRefresh,
                    o.keyframesOnDemand))) {
@@ -1221,7 +1226,7 @@ int RunCapture(const Options& o)
         (enc.intraRefresh || o.keyframesOnDemand) ? "keyframes on request" : "periodic keyframes");
 
     std::thread(StdinThread).detach();
-    if (enc.async) std::thread([&enc] { enc.EventLoop(); }).detach();
+    if (enc.async) std::thread([encoder] { encoder->EventLoop(); }).detach();
 
     std::vector<int64_t> sendUs(kSendRing, 0);
     WindowedMin rtt;

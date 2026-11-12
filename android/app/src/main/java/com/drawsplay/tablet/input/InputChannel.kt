@@ -1,4 +1,4 @@
-﻿package com.drawsplay.tablet.input
+package com.drawsplay.tablet.input
 
 import com.drawsplay.tablet.video.EchoTracker
 import android.os.Build
@@ -10,7 +10,6 @@ import com.drawsplay.tablet.transport.AccessoryFraming
 import com.drawsplay.tablet.transport.AccessoryTransport
 import com.drawsplay.tablet.transport.HostEndpoint
 import com.drawsplay.tablet.transport.HostEndpointSelector
-import com.drawsplay.tablet.transport.TlsSocketFactory
 import com.drawsplay.tablet.transport.UsbMuxFrameCodec
 import org.json.JSONArray
 import org.json.JSONObject
@@ -42,10 +41,6 @@ class InputChannel(
         fun onSessionPolicy(
             keepAliveOnBackground: Boolean,
             videoScaling: String,
-            wifiEnabled: Boolean,
-            wifiAuthToken: String,
-            wifiTlsRequired: Boolean,
-            wifiTlsFingerprint: String,
             penPrediction: Boolean,
             penInkPreview: Boolean
         )
@@ -166,21 +161,10 @@ class InputChannel(
                         CONNECT_TIMEOUT_MS.toLong()
                     )
                 }
-                if (endpoint.tls && endpoint.tlsFingerprintSha256.isNotBlank()) {
-                    TlsSocketFactory.connectPinned(
-                        endpoint.host,
-                        endpoint.inputPort,
-                        CONNECT_TIMEOUT_MS,
-                        endpoint.tlsFingerprintSha256,
-                        sendBufferSize = 128 * 1024,
-                        receiveBufferSize = 128 * 1024
-                    )
-                } else {
-                    Socket().apply {
-                        sendBufferSize = 128 * 1024
-                        receiveBufferSize = 128 * 1024
-                        connect(InetSocketAddress(endpoint.host, endpoint.inputPort), CONNECT_TIMEOUT_MS)
-                    }
+                Socket().apply {
+                    sendBufferSize = 128 * 1024
+                    receiveBufferSize = 128 * 1024
+                    connect(InetSocketAddress(endpoint.host, endpoint.inputPort), CONNECT_TIMEOUT_MS)
                 }.apply {
                     tcpNoDelay = true
                     keepAlive = true
@@ -309,10 +293,6 @@ class InputChannel(
                 "sessionPolicy" -> listener.onSessionPolicy(
                     obj.optBoolean("keepAliveOnBackground", false),
                     obj.optString("videoScaling", ""),
-                    obj.optBoolean("wifiEnabled", false),
-                    obj.optString("wifiAuthToken", ""),
-                    obj.optBoolean("wifiTlsRequired", false),
-                    obj.optString("wifiTlsFingerprint", ""),
                     obj.optBoolean("penPrediction", false),
                     // Hosts without the setting predate the preview's
                     // reconciliation support: keep it off for them.
@@ -417,7 +397,6 @@ class InputChannel(
 
     private fun buildHelloPayload(): ByteArray {
         val info = displayInfo
-        val endpoint = activeEndpoint
         val obj = JSONObject().apply {
             put("type", "hello")
             put("device", "${Build.MANUFACTURER} ${Build.MODEL}")
@@ -452,9 +431,6 @@ class InputChannel(
             put("videoFeatures", JSONArray().put("tile1").put("meta1").put("ack1").put("cursor1"))
             put("inputProtocol", "mux-v1")
             put("timestamp", System.currentTimeMillis())
-            if (!endpoint?.authToken.isNullOrBlank()) {
-                put("authToken", endpoint?.authToken)
-            }
         }
         return obj.toString().toByteArray(Charsets.UTF_8)
     }

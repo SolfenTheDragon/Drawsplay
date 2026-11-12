@@ -1,0 +1,18 @@
+Shared protocol test vectors.
+
+Each file here pins one wire or file format that more than one program
+implements. The tests of every implementation load the same file, so a change
+on one side that the others do not follow fails a test instead of a session.
+
+  aoa-frames.vectors     USB accessory link frames    Go host, Android app
+  mux-frames.vectors     input-channel mux frames     Go host, Android app
+  idd-ioctl.vectors      virtual display driver API   Go host, dd-host (and Public.h)
+  display-claims.json    shared display claims file   Go host, dd-host
+  desktop-status.json    dd-host status.json          dd-host writes, Go host reads
+
+.vectors files hold one case per line: a name, then key=value pairs (hex in
+lowercase, "-" for empty). Lines starting with # are comments. The format is
+plain so that every language reads it without a JSON library.
+
+To change a format: change the vectors first, then every implementation, and
+describe the change in FUNCTIONALITY.md section 3.

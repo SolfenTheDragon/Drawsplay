@@ -72,7 +72,7 @@ func TestIsInstallerExeName(t *testing.T) {
 	}
 }
 
-func TestPathInsideDir(t *testing.T) {
+func TestPathWithin(t *testing.T) {
 	dir := filepath.Join("base", "DrawSplay")
 	cases := []struct {
 		path string
@@ -85,8 +85,8 @@ func TestPathInsideDir(t *testing.T) {
 		{"", false},
 	}
 	for _, c := range cases {
-		if got := pathInsideDir(c.path, dir); got != c.want {
-			t.Errorf("pathInsideDir(%q) = %v, want %v", c.path, got, c.want)
+		if got := pathWithin(c.path, dir); got != c.want {
+			t.Errorf("pathWithin(%q) = %v, want %v", c.path, got, c.want)
 		}
 	}
 }

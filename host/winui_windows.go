@@ -9,6 +9,7 @@ package main
 // terminal, the host attaches to that terminal's console for its output.
 
 import (
+	"context"
 	"log"
 	"os"
 	"os/exec"
@@ -120,4 +121,16 @@ func schtasksPath() string { return system32Path("schtasks.exe") }
 
 func windowsPowerShellPath() string {
 	return system32Path(filepath.Join("WindowsPowerShell", "v1.0", "powershell.exe"))
+}
+
+// powerShellCommand runs script in Windows PowerShell with no profile, no
+// prompts and no console window. env adds NAME=value pairs; scripts read
+// paths from the environment so they never need quoting into the script.
+func powerShellCommand(ctx context.Context, script string, env ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	hideChildWindow(cmd)
+	return cmd
 }

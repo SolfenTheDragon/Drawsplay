@@ -85,8 +85,16 @@ for f in \
   /etc/udev/rules.d/70-drawsplay-drm-connector.rules \
   /etc/udev/rules.d/99-drawsplay-uinput.rules \
   /etc/modules-load.d/drawsplay-vkms.conf \
-  /etc/modprobe.d/drawsplay-vkms.conf; do
-  [[ -e "$f" ]] && SYSTEM_FILES+=("$f")
+  /etc/modprobe.d/drawsplay-vkms.conf \
+  /usr/libexec/drawsplay/drawsplay-display-helper \
+  /usr/share/polkit-1/actions/com.drawsplay.display-helper.policy; do
+  [[ -e "$f" ]] || continue
+  # DrawSplay Desktop's dd-host uses the same uinput rule; keep it while dd-host is installed.
+  if [[ "$f" == */99-drawsplay-uinput.rules ]] && { command -v dd-host >/dev/null 2>&1 || [[ -x "$HOME/.local/bin/dd-host" ]]; }; then
+    echo "Keeping $f: DrawSplay Desktop (dd-host) uses it too."
+    continue
+  fi
+  SYSTEM_FILES+=("$f")
 done
 
 # A forced port is connected with no monitor identity (no EDID) behind it. It
@@ -112,7 +120,7 @@ for a in "$@"; do
   if [[ "$a" == "--" ]]; then seen=1; continue; fi
   if [[ "$seen" -eq 0 ]]; then
     case "$a" in
-      /etc/udev/rules.d/70-drawsplay-aoa.rules|/etc/udev/rules.d/70-drawsplay-drm-connector.rules|/etc/udev/rules.d/99-drawsplay-uinput.rules|/etc/modules-load.d/drawsplay-vkms.conf|/etc/modprobe.d/drawsplay-vkms.conf) files+=("$a") ;;
+      /etc/udev/rules.d/70-drawsplay-aoa.rules|/etc/udev/rules.d/70-drawsplay-drm-connector.rules|/etc/udev/rules.d/99-drawsplay-uinput.rules|/etc/modules-load.d/drawsplay-vkms.conf|/etc/modprobe.d/drawsplay-vkms.conf|/usr/libexec/drawsplay/drawsplay-display-helper|/usr/share/polkit-1/actions/com.drawsplay.display-helper.policy) files+=("$a") ;;
       *) echo "refusing unexpected path: $a" >&2; exit 2 ;;
     esac
   else
@@ -123,6 +131,7 @@ done
 for p in "${ports[@]}"; do echo detect >"$p"; done
 if [[ ${#files[@]} -gt 0 ]]; then
   rm -f "${files[@]}"
+  rmdir /usr/libexec/drawsplay 2>/dev/null
   udevadm control --reload-rules
   udevadm trigger --subsystem-match=drm --subsystem-match=usb --action=change
   for f in "${files[@]}"; do
@@ -167,7 +176,7 @@ if [[ "$PURGE" -eq 1 ]]; then
 else
   echo "DrawSplay settings and logs were kept in ${CONFIG_DIR}/DrawSplay (run with --purge to delete them)."
 fi
-echo "Group memberships added by the installer (input, plugdev) are kept; remove them with: sudo gpasswd -d \$USER <group>"
+echo "Group memberships added by the installer (plugdev; older versions also input) are kept; remove them with: sudo gpasswd -d \$USER <group>"
 
 # --- Restart prompt ----------------------------------------------------------
 # Kernel modules and display state DrawSplay touched (for example vkms while

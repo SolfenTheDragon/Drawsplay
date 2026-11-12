@@ -35,7 +35,14 @@ func fakeSysfsDRM(t *testing.T, status string, edid []byte) (statusFile string) 
 	os.WriteFile(filepath.Join(vc, "status"), []byte("disconnected\n"), 0o644)
 	prev := sysfsDRMDir
 	sysfsDRMDir = filepath.Join(root, "class", "drm")
-	t.Cleanup(func() { sysfsDRMDir = prev })
+	// Claims must not leak to or from a host running on the test machine.
+	claims := filepath.Join(root, "claims")
+	prevClaims := displayClaimsDir
+	displayClaimsDir = func() string { return claims }
+	t.Cleanup(func() {
+		sysfsDRMDir = prev
+		displayClaimsDir = prevClaims
+	})
 	return statusFile
 }
 

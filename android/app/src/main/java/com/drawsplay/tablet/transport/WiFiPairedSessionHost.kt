@@ -34,6 +34,7 @@ class WiFiPairedSessionHost(
     private val onStreaming: (Boolean) -> Unit = {},
     private val onStatus: (PairedConnectionStatus) -> Unit = {},
     private val onPictureReady: () -> Unit = {},
+    private val onVideoSize: (Int, Int) -> Unit = { _, _ -> },
     private val wifiAllowed: () -> Boolean
 ) {
     private val app = context.applicationContext
@@ -131,7 +132,7 @@ class WiFiPairedSessionHost(
                 serviceName = "DrawSplay-${Build.MODEL}".take(48)
                 serviceType = "_drawsplay-tablet._tcp."
                 port = control.localPort
-                if (Build.VERSION.SDK_INT >= 33) setNetwork(network)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setNetwork(network)
                 setAttribute("v", "2")
                 setAttribute("videoPort", video.localPort.toString())
                 setAttribute("pairing", "0")
@@ -160,7 +161,8 @@ class WiFiPairedSessionHost(
             // The attach record used video-socket sequence 1; stats records continue from 2.
             val statsLink = WiFiControlLink(media.inputStream, media.outputStream, established.epoch)
             WiFiVideoPlayer.run(media.inputStream, { resources.close() }, link, established.limits, established.epoch, target, statsLink, linkProbe::sample,
-                onPictureReady = { post(run, resources) { onPictureReady() } }) {
+                onPictureReady = { post(run, resources) { onPictureReady() } },
+                onVideoSize = { width, height -> post(run, resources) { onVideoSize(width, height) } }) {
                 !run.isActive || !wifiAllowed()
             }
         } finally {
@@ -206,7 +208,7 @@ class WiFiPairedSessionHost(
     }
 
     companion object {
-        private const val TAG = "WiFiPairedHost"
+        private const val TAG = "WiFiPairedSessionHost"
         private const val IDLE_MS = 3000L
         private const val RETRY_MS = 2000L
         private const val WATCH_MS = 1000L

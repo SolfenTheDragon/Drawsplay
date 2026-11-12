@@ -32,6 +32,7 @@
             android:id="@+id/inputPad"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
+            android:defaultFocusHighlightEnabled="false"
             android:background="@android:color/transparent" />
 
     </FrameLayout>
@@ -72,18 +73,20 @@
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:accessibilityLiveRegion="polite"
-                android:text="@string/status_waiting_for_host"
+                android:text="@string/headline_waiting"
                 android:textColor="@color/ds_text"
-                android:textSize="18sp"
+                android:textSize="26sp"
                 android:textStyle="bold" />
 
             <TextView
+                android:id="@+id/statusDetail"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="12dp"
+                android:accessibilityLiveRegion="polite"
                 android:gravity="center"
-                android:text="@string/usb_setup_help"
-                android:textColor="@color/ds_text"
+                android:text="@string/status_waiting_for_host"
+                android:textColor="@color/ds_muted"
                 android:textSize="16sp" />
 
             <Button
@@ -97,21 +100,21 @@
 
             <Button
                 android:id="@+id/wifiConnectButton"
-                android:layout_width="wrap_content"
+                style="@style/DrawSplay.PrimaryButton"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="24dp"
-                android:background="@drawable/ds_button_secondary"
                 android:minHeight="48dp"
                 android:paddingHorizontal="20dp"
                 android:paddingVertical="10dp"
                 android:stateListAnimator="@null"
                 android:text="@string/wifi_connect"
                 android:textAllCaps="false"
-                android:textColor="@color/ds_button_text"
                 android:textStyle="bold" />
 
             <Button
                 android:id="@+id/wifiForgetButton"
+                style="@style/DrawSplay.SecondaryButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
@@ -124,6 +127,62 @@
                 android:textAllCaps="false"
                 android:textColor="@color/ds_button_text"
                 android:visibility="gone" />
+
+            <Button
+                android:id="@+id/usbHelpToggle"
+                style="@style/DrawSplay.SecondaryButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/help_show" />
+
+            <TextView
+                android:id="@+id/usbHelpDetails"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:gravity="center"
+                android:text="@string/usb_setup_help"
+                android:visibility="gone"
+                android:textColor="@color/ds_text"
+                android:textSize="16sp" />
+
+            <!-- App update (update/AppUpdater.kt); hidden when there is none. -->
+            <LinearLayout
+                android:id="@+id/updateCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:background="@drawable/ds_panel"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/updateText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite"
+                    android:textColor="@color/ds_text"
+                    android:textSize="16sp" />
+
+                <ProgressBar
+                    android:id="@+id/updateProgress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:max="100"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/updateButton"
+                    style="@style/DrawSplay.SecondaryButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:visibility="gone" />
+            </LinearLayout>
         </LinearLayout>
         </ScrollView>
 
@@ -152,7 +211,7 @@
                 android:letterSpacing="0.13"
                 android:text="@string/wifi_eyebrow"
                 android:textColor="@color/ds_muted"
-                android:textSize="11sp"
+                android:textSize="12sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -162,14 +221,14 @@
                 android:layout_marginTop="4dp"
                 android:text="@string/wifi_title"
                 android:textColor="@color/ds_text"
-                android:textSize="20sp"
+                android:textSize="24sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="@string/wifi_hint"
+                android:text="@string/wifi_quick_start"
                 android:textColor="@color/ds_muted"
                 android:textSize="16sp" />
 
@@ -222,11 +281,13 @@
                 android:maxLength="8"
                 android:padding="12dp"
                 android:singleLine="true"
+                android:textSize="18sp"
                 android:textColor="@color/ds_text"
                 android:textColorHint="@color/ds_muted" />
 
             <Button
                 android:id="@+id/wifiPairSubmit"
+                style="@style/DrawSplay.PrimaryButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
@@ -249,7 +310,26 @@
                 android:visibility="gone" />
 
             <Button
+                android:id="@+id/wifiHelpToggle"
+                style="@style/DrawSplay.SecondaryButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/help_show" />
+
+            <TextView
+                android:id="@+id/wifiHelpDetails"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/wifi_hint"
+                android:textColor="@color/ds_muted"
+                android:textSize="16sp"
+                android:visibility="gone" />
+
+            <Button
                 android:id="@+id/wifiPairClose"
+                style="@style/DrawSplay.SecondaryButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"

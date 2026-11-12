@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -12,6 +13,8 @@ import (
 func init() {
 	// Tests must never read the real kernel log or the user's guard file.
 	vkmsKernelLogFn = func() bool { return false }
+	vkmsPostLoadCheck = func() bool { return false }
+	readKernelLogFn = func() (string, bool) { return "", false }
 	displayGuardDir = func() (string, error) { return os.TempDir() + "/drawsplay-guard-test-unused", nil }
 }
 
@@ -142,8 +145,92 @@ func TestKernelLogDenialLastsUntilKernelChanges(t *testing.T) {
 	if _, denied := displayGuardDenied(guardMethodVkms); !denied {
 		t.Fatal("a kernel-proven failure must outlast the usual expiry on the same kernel")
 	}
+	// A point update ships the same DRM code: the display must not be
+	// taken down again to find that out.
 	kernelReleaseFn = func() string { return "7.0.0-1018-oem" }
+	if _, denied := displayGuardDenied(guardMethodVkms); !denied {
+		t.Fatal("a kernel point update must keep the denial")
+	}
+	kernelReleaseFn = func() string { return "7.1.0-1001-oem" }
 	if _, denied := displayGuardDenied(guardMethodVkms); denied {
-		t.Fatal("a kernel update must end the denial")
+		t.Fatal("a new kernel series must end the denial")
+	}
+}
+
+func TestKernelSeries(t *testing.T) {
+	for in, want := range map[string]string{
+		"7.0.0-1018-oem":    "7.0",
+		"7.0.0-1017-oem":    "7.0",
+		"6.14.0-29-generic": "6.14",
+		"7.1-rc3":           "7.1",
+		"7":                 "7",
+		"":                  "",
+	} {
+		if got := kernelSeries(in); got != want {
+			t.Errorf("kernelSeries(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// withKernelLogTest wires readKernelLogFn to text and resets the cache.
+func withKernelLogTest(t *testing.T, text *string) {
+	t.Helper()
+	withGuardTest(t)
+	vkmsKernelLogFn = vkmsKernelLogShowsFailure
+	oldRead := readKernelLogFn
+	readKernelLogFn = func() (string, bool) { return *text, true }
+	vkmsLogCache.mu.Lock()
+	vkmsLogCache.checked, vkmsLogCache.failed = time.Time{}, false
+	vkmsLogCache.mu.Unlock()
+	t.Cleanup(func() {
+		readKernelLogFn = oldRead
+		vkmsLogCache.mu.Lock()
+		vkmsLogCache.checked, vkmsLogCache.failed = time.Time{}, false
+		vkmsLogCache.mu.Unlock()
+	})
+}
+
+func TestVkmsKernelLogRecheckBypassesTheCleanCache(t *testing.T) {
+	text := "kernel: [drm] Initialized vkms 1.0.0\n"
+	withKernelLogTest(t, &text)
+	if vkmsKernelLogShowsFailure() {
+		t.Fatal("a clean log must not block vkms")
+	}
+	// The failure arrives a second after the load, well inside the cache window.
+	text += "kernel:  vkms_prepare_fb+0x50/0x60 [vkms]\n"
+	if vkmsKernelLogShowsFailure() {
+		t.Fatal("the once-a-minute check is expected to still report the cached result")
+	}
+	if !vkmsKernelLogRecheck() {
+		t.Fatal("the post-load recheck must read the log again")
+	}
+	if !vkmsKernelLogShowsFailure() {
+		t.Fatal("a failure must stick")
+	}
+	reason, denied := displayGuardDenied(guardMethodVkms)
+	if !denied || !strings.Contains(reason, "vkms_prepare_fb") {
+		t.Fatalf("the failure must be recorded as a denial, got %q, %v", reason, denied)
+	}
+}
+
+func TestVkmsKernelLogPreviousBootFailureBlocksBeforeLoading(t *testing.T) {
+	// The module is not loaded in this boot (the user rebooted after the
+	// freeze), but the previous boot's log carries the trace.
+	text := "kernel: Linux version 7.0.0-1018-oem\n\nkernel:  vkms_prepare_fb+0x50/0x60 [vkms]\n"
+	withKernelLogTest(t, &text)
+	if !vkmsBlocked() {
+		t.Fatal("a failure in the previous boot's log must block vkms before it is loaded again")
+	}
+}
+
+func TestVkmsKernelLogUnreadableIsNotCached(t *testing.T) {
+	text := ""
+	withKernelLogTest(t, &text)
+	reads := 0
+	readKernelLogFn = func() (string, bool) { reads++; return "", false }
+	vkmsKernelLogShowsFailure()
+	vkmsKernelLogShowsFailure()
+	if reads != 2 {
+		t.Fatalf("an unreadable log must be retried, reads = %d", reads)
 	}
 }

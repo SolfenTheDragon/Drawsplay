@@ -96,7 +96,7 @@ currently accepts installed APKs under `/data/app/`; adopted/external
 storage layouts fail explicitly. Older Android versions may not expose
 the required RSS totals/procfs; failure is not a zero-memory result.
 
-Follow [the design's measurement contract](../../docs/wifi-design.md#33-baseline-preparation-not-a-fabricated-phase-0-pass).
+Follow the design's measurement contract (`docs/wifi-design.md`, section 3.3, a maintainer note).
 Run matched fixed-workload trials and preserve rejected windows. Do not
 replace the known-good installed app/host merely to match source revision.
 Windows collection, optical/input instrumentation, automated controlled

@@ -1,4 +1,4 @@
-﻿package com.drawsplay.tablet.video
+package com.drawsplay.tablet.video
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals

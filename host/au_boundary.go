@@ -2,7 +2,7 @@ package main
 
 // Early emission of each frame's last NAL unit.
 //
-// splitAnnexB can only call a NAL unit complete once the next start code has
+// h264.Split can only call a NAL unit complete once the next start code has
 // arrived, and the next start code belongs to the next frame. So every
 // frame's final NAL unit (the slice, i.e. nearly all of the frame) used to
 // wait on the host for a whole frame period, 16.7 ms at 60 fps, before being
@@ -30,6 +30,7 @@ package main
 // surfaces as errAccessUnitResync.
 
 import (
+	"drawsplay/host/internal/h264"
 	"errors"
 	"io"
 	"sync/atomic"
@@ -121,22 +122,22 @@ func newAccessUnitTracker(writeChunk int) *accessUnitTracker {
 	return &accessUnitTracker{writeChunk: int64(writeChunk), observed: -1}
 }
 
-// split is splitAnnexB for a buffer whose last added bytes were just read;
+// split is h264.Split for a buffer whose last added bytes were just read;
 // boundary reports that the read provably ended at a write boundary. When
 // that boundary ends an access unit, the trailing NAL unit is returned as the
 // last of units and rest is nil.
 func (t *accessUnitTracker) split(buf []byte, added int, boundary bool) (units [][]byte, rest []byte, err error) {
 	t.end += int64(added)
 	if t.verify {
-		switch leadingStartCode(buf) {
-		case startCodeIncomplete:
+		switch h264.LeadingStartCode(buf) {
+		case h264.StartCodeIncomplete:
 			return nil, buf, nil
-		case startCodeAbsent:
+		case h264.StartCodeAbsent:
 			return nil, nil, errAccessUnitResync
 		}
 		t.verify = false
 	}
-	units, rest = splitAnnexB(buf)
+	units, rest = h264.Split(buf)
 	offset := t.end - int64(len(rest))
 	for _, unit := range units {
 		offset -= int64(len(unit))
@@ -173,7 +174,7 @@ func (t *accessUnitTracker) observe(unit []byte, off int64) bool {
 	if off <= t.observed {
 		return off == t.observed
 	}
-	h := annexBNALHeaderOffset(unit)
+	h := h264.HeaderOffset(unit)
 	if h < 0 {
 		return false
 	}
@@ -183,7 +184,7 @@ func (t *accessUnitTracker) observe(unit []byte, off int64) bool {
 		return false // first_mb_in_slice has not arrived yet
 	}
 	t.observed = off
-	if t.sawVCL && opensAccessUnit(nalType, unit[h+1:]) {
+	if t.sawVCL && h264.OpensAccessUnit(nalType, unit[h+1:]) {
 		t.auStart = off
 		t.sawVCL = false
 	}
@@ -191,44 +192,4 @@ func (t *accessUnitTracker) observe(unit []byte, off int64) bool {
 		t.sawVCL = true
 	}
 	return true
-}
-
-// opensAccessUnit reports whether a NAL unit of nalType that follows a slice of
-// the current picture starts a new access unit (H.264 7.4.1.2.3): SEI, SPS,
-// PPS, access unit delimiter, types 14-18, or the first slice of the next
-// picture. A slice is first when first_mb_in_slice is 0, whose ue(v) code is a
-// single 1 bit at the start of the payload.
-func opensAccessUnit(nalType byte, payload []byte) bool {
-	switch {
-	case nalType >= 6 && nalType <= 9, nalType >= 14 && nalType <= 18:
-		return true
-	case nalType == 1 || nalType == 5:
-		return len(payload) > 0 && payload[0]&0x80 != 0
-	}
-	return false
-}
-
-type startCodeCheck int
-
-const (
-	startCodePresent startCodeCheck = iota
-	startCodeIncomplete
-	startCodeAbsent
-)
-
-// leadingStartCode classifies how buf opens: with a start code (two or more
-// zero bytes, then 0x01), possibly with one (zero bytes only, so far), or not.
-func leadingStartCode(buf []byte) startCodeCheck {
-	zeros := 0
-	for zeros < len(buf) && buf[zeros] == 0 {
-		zeros++
-	}
-	switch {
-	case zeros == len(buf):
-		return startCodeIncomplete
-	case zeros >= 2 && buf[zeros] == 1:
-		return startCodePresent
-	default:
-		return startCodeAbsent
-	}
 }

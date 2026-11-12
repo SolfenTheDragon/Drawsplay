@@ -4,6 +4,7 @@ package main
 
 import (
 	"archive/zip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,7 +13,6 @@ import (
 	"io"
 	"io/fs"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -53,17 +53,6 @@ type runtimeArchive struct {
 	URL     string
 	SHA256  string
 	Source  string
-}
-
-type githubRelease struct {
-	TagName string        `json:"tag_name"`
-	Assets  []githubAsset `json:"assets"`
-}
-
-type githubAsset struct {
-	Name   string `json:"name"`
-	URL    string `json:"browser_download_url"`
-	Digest string `json:"digest"`
 }
 
 // runtimeManifest records what was installed and the SHA-256 of every
@@ -172,7 +161,7 @@ func latestFFmpegArchives(arch string) ([]runtimeArchive, error) {
 	var found []runtimeArchive
 	var errs []error
 	for _, s := range sources {
-		rel, err := fetchGitHubRelease(s.api)
+		rel, err := fetchGitHubRelease(context.Background(), s.api)
 		if err == nil {
 			var archive runtimeArchive
 			if archive, err = s.choose(rel); err == nil {
@@ -190,28 +179,6 @@ func latestFFmpegArchives(arch string) ([]runtimeArchive, error) {
 	return found, nil
 }
 
-func fetchGitHubRelease(url string) (githubRelease, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return githubRelease{}, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "DrawSplay")
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		return githubRelease{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return githubRelease{}, fmt.Errorf("release lookup failed: %s", resp.Status)
-	}
-	var rel githubRelease
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&rel); err != nil {
-		return githubRelease{}, fmt.Errorf("decode release: %w", err)
-	}
-	return rel, nil
-}
-
 var gyanEssentialsAsset = regexp.MustCompile(`^ffmpeg-(\d+(?:\.\d+)*)-essentials_build\.zip$`)
 
 // selectGyanEssentials picks the essentials zip from gyan's latest release.
@@ -223,7 +190,7 @@ func selectGyanEssentials(rel githubRelease) (runtimeArchive, error) {
 		}
 		return archiveFromAsset(a, m[1])
 	}
-	return runtimeArchive{}, fmt.Errorf("release %s has no essentials zip", rel.TagName)
+	return runtimeArchive{}, fmt.Errorf("release %s has no essentials zip", rel.Tag)
 }
 
 var btbnStableAsset = regexp.MustCompile(`^ffmpeg-n(\d+(?:\.\d+)*)-latest-(win64|winarm64)-gpl-(\d+(?:\.\d+)*)\.zip$`)
@@ -244,7 +211,7 @@ func selectBtbNStable(rel githubRelease, arch string) (runtimeArchive, error) {
 		}
 	}
 	if bestVersion == "" {
-		return runtimeArchive{}, fmt.Errorf("release %s has no stable %s GPL build", rel.TagName, platform)
+		return runtimeArchive{}, fmt.Errorf("release %s has no stable %s GPL build", rel.Tag, platform)
 	}
 	return archiveFromAsset(best, bestVersion)
 }
@@ -368,19 +335,6 @@ func writeRuntimeManifest(dir string, m runtimeManifest) error {
 	return os.WriteFile(filepath.Join(dir, runtimeManifestName), data, 0o644)
 }
 
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 // Runtime auto-download directories are never trusted merely because an
 // executable is present. Verify the executable and its DLLs against the
 // install manifest (or the legacy pinned hashes) before using it.
@@ -390,7 +344,7 @@ func verifyBundledToolCandidate(candidate, tool string) bool {
 		return false
 	}
 	runtimeRoot := filepath.Join(exeDir, "runtime", tool)
-	if !isPathWithin(candidate, runtimeRoot) {
+	if !pathWithin(candidate, runtimeRoot) {
 		return true // packaged, non-auto-downloaded bundle
 	}
 	hashes, err := runtimeExpectedHashes(runtimeRoot, candidate, tool)
@@ -443,32 +397,21 @@ func runtimeExpectedHashes(runtimeRoot, candidate, tool string) (map[string]stri
 	return want, nil
 }
 
+// maxRuntimeArchiveBytes bounds an ffmpeg build download (about 200 MiB today).
+const maxRuntimeArchiveBytes = 1 << 30
+
 func downloadArchive(prefix, url, expectedSHA256 string) (string, error) {
 	tmp, err := os.CreateTemp(os.TempDir(), prefix+"-*.zip")
 	if err != nil {
 		return "", err
 	}
 	tmpPath := tmp.Name()
-
-	client := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := client.Get(url)
+	d := download{URL: url, Allowed: githubURLAllowed, Timeout: 10 * time.Minute, Limit: maxRuntimeArchiveBytes}
+	err = d.to(context.Background(), tmp)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
 	if err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("download failed: %s", resp.Status)
-	}
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return "", err
-	}
-	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
 		return "", err
 	}
@@ -494,7 +437,7 @@ func extractZipSubset(zipPath, destRoot string, mapName func(name string) (rel s
 			continue
 		}
 		target := filepath.Join(destRoot, filepath.FromSlash(rel))
-		if !isPathWithin(target, destRoot) {
+		if !pathWithin(target, destRoot) {
 			return errors.New("archive path traversal attempt blocked")
 		}
 		if err := extractFile(f, target); err != nil {
@@ -503,7 +446,7 @@ func extractZipSubset(zipPath, destRoot string, mapName func(name string) (rel s
 		extractedAny = true
 	}
 	if !extractedAny {
-		return fmt.Errorf("archive did not contain expected files")
+		return errors.New("archive did not contain expected files")
 	}
 	return nil
 }
@@ -527,20 +470,4 @@ func extractFile(f *zip.File, target string) error {
 		return err
 	}
 	return out.Close()
-}
-
-func isPathWithin(path, root string) bool {
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(absRoot, absPath)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

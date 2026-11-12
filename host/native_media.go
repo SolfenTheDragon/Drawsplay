@@ -10,6 +10,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"drawsplay/host/internal/h264"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -54,7 +55,9 @@ const (
 
 var errNativeBadFirstFrame = errors.New("native helper first frame is not a decodable keyframe")
 
-// nativeFrameHeader is the 16-byte header preceding every helper frame.
+// nativeFrameHeader is the 16-byte header preceding every helper frame. The
+// helper protocol is specified in FUNCTIONALITY.md §3.5; both helpers
+// (native/drawsplay-media, native/drawsplay-media-win) implement it.
 type nativeFrameHeader struct {
 	PayloadLen uint32
 	Kind       uint8
@@ -106,46 +109,12 @@ func frameMetaPayload(inputSeq, pipeUs uint32) []byte {
 // decodable stream: SPS, PPS and an IDR slice.
 func auIsDecodableStart(au []byte) bool {
 	seen := 0
-	for _, nal := range splitAnnexBAll(au) {
-		if t := h264NALType(nal); t > 0 && t < 32 {
+	for _, nal := range h264.SplitAll(au) {
+		if t := h264.NALType(nal); t > 0 && t < 32 {
 			seen |= 1 << t
 		}
 	}
 	return seen&nativeFirstFrameNALMask == nativeFirstFrameNALMask
-}
-
-// splitAnnexBAll splits a complete buffer into NAL units, including the
-// trailing one.
-func splitAnnexBAll(b []byte) [][]byte {
-	units, rest := splitAnnexB(b)
-	if tail, ok := flushAnnexBTail(rest); ok {
-		units = append(units, tail)
-	}
-	return units
-}
-
-// Client-advertised video-channel extensions.
-var clientFeatures = struct {
-	sync.RWMutex
-	set map[string]bool
-}{set: map[string]bool{}}
-
-func publishClientVideoFeatures(features []string) {
-	set := make(map[string]bool, len(features))
-	for _, f := range features {
-		if f = strings.ToLower(strings.TrimSpace(f)); f != "" {
-			set[f] = true
-		}
-	}
-	clientFeatures.Lock()
-	clientFeatures.set = set
-	clientFeatures.Unlock()
-}
-
-func clientHasFeature(name string) bool {
-	clientFeatures.RLock()
-	defer clientFeatures.RUnlock()
-	return clientFeatures.set[name]
 }
 
 // Input kicks: after each injected input event the active helper is told to
@@ -173,13 +142,6 @@ func noteInputInjected(seq uint32) {
 // a few frames of latency.
 const nativeMaxInflight = 5
 
-// clientRequestsKeyframes reports whether the tablet asks for a keyframe
-// whenever it drops pictures (clients with frame acks also do that). Native
-// helpers then send keyframes only on request instead of every two seconds:
-// on a lossless link (USB, TCP) a periodic keyframe only adds a periodic
-// burst, several frames in size, to the link and the latency.
-func clientRequestsKeyframes() bool { return clientHasFeature(clientFeatureFrameAck) }
-
 // nativeFlowControlHelperVersion is the first Linux helper version that
 // accepts --max-inflight and frame acks ("A <n>"). Older helper binaries
 // (built separately, see BUILD.md) reject unknown options, so they get the
@@ -188,12 +150,12 @@ const nativeFlowControlHelperVersion = 2
 
 // nativeFlowControlArgs returns the frame-window and keyframe options for a
 // Linux helper of the given probed version.
-func nativeFlowControlArgs(helperVersion, fps int) []string {
+func nativeFlowControlArgs(helperVersion, fps int, client clientSession) []string {
 	if helperVersion < nativeFlowControlHelperVersion {
 		return nil
 	}
 	args := []string{"--max-inflight", strconv.Itoa(nativeMaxInflight)}
-	if clientRequestsKeyframes() {
+	if client.requestsKeyframes() {
 		// Keyframes only when the tablet asks: no periodic IDR spikes.
 		args = append(args, "--gop", strconv.Itoa(onDemandGOPFrames(fps)))
 	}
@@ -208,8 +170,8 @@ const nativeCursorHelperVersion = 3
 // nativeCursorArgs returns --cursor overlay for a Linux helper of the given
 // probed version when the tablet draws the host cursor itself: cursor motion
 // then costs no encode and never waits behind a video frame, as on Windows.
-func nativeCursorArgs(helperVersion int) []string {
-	if helperVersion < nativeCursorHelperVersion || !clientHasFeature(clientFeatureCursor) {
+func nativeCursorArgs(helperVersion int, client clientSession) []string {
+	if helperVersion < nativeCursorHelperVersion || !client.hasFeature(clientFeatureCursor) {
 		return nil
 	}
 	return []string{"--cursor", "overlay"}
@@ -380,9 +342,9 @@ func withNativeHelperCandidate(specs []pipelineSpec, opts videoOptions, target c
 		log.Printf("Native media helper skipped for VA driver %q in %s mode; using ffmpeg (set nativeMediaHelper to \"on\" to try it)", res.Vendor, mode)
 		return specs
 	}
-	args := nativeHelperArgs(display, target.Rect, opts.FPS, opts.Bitrate, clientHasFeature(clientFeatureTiles))
-	args = append(args, nativeFlowControlArgs(res.Version, opts.FPS)...)
-	args = append(args, nativeCursorArgs(res.Version)...)
+	args := nativeHelperArgs(display, target.Rect, opts.FPS, opts.Bitrate, opts.Client.hasFeature(clientFeatureTiles))
+	args = append(args, nativeFlowControlArgs(res.Version, opts.FPS, opts.Client)...)
+	args = append(args, nativeCursorArgs(res.Version, opts.Client)...)
 	spec := pipelineSpec{
 		Name:        "native_vaapi",
 		BaseEncoder: vaapiH264Encoder,
@@ -398,7 +360,7 @@ func withNativeHelperCandidate(specs []pipelineSpec, opts videoOptions, target c
 // runFramedPipeline pumps a helper's framed stdout to the client. As with
 // runEncodePipeline, an error before any output lets the caller fall back to
 // the next candidate.
-func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec pipelineSpec, monitor *sessionMonitor, rc *rateController, temporal *temporalController, expectBlackout bool, gate *congestionGate) (bool, error) {
+func runFramedPipeline(ctx context.Context, sink videoSink, opts videoOptions, spec pipelineSpec, monitor *sessionMonitor, rc *rateController, temporal *temporalController, expectBlackout bool, gate *congestionGate) (bool, error) {
 	pipeline, err := startCapturePipeline(ctx, spec)
 	if err != nil {
 		return false, err
@@ -433,9 +395,9 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 	if encoderName == "" {
 		encoderName = spec.Name
 	}
-	sendMeta := clientHasFeature(clientFeatureFrameMeta)
-	sendTiles := clientHasFeature(clientFeatureTiles)
-	sendCursor := clientHasFeature(clientFeatureCursor)
+	sendMeta := opts.Client.hasFeature(clientFeatureFrameMeta)
+	sendTiles := opts.Client.hasFeature(clientFeatureTiles)
+	sendCursor := opts.Client.hasFeature(clientFeatureCursor)
 	nextSummary := time.Now().Add(sessionSummaryInterval)
 	telemetry := newPipelineTelemetry(spec.Name)
 	defer telemetry.finish()
@@ -453,7 +415,7 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 				return produced.Load(), ctx.Err()
 			}
 			if !produced.Load() {
-				return false, fmt.Errorf("native helper produced no output: %v (%s)", rerr, pipeline.errorTail())
+				return false, fmt.Errorf("native helper produced no output: %w (%s)", rerr, pipeline.errorTail())
 			}
 			return true, fmt.Errorf("native helper output: %w (%s)", rerr, pipeline.errorTail())
 		}
@@ -476,14 +438,14 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 			markActiveVideoSessionReady()
 			cfg, _ := json.Marshal(videoConfigMsg{
 				Codec:       opts.Codec,
-				HostCodecs:  hostVideoCodecs,
+				HostCodecs:  opts.HostCodecs,
 				Encoder:     encoderName,
 				FPS:         opts.FPS,
 				Bitrate:     opts.Bitrate,
 				Pacing:      "latency",
 				CaptureMode: captureModeDamage,
 			})
-			if err := writeVideoPacket(w, videoPacketConfig, cfg); err != nil {
+			if err := sink.WritePacket(videoPacketConfig, cfg); err != nil {
 				return true, fmt.Errorf("client write: %w", err)
 			}
 			publishVideoStatus(true, spec.Name, opts.Bitrate)
@@ -492,17 +454,17 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 		switch hdr.Kind {
 		case nativeFrameKindAU:
 			if sendMeta {
-				if err := writeVideoPacket(w, videoPacketFrameMeta, frameMetaPayload(hdr.InputSeq, hdr.PipeUs)); err != nil {
+				if err := sink.WritePacket(videoPacketFrameMeta, frameMetaPayload(hdr.InputSeq, hdr.PipeUs)); err != nil {
 					return true, fmt.Errorf("client write: %w", err)
 				}
 			}
-			units := splitAnnexBAll(payload)
+			units := h264.SplitAll(payload)
 			telemetry.addUnits(len(units))
 			for _, unit := range units {
-				if spec.SignalBT709Limited && h264NALType(unit) == 7 {
-					unit = withBT709LimitedVUI(unit)
+				if spec.SignalBT709Limited && h264.NALType(unit) == 7 {
+					unit = h264.WithBT709LimitedVUI(unit)
 				}
-				if err := writeVideoPacket(w, videoPacketNAL, unit); err != nil {
+				if err := sink.WritePacket(videoPacketNAL, unit); err != nil {
 					return true, fmt.Errorf("client write: %w", err)
 				}
 				sentNALs++
@@ -513,7 +475,7 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 			if !sendCursor {
 				break
 			}
-			if err := writeVideoPacket(w, videoPacketCursor, payload); err != nil {
+			if err := sink.WritePacket(videoPacketCursor, payload); err != nil {
 				return true, fmt.Errorf("client write: %w", err)
 			}
 			sentBytes += int64(len(payload))
@@ -525,7 +487,7 @@ func runFramedPipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 			if hdr.Kind == nativeFrameKindMode {
 				ptype = videoPacketMode
 			}
-			if err := writeVideoPacket(w, ptype, payload); err != nil {
+			if err := sink.WritePacket(ptype, payload); err != nil {
 				return true, fmt.Errorf("client write: %w", err)
 			}
 			sentBytes += int64(len(payload))

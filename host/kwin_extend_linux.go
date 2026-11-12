@@ -225,7 +225,7 @@ func (k *kwinOutput) MapTablet() error {
 	return kwinSetTabletOutput(kwinOutputName)
 }
 
-func (k *kwinOutput) Remove([]x11OutputPos, string) error {
+func (k *kwinOutput) Remove([]outputPos, string) error {
 	k.close()
 	return nil
 }
@@ -285,7 +285,7 @@ func enableKWinOutput(output string) error {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "kscreen-doctor", "output."+output+".enable").CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("kscreen-doctor: %v: %s", err, bytes.TrimSpace(out))
+		return fmt.Errorf("kscreen-doctor: %w: %s", err, bytes.TrimSpace(out))
 	}
 	return nil
 }

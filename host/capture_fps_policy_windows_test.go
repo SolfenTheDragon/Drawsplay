@@ -14,8 +14,8 @@ func TestTabletPanelHz(t *testing.T) {
 	if got := tabletPanelHz(); got != 90 {
 		t.Fatalf("stats refresh: got %d, want 90", got)
 	}
-	bindSessionClientIdentity(903, clientIdentity{Platform: "android", RefreshRates: []int{60, 144}})
-	defer unbindSessionClientIdentity(903)
+	bindTestIdentity(903, clientIdentity{Platform: "android", RefreshRates: []int{60, 144}})
+	defer unbindClientSession(903)
 	if got := tabletPanelHz(); got != 144 {
 		t.Fatalf("hello rates: got %d, want 144", got)
 	}

@@ -58,13 +58,16 @@ func vkmsForcedByUser() bool {
 
 var errVkmsPromptDeclined = errors.New("the password prompt was dismissed")
 
-var errVkmsNeedsRoot = errors.New("loading vkms needs root and passwordless sudo is unavailable")
+// errNeedsRoot: a root step could not run without a prompt and prompting was
+// not allowed. Wrapped with the step's name where it is returned.
+var errNeedsRoot = errors.New("root is needed and passwordless sudo is unavailable")
 
 // Seams for tests.
 var (
 	vkmsLoadPrivileged = loadVkmsPrivileged
 	vkmsIsLoaded       = vkmsModuleLoaded
 	vkmsIsAvailable    = vkmsModuleAvailable
+	vkmsPostLoadCheck  = vkmsKernelLogRecheck
 	vkmsOutputPoll     = 250 * time.Millisecond
 )
 
@@ -112,28 +115,10 @@ func ensureX11VirtualDisplay(reason string, mayPrompt bool) {
 	defer refreshX11VkmsWarning()
 	if vkmsAutoloadEnabled() && !vkmsBlockedFn() && !vkmsIsLoaded() && vkmsIsAvailable() {
 		// Primary method; guarded: see vkmsAutoloadEnv.
-		log.Printf("X11 has no virtual display (%s); loading the vkms kernel module", reason)
-		displayGuardBegin(guardMethodVkms)
-		defer displayGuardEnd(guardMethodVkms)
-		if err := vkmsLoadPrivileged(mayPrompt); err != nil {
-			// A no-prompt attempt that lacked root must not start the cooldown,
-			// or it would block the prompt when a tablet connects soon after.
-			failed = mayPrompt || !errors.Is(err, errVkmsNeedsRoot)
-			log.Printf("Could not load vkms automatically: %v; the tablet will mirror the desktop", err)
+		ready, tryFallback := loadVkmsForX11(reason, mayPrompt, &failed)
+		if ready || !tryFallback {
 			return
 		}
-		deadline := time.Now().Add(vkmsOutputWait)
-		for !x11VirtualDisplayReady() {
-			if time.Now().After(deadline) {
-				failed = true
-				log.Printf("vkms is loaded but the X server shows no virtual output; log out and back in to use it")
-				return
-			}
-			time.Sleep(vkmsOutputPoll)
-		}
-		log.Printf("vkms loaded; the X11 virtual display is ready")
-		settleNewX11Output()
-		return
 	}
 	// Fallback for systems where vkms is unavailable, not picked up by the X
 	// server, or unsafe: use a spare, unplugged connector of the GPU.
@@ -148,13 +133,59 @@ func ensureX11VirtualDisplay(reason string, mayPrompt bool) {
 	err := ensureForcedConnectorDisplay(reason, mayPrompt)
 	displayGuardEnd(guardMethodForcedConnector)
 	if err != nil {
-		failed = mayPrompt || !errors.Is(err, errVkmsNeedsRoot)
+		failed = mayPrompt || !errors.Is(err, errNeedsRoot)
 		if !errors.Is(err, errNoSpareConnector) {
 			log.Printf("Could not set up a spare-connector virtual display: %v; the tablet will mirror the desktop", err)
 		}
 		return
 	}
 	settleNewX11Output()
+}
+
+// loadVkmsForX11 loads vkms and waits for its output. ready reports that the
+// virtual display is up. Otherwise *failed says whether the attempt counts
+// towards the retry cooldown, and tryFallback whether the spare-connector
+// fallback should be tried in the same pass: it is when the kernel rejected
+// vkms, not when the user declined the prompt (the fallback would ask again)
+// or the output simply has not appeared (a re-login fixes that). The kernel
+// log is read again right after the load and once the output is up, because
+// the vkms_prepare_fb failure strikes within that second and can leave the X
+// server alive with a frozen display: a failure found there denies vkms for
+// this kernel series so no later start repeats it.
+func loadVkmsForX11(reason string, mayPrompt bool, failed *bool) (ready, tryFallback bool) {
+	log.Printf("X11 has no virtual display (%s); loading the vkms kernel module", reason)
+	displayGuardBegin(guardMethodVkms)
+	defer displayGuardEnd(guardMethodVkms)
+	if err := vkmsLoadPrivileged(mayPrompt); err != nil {
+		// A no-prompt attempt that lacked root must not start the cooldown,
+		// or it would block the prompt when a tablet connects soon after.
+		*failed = mayPrompt || !errors.Is(err, errNeedsRoot)
+		log.Printf("Could not load vkms automatically: %v; the tablet will mirror the desktop", err)
+		return false, false
+	}
+	kernelFailed := func() (bool, bool) {
+		*failed = true
+		log.Printf("vkms failed in the kernel right after loading; leaving it alone and trying a spare connector instead")
+		return false, true
+	}
+	deadline := time.Now().Add(vkmsOutputWait)
+	for !x11VirtualDisplayReady() {
+		if vkmsPostLoadCheck() {
+			return kernelFailed()
+		}
+		if time.Now().After(deadline) {
+			*failed = true
+			log.Printf("vkms is loaded but the X server shows no virtual output; log out and back in to use it")
+			return false, false
+		}
+		time.Sleep(vkmsOutputPoll)
+	}
+	if vkmsPostLoadCheck() {
+		return kernelFailed()
+	}
+	log.Printf("vkms loaded; the X11 virtual display is ready")
+	settleNewX11Output()
+	return true, false
 }
 
 // settleNewX11Output switches the new output off again if the window manager
@@ -189,14 +220,14 @@ var vkmsLoadCommands = [][]string{
 	{"modprobe", "vkms"},
 }
 
-// vkmsLoadAndPersistScript loads vkms (opt-in only, see vkmsAutoloadEnv).
+// vkmsLoadScript loads vkms (opt-in only, see vkmsAutoloadEnv).
 // It deliberately does not persist anything: loading vkms at boot would
 // expose every login to the kernel issue described at vkmsAutoloadEnv.
-const vkmsLoadAndPersistScript = `modprobe vkms create_default_dev=1 || modprobe vkms`
+const vkmsLoadScript = `modprobe vkms create_default_dev=1 || modprobe vkms`
 
 // loadVkmsPrivileged loads vkms as root: directly, through passwordless sudo,
-// or, when mayPrompt is set, through one polkit (pkexec) password prompt that
-// also makes vkms load at boot. Without mayPrompt it never prompts.
+// or, when mayPrompt is set, through one polkit (pkexec) password prompt.
+// Nothing is made to load at boot. Without mayPrompt it never prompts.
 func loadVkmsPrivileged(mayPrompt bool) error {
 	env := append(os.Environ(), "PATH="+os.Getenv("PATH")+":/usr/sbin:/sbin")
 	run := func(argv ...string) error {
@@ -210,7 +241,7 @@ func loadVkmsPrivileged(mayPrompt bool) error {
 		return nil
 	}
 	if os.Geteuid() == 0 {
-		return run("sh", "-c", vkmsLoadAndPersistScript)
+		return run("sh", "-c", vkmsLoadScript)
 	}
 	if sudo, err := exec.LookPath("sudo"); err == nil {
 		for _, argv := range vkmsLoadCommands {
@@ -220,13 +251,17 @@ func loadVkmsPrivileged(mayPrompt bool) error {
 		}
 	}
 	if !mayPrompt {
-		return errVkmsNeedsRoot
+		return fmt.Errorf("loading vkms: %w", errNeedsRoot)
 	}
 	pkexec, err := exec.LookPath("pkexec")
 	if err != nil {
-		return errors.New("pkexec is not available; run \"sudo modprobe vkms create_default_dev=1\" and configure vkms to load at boot")
+		return errors.New("pkexec is not available; run \"sudo modprobe vkms create_default_dev=1\" (vkms is not loaded at boot; it is loaded when needed)")
 	}
-	err = run(pkexec, "sh", "-c", vkmsLoadAndPersistScript)
+	if helper, ok := displayHelper(); ok {
+		err = run(pkexec, helper, "vkms-load")
+	} else {
+		err = run(pkexec, "sh", "-c", vkmsLoadScript)
+	}
 	var ee *exec.ExitError
 	// 126: the user dismissed the prompt or is not authorized.
 	if errors.As(err, &ee) && ee.ExitCode() == 126 {

@@ -69,11 +69,14 @@ func requireCSRF(w http.ResponseWriter, r *http.Request, expected string) bool {
 }
 
 func sameLocalAuthority(originHost, requestHost string) bool {
-	if !strings.EqualFold(originHost, requestHost) {
-		return false
-	}
-	host := originHost
-	if h, _, err := net.SplitHostPort(originHost); err == nil {
+	return strings.EqualFold(originHost, requestHost) && localHostHeader(originHost)
+}
+
+// localHostHeader reports whether a Host (or Origin authority) names this
+// machine: "localhost" or a loopback IP literal, with any port.
+func localHostHeader(authority string) bool {
+	host := authority
+	if h, _, err := net.SplitHostPort(authority); err == nil {
 		host = h
 	}
 	host = strings.Trim(host, "[]")

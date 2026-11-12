@@ -10,12 +10,15 @@ class WiFiPairedSessionSupportTest {
     private fun ip(value: String) = InetAddress.getByName(value)
 
     @Test
-    fun usbPresenceBlocksWifiButWifiAloneDoesNot() {
-        assertFalse(UsbPriorityPolicy.allowWifi(accessoryAttached = true, usbPowered = false, adbEnabled = false))
-        assertFalse(UsbPriorityPolicy.allowWifi(accessoryAttached = false, usbPowered = true, adbEnabled = true))
-        assertTrue(UsbPriorityPolicy.allowWifi(accessoryAttached = false, usbPowered = true, adbEnabled = false))
-        assertTrue(UsbPriorityPolicy.allowWifi(accessoryAttached = false, usbPowered = false, adbEnabled = true))
-        assertTrue(UsbPriorityPolicy.allowWifi(accessoryAttached = false, usbPowered = false, adbEnabled = false))
+    fun debuggingWithoutAnAccessoryKeepsWifiAvailableUntilUsbActuallyOpens() {
+        val selector = HostEndpointSelector { true }
+        assertTrue(selector.videoCandidates().isEmpty())
+        assertTrue(UsbPriorityPolicy.allowWifi(selector.isAccessoryAttached()))
+        selector.updateAccessoryAttached(true)
+        assertTrue(selector.videoCandidates().single().accessory)
+        assertFalse(UsbPriorityPolicy.allowWifi(selector.isAccessoryAttached()))
+        selector.updateAccessoryAttached(false)
+        assertTrue(UsbPriorityPolicy.allowWifi(selector.isAccessoryAttached()))
     }
 
     @Test

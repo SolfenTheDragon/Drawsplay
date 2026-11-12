@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -54,7 +55,7 @@ func currentSetupChecklist(cfg settings) setupChecklist {
 			Key:     "adb-ready",
 			Label:   "ADB is connected",
 			OK:      adb.Ready,
-			Detail:  detailOrDefault(adb.Error, "Ready"),
+			Detail:  cmp.Or(adb.Error, "Ready"),
 			Action:  adbSetupAction(hostOS, adb.Error),
 			Command: adbSetupCommand(hostOS),
 		})
@@ -75,21 +76,21 @@ func currentSetupChecklist(cfg settings) setupChecklist {
 			Key:    "device-connected",
 			Label:  "Client connected and authorized",
 			OK:     activeDevice != "",
-			Detail: detailOrDefault(activeDevice, "Waiting for client hello"),
+			Detail: cmp.Or(activeDevice, "Waiting for client hello"),
 			Action: "Open DrawSplay on the client device and keep the app in foreground.",
 		},
 		{
 			Key:    "stream-live",
 			Label:  "Desktop stream active",
 			OK:     video.Streaming,
-			Detail: detailOrDefault(video.Encoder, "Waiting for stream"),
+			Detail: cmp.Or(video.Encoder, "Waiting for stream"),
 			Action: "If this stays idle, lower resolution/FPS or reconnect the session.",
 		},
 	}...)
 	if hostOS == "linux" && video.Streaming {
 		detail := "Extended desktop"
 		if video.DisplayMode == "mirror" {
-			detail = detailOrDefault(video.Display, "Desktop mirror mode")
+			detail = cmp.Or(video.Display, "Desktop mirror mode")
 		}
 		items = append(items, setupCheckItem{
 			Key:    "linux-display-mode",
@@ -104,7 +105,7 @@ func currentSetupChecklist(cfg settings) setupChecklist {
 			Label:  "uinput injection access",
 			OK:     !containsWarning(warnings, "uinput"),
 			Detail: warningDetail(warnings, "uinput", "Ready"),
-			Action: `Create /etc/udev/rules.d/99-drawsplay-uinput.rules with: KERNEL=="uinput", MODE="0660", GROUP="input"; add user to input group; reload udev; then reconnect.`,
+			Action: "Run the DrawSplay install script again (it installs 99-drawsplay-uinput.rules), then log out and back in and reconnect.",
 		})
 		if x11SessionActive() {
 			items = append(items, setupCheckItem{
@@ -188,7 +189,7 @@ func aoaSetupItem(hostOS string, st aoaStatusInfo) setupCheckItem {
 		item.OK = true
 		item.Detail = "Tablet linked over USB"
 	case "waiting-app":
-		item.Detail = detailOrDefault(st.Detail, "Waiting for the tablet app")
+		item.Detail = cmp.Or(st.Detail, "Waiting for the tablet app")
 		item.Action = "Accept the USB prompt on the tablet and keep DrawSplay open."
 	case "switching":
 		item.Detail = "Switching the tablet to accessory mode"
@@ -242,43 +243,7 @@ func ffmpegSetupCommand(hostOS string) string {
 	return ""
 }
 
+// containsFold reports whether sub occurs in s, ignoring case.
 func containsFold(s, sub string) bool {
-	// strings.ContainsFold does not exist; keep this tiny and allocation-free.
-	return len(sub) == 0 || indexFold(s, sub) >= 0
-}
-
-func indexFold(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if equalFoldASCII(s[i:i+len(sub)], sub) {
-			return i
-		}
-	}
-	return -1
-}
-
-func equalFoldASCII(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := 0; i < len(a); i++ {
-		ai := a[i]
-		bi := b[i]
-		if ai >= 'A' && ai <= 'Z' {
-			ai += 'a' - 'A'
-		}
-		if bi >= 'A' && bi <= 'Z' {
-			bi += 'a' - 'A'
-		}
-		if ai != bi {
-			return false
-		}
-	}
-	return true
-}
-
-func detailOrDefault(value, fallback string) string {
-	if value == "" {
-		return fallback
-	}
-	return value
+	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))
 }

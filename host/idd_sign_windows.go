@@ -40,9 +40,10 @@ func signIDDDriverPackage(dir string) (string, error) {
 		"DrawSplay virtual display driver (this PC only)")
 }
 
+// removeIDDSigningCerts deletes the virtual display driver's signing
+// certificate with thumbprint, or every one when thumbprint is "".
 func removeIDDSigningCerts(thumbprint string) error {
-	return removeDriverSigningCertsMatching("$_.Subject -like '" + iddSignerSubject +
-		"*' -and ('" + thumbprint + "' -eq '' -or $_.Thumbprint -eq '" + thumbprint + "')")
+	return removeSigningCerts(iddSignerSubject, thumbprint)
 }
 
 type iddPackageInstallOps struct {

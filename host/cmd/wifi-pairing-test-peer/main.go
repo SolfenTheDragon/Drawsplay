@@ -26,7 +26,7 @@ func main() {
 	} else if len(os.Args) == 1 {
 		err = run(os.Stdin, os.Stdout)
 	} else {
-		err = fmt.Errorf("expected no arguments, --enrollment loopback-IP:port, or --session control-loopback:port video-loopback:port tablet-SPKI-hex")
+		err = errors.New("expected no arguments, --enrollment loopback-IP:port, or --session control-loopback:port video-loopback:port tablet-SPKI-hex")
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Wi-Fi pairing interoperability fixture:", err)
@@ -38,7 +38,7 @@ func main() {
 func runEnrollment(address string, output io.Writer) (result error) {
 	endpoint, err := netip.ParseAddrPort(address)
 	if err != nil || !endpoint.Addr().IsLoopback() || endpoint.Port() == 0 {
-		return fmt.Errorf("enrollment test peer requires a numeric loopback address")
+		return errors.New("enrollment test peer requires a numeric loopback address")
 	}
 	directory, err := os.MkdirTemp("", "drawsplay-enrollment-test-")
 	if err != nil {
@@ -80,7 +80,7 @@ func runEnrollment(address string, output io.Writer) (result error) {
 		return err
 	}
 	if answer[0] != 43 {
-		return fmt.Errorf("incorrect authenticated reply")
+		return errors.New("incorrect authenticated reply")
 	}
 	return nil
 }

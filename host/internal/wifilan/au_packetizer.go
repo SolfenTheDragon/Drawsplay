@@ -2,6 +2,7 @@ package wifilan
 
 import (
 	"bytes"
+	"drawsplay/host/internal/h264"
 	"errors"
 )
 
@@ -28,35 +29,30 @@ var startCode4 = []byte{0, 0, 0, 1}
 // length written to dst for a picture NAL, or 0 for NAL units that are
 // consumed or dropped (AUD, SEI, filler, SPS, PPS).
 func (p *AUPacketizer) Push(nal, dst []byte) (n int, idr bool, err error) {
-	prefix := 0
-	switch {
-	case len(nal) >= 4 && bytes.Equal(nal[:4], startCode4):
-		prefix = 4
-	case len(nal) >= 3 && nal[0] == 0 && nal[1] == 0 && nal[2] == 1:
-		prefix = 3
-	}
-	if prefix == 0 || len(nal) < prefix+1 || nal[prefix]&0x80 != 0 {
+	prefix := h264.HeaderOffset(nal)
+	// The forbidden_zero_bit must be 0.
+	if prefix < 0 || nal[prefix]&0x80 != 0 {
 		return 0, false, ErrUnsupportedAU
 	}
 	header := nal[prefix]
-	switch header & 31 {
-	case 6, 9, 12:
+	switch header & 0x1F {
+	case h264.TypeSEI, h264.TypeAUD, h264.TypeFiller:
 		return 0, false, nil
-	case 7:
+	case h264.TypeSPS:
 		p.sps = p.store(p.sps, nal[prefix:])
 		return 0, false, nil
-	case 8:
+	case h264.TypePPS:
 		p.pps = p.store(p.pps, nal[prefix:])
 		return 0, false, nil
-	case 1, 5:
+	case h264.TypeSlice, h264.TypeIDR:
 	default:
 		return 0, false, ErrUnsupportedAU
 	}
-	// first_mb_in_slice is ue(v); zero is the single bit 1.
-	if len(nal) < prefix+2 || nal[prefix+1]&0x80 == 0 {
+	// One slice per picture: every slice must be its picture's first.
+	if !h264.IsFirstSlice(nal[prefix+1:]) {
 		return 0, false, ErrUnsupportedAU
 	}
-	idr = header&31 == 5
+	idr = header&0x1F == h264.TypeIDR
 	body := nal[prefix:]
 	if len(dst) < 6+4+len(body) {
 		return 0, false, ErrUnsupportedAU

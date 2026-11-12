@@ -13,11 +13,27 @@ Thanks for your interest in DrawSplay. Contributions are welcome, with one impor
 
 - Keep each pull request small and focused on one change.
 - Describe what changed and why, and how you tested it (OS, GPU and tablet if relevant).
-- Make sure CI passes. From `host/`: `gofmt`, `go vet ./...` and `go test ./...`. From `android/`: `./gradlew :app:compileReleaseKotlin` and `./gradlew :app:testReleaseUnitTest`.
-- Keep Windows and Linux builds both compiling. Platform-specific host code uses `_windows.go`, `_linux.go` and `_other.go` filename suffixes.
+- Make sure CI passes. Run what applies to your change before opening the pull request:
+  - `host/`: `gofmt -l .` (no output), `go vet ./...`, `go test -race ./...` and `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...`. For Windows code, also `GOOS=windows go vet ./...`; for new platform files, also `GOOS=darwin go vet ./...`.
+  - Browser calibration math: from the repository root, `node --test host/webui_calibration_test.cjs` (Node's built-in test runner; no npm dependencies).
+  - Linux installer detection: `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_*.py'` (isolated detection fixtures; does not install anything).
+  - `desktop/`: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`.
+  - `android/` with JDK 17: `./gradlew :app:compileReleaseKotlin` and `./gradlew :app:testReleaseUnitTest` (`.\gradlew.bat` on Windows).
+  - `native/drawsplay-media/`: `make CC="cc -Werror"`.
+- Pin any new GitHub Action to a full commit SHA with a version comment, like the existing ones.
+- Keep Windows and Linux builds both compiling. Platform-specific host code uses `_windows.go`, `_linux.go` and `_other.go` filename suffixes. An `_other.go` file is the fallback for every platform its `_windows.go` or `_linux.go` siblings don't cover, and its build tag says so (`!windows`, `!linux` or `!linux && !windows`). Other platforms aren't supported, but the host still compiles there (`GOOS=darwin go vet ./...`), which catches a missing fallback.
 - Input and video paths are latency-sensitive: avoid per-event handshakes, unbounded queues and socket I/O on the Android main thread.
-- Protocol changes must be additive. Don't commit secrets or signing keys.
-- Update `README.md` if setup or usage changes.
+- Protocol changes must be additive. Remove a field or framing only once no released tablet app uses it (see `FUNCTIONALITY.md` §7). Don't commit secrets or signing keys.
+- The Go host (`host/`) and DrawSplay Desktop's `dd-host` (`desktop/host/`) solve the same problems separately. When you fix one, check the other:
+  - X11 virtual output and CVT modes: `host/x11_extend_linux.go` and `desktop/host/src/linux_display.rs`
+  - sway/Hyprland outputs: `host/sway_extend_linux.go`, `host/hypr_extend_linux.go` and `desktop/host/src/wayland_display.rs`
+  - Windows virtual display: `host/idd_*.go`, `host/display_windows.go` and `desktop/host/src/vdisplay.rs`
+  - ffmpeg encoder choice and arguments: `host/ffmpeg.go`, `host/pipeline*.go` and `desktop/host/src/encoder.rs`, `capture.rs`
+  - bitrate ladder: `host/ratecontrol.go` and `desktop/host/src/ratecontrol.rs`
+  - input injection and key maps: `host/inject*.go`, `host/keymap.go` and `desktop/host/src/inject/`, `desktop/client/src/keys.rs`
+  - files both read or write (tested against `testdata/protocols/`): display claims (`host/display_claims_linux.go`, `desktop/host/src/display_claims.rs`), dd-host's `status.json` (`desktop/host/src/status.rs`, `host/desktop_host_status.go`), the driver interface (`host/idd_protocol.go`, `desktop/host/src/idd_protocol.rs`)
+- Formats implemented in more than one place have shared test vectors in `testdata/protocols/`. Change the vectors with the format, and run every implementation's tests.
+- Update `README.md` if setup or usage changes, `FUNCTIONALITY.md` if behaviour changes, and `PRIVACY.md` if what is stored or sent changes.
 
 ## Licensing
 

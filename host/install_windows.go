@@ -26,6 +26,8 @@ package main
 
 import (
 	"bytes"
+	"cmp"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"encoding/xml"
@@ -36,6 +38,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -69,7 +72,10 @@ type installerOptions struct {
 	InstallElevated   string // internal: elevated install phase, result path
 	WinUSBBind        bool   // internal: elevated WinUSB driver setup (scheduled task / UAC)
 	UninstallElevated string // internal: elevated uninstall phase, result path
-	NoArgs            bool
+	// internal: the dependency choices for the elevated uninstall phase. They travel on the
+	// command line, not in a file in the user's writable temp folder.
+	UninstallRequest uninstallRequest
+	NoArgs           bool
 }
 
 type uninstallResult struct {
@@ -91,7 +97,7 @@ func runInstallerMode(o installerOptions) (handled bool, code int) {
 	case o.WinUSBBind:
 		return true, runWinUSBBindMode()
 	case o.UninstallElevated != "":
-		return true, runUninstallElevated(o.UninstallElevated)
+		return true, runUninstallElevated(o.UninstallElevated, o.UninstallRequest)
 	case o.Uninstall || isUninstallerExeName(exe):
 		return true, runUninstall(exe, o)
 	case o.Install, o.NoArgs && isInstallerExeName(exe):
@@ -128,7 +134,7 @@ func shouldOfferInstall(exe string) bool {
 	if _, installed := loadInstallManifest(); installed {
 		return false
 	}
-	if pathInsideDir(exe, defaultInstallDir()) {
+	if pathWithin(exe, defaultInstallDir()) {
 		return false
 	}
 	if dir, err := userStateDir(); err == nil && fileExists(filepath.Join(dir, portableMarkerName)) {
@@ -139,6 +145,19 @@ func shouldOfferInstall(exe string) bool {
 
 func isProcessElevated() bool {
 	return windows.GetCurrentProcessToken().IsElevated()
+}
+
+func newInstallerResultPath(prefix string) (string, error) {
+	f, err := os.CreateTemp(os.TempDir(), prefix+"-*.json")
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
 }
 
 // installerReport prints to the console (if any) and, unless quiet, shows a
@@ -154,45 +173,52 @@ func installerReport(quiet bool, title, text string, show func(title, text strin
 
 func runInstall(exe string, o installerOptions) int {
 	attachParentConsole()
-	if loadSettings().NoDriverInstall {
+	if o.Quiet && loadSettings().NoDriverInstall {
 		o.SkipVDD = true
 	}
 	previous, _ := loadInstallManifest()
 	wantDesktop := o.DesktopShortcut || (o.Quiet && previous.DesktopShortcut != "")
-	if !o.Quiet && !o.DesktopShortcut {
-		wantDesktop = askYesNo("Install DrawSplay", "Add a DrawSplay shortcut to the desktop?")
-	}
 	wantAutostart := installWantsAutostart(o, previous.HostExe != "")
-	if !o.Quiet && !o.Autostart && !o.NoAutostart {
-		wantAutostart = askYesNo("Install DrawSplay",
-			"Start DrawSplay automatically in the system tray when you sign in to Windows?\n\n"+
-				"You can change this later on the DrawSplay settings page.")
-	}
-	if !o.Quiet && !o.SkipVDD {
-		if _, err := iddDevicePath(); err != nil {
-			o.SkipVDD = !askYesNo("Install DrawSplay virtual display",
-				"Install the virtual display driver for extend mode?\n\n"+
-					"If its catalog is unsigned, DrawSplay signs it on this PC and "+
-					"adds a certificate to this computer's Trusted Root and Trusted "+
-					"Publishers stores. Its private signing key is deleted immediately. "+
-					"Uninstall removes the driver and certificate.\n\n"+
-					"Secure Boot and signature enforcement are not changed. "+
-					"If DrawSplay's driver fails, setup uses an existing Parsec VDD "+
-					"or downloads and installs a verified Parsec fallback only if needed. "+
-					"Choose No to use mirror mode instead.")
+	if !o.Quiet {
+		_, driverErr := iddDevicePath()
+		choices, accepted, err := chooseInstallerOptions(o, wantDesktop || previous.DesktopShortcut != "", wantAutostart, driverErr == nil)
+		if err != nil {
+			installerReport(false, "DrawSplay setup could not open", err.Error()+"\n\nNo installation changes were made.", showError)
+			return 1
 		}
+		if !accepted {
+			return 0
+		}
+		wantDesktop, wantAutostart = choices.Desktop, choices.Autostart
+		o.SkipVDD = !choices.Driver
+	}
+	progress := startInstallerProgress(o.Quiet)
+	defer progress.close()
+	report := func(title, text string, show func(string, string)) {
+		progress.close()
+		installerReport(o.Quiet, title, text, show)
 	}
 	dir := defaultInstallDir()
-	fmt.Printf("Installing DrawSplay to %s\n", dir)
+	progress.update("Preparing installation. Any existing DrawSplay session will stop.")
 
+	// An update started from the settings page names the host that started
+	// it; let that host shut down cleanly (releasing its virtual display)
+	// before stopping whatever is left.
+	if pid, err := strconv.Atoi(os.Getenv(updateWaitPIDEnv)); err == nil && pid > 0 {
+		waitForProcessExit(uint32(pid), 30*time.Second)
+	}
 	// Release the installed binaries if an older copy is running.
 	stopProcessesInDir(dir)
 
-	resultPath := filepath.Join(os.TempDir(), fmt.Sprintf("drawsplay-install-%d.json", os.Getpid()))
-	_ = os.Remove(resultPath)
+	resultPath, err := newInstallerResultPath("drawsplay-install")
+	if err != nil {
+		report("DrawSplay setup failed", fmt.Sprintf("prepare result file: %v", err), showError)
+		return 1
+	}
 	defer os.Remove(resultPath)
 
 	var elevErr error
+	progress.update("Waiting for administrator approval, then copying files and setting up drivers. This can take several minutes.")
 	if isProcessElevated() {
 		if runInstallElevated(resultPath, o.SkipVDD) != 0 {
 			elevErr = errors.New("elevated install phase failed")
@@ -216,13 +242,29 @@ func runInstall(exe string, o installerOptions) int {
 		if len(m.Warnings) > 0 {
 			detail += "\n\n" + strings.Join(m.Warnings, "\n")
 		}
-		installerReport(o.Quiet, "DrawSplay setup failed", detail, showError)
+		report("DrawSplay setup failed", detail, showError)
+		// Setup stopped the installed copy above; start it again so a
+		// declined approval does not leave DrawSplay off.
+		if previous.HostExe != "" && fileExists(previous.HostExe) {
+			relaunch := exec.Command(previous.HostExe)
+			relaunch.Dir = filepath.Dir(previous.HostExe)
+			if relaunch.Start() == nil {
+				_ = relaunch.Process.Release()
+			}
+		}
 		return 1
 	}
 
+	progress.update("Saving your startup preferences and creating shortcuts...")
 	stateDir, err := configDir()
 	if err != nil {
-		installerReport(o.Quiet, "DrawSplay setup failed", fmt.Sprintf("cannot create %%APPDATA%%\\DrawSplay: %v", err), showError)
+		report("DrawSplay setup failed", fmt.Sprintf("cannot create %%APPDATA%%\\DrawSplay: %v", err), showError)
+		return 1
+	}
+	cfg := loadSettings()
+	cfg.NoDriverInstall = o.SkipVDD
+	if err := saveSettings(cfg); err != nil {
+		report("DrawSplay setup failed", fmt.Sprintf("save display driver preference: %v", err), showError)
 		return 1
 	}
 	for key, result := range m.WinUSB {
@@ -261,10 +303,11 @@ func runInstall(exe string, o installerOptions) int {
 	}
 	_ = os.Remove(filepath.Join(stateDir, portableMarkerName))
 	if err := writeJSONAtomic(filepath.Join(stateDir, installManifestName), m); err != nil {
-		installerReport(o.Quiet, "DrawSplay setup failed", fmt.Sprintf("write install manifest: %v", err), showError)
+		report("DrawSplay setup failed", fmt.Sprintf("write install manifest: %v", err), showError)
 		return 1
 	}
 
+	progress.update("Starting DrawSplay. Look for its icon in the system tray.")
 	launch := exec.Command(m.HostExe)
 	launch.Dir = m.InstallDir
 	if err := launch.Start(); err != nil {
@@ -280,12 +323,12 @@ func runInstall(exe string, o installerOptions) int {
 	summary := fmt.Sprintf("DrawSplay is installed in %s and is running in the system tray.\n"+
 		"%s Settings are stored in %s.\n\n"+
 		"Virtual display driver: %s\nWinUSB: %s",
-		m.InstallDir, startup, stateDir, valueOr(m.VDDDriver, "unknown"), summarizeWinUSB(m.WinUSB))
+		m.InstallDir, startup, stateDir, cmp.Or(m.VDDDriver, "unknown"), summarizeWinUSB(m.WinUSB))
 	if len(m.Warnings) > 0 {
 		summary += "\n\nWarnings:\n" + strings.Join(m.Warnings, "\n")
-		installerReport(o.Quiet, "DrawSplay installed", summary, showWarning)
+		report("DrawSplay installed", summary, showWarning)
 	} else {
-		installerReport(o.Quiet, "DrawSplay installed", summary, showInfo)
+		report("DrawSplay installed", summary, showInfo)
 	}
 	return 0
 }
@@ -305,7 +348,7 @@ func runInstallElevated(resultPath string, skipVDD bool) int {
 	fail := func(format string, args ...any) int {
 		m.HostExe = ""
 		m.Warnings = append(m.Warnings, fmt.Sprintf(format, args...))
-		_ = writeJSONAtomic(resultPath, m)
+		_ = writeElevatedResult(resultPath, m)
 		return 1
 	}
 	if !isProcessElevated() {
@@ -319,10 +362,28 @@ func runInstallElevated(resultPath string, skipVDD bool) int {
 		return fail("create %s: %v", dir, err)
 	}
 	stopProcessesInDir(dir)
-	for _, dst := range []string{m.HostExe, m.UninstallerExe} {
-		if err := copyFileReplacing(src, dst); err != nil {
-			return fail("copy %s: %v", dst, err)
+	if !strings.EqualFold(filepath.Clean(src), filepath.Clean(m.HostExe)) {
+		// Copy the installer into Program Files before checking its
+		// signature, so the bytes that are verified are the bytes that get
+		// installed: the user-writable source could otherwise be swapped in
+		// between.
+		staged := m.HostExe + ".new"
+		if err := copyFile(src, staged); err != nil {
+			return fail("copy %s: %v", staged, err)
 		}
+		if fileExists(m.HostExe) {
+			if err := verifyUpdateInstallerSigner(m.HostExe, staged); err != nil {
+				_ = os.Remove(staged)
+				return fail("verify elevated installer against the installed host: %v", err)
+			}
+		}
+		if err := os.Rename(staged, m.HostExe); err != nil {
+			_ = os.Remove(staged)
+			return fail("install %s: %v", m.HostExe, err)
+		}
+	}
+	if err := copyFileReplacing(m.HostExe, m.UninstallerExe); err != nil {
+		return fail("copy %s: %v", m.UninstallerExe, err)
 	}
 
 	// The non-elevated host cannot write runtime downloads into Program
@@ -337,10 +398,12 @@ func runInstallElevated(resultPath string, skipVDD bool) int {
 		}
 	}
 
-	if _, err := iddDevicePath(); err == nil {
-		m.VDDDriver = driverStatusPresent
-	} else if skipVDD {
-		m.VDDDriver = "skipped (-no-driver-install); mirror mode only"
+	if skipVDD {
+		if _, err := iddDevicePath(); err == nil {
+			m.VDDDriver = driverStatusPresent
+		} else {
+			m.VDDDriver = "skipped (-no-driver-install); mirror mode only"
+		}
 	} else {
 		result := installWindowsDisplayDriver()
 		m.VDDDriver, m.ParsecVDDOwned = result.status, result.parsecOwned
@@ -371,8 +434,8 @@ func runInstallElevated(resultPath string, skipVDD bool) int {
 	if err := writeUninstallRegistryEntry(m); err != nil {
 		m.Warnings = append(m.Warnings, fmt.Sprintf("Apps & Features entry: %v", err))
 	}
-	if err := writeJSONAtomic(resultPath, m); err != nil {
-		log.Printf("write install result: %v", err)
+	if err := writeElevatedResult(resultPath, m); err != nil {
+		log.Printf("Could not write the install result: %v", err)
 		return 1
 	}
 	return 0
@@ -412,13 +475,25 @@ func copyFileReplacing(src, dst string) error {
 	if strings.EqualFold(filepath.Clean(src), filepath.Clean(dst)) {
 		return nil
 	}
+	tmp := dst + ".new"
+	if err := copyFile(src, tmp); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// copyFile writes a fresh copy of src at dst (mode 0755), replacing dst.
+func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	tmp := dst + ".new"
-	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
 		return err
 	}
@@ -428,11 +503,7 @@ func copyFileReplacing(src, dst string) error {
 		err = closeErr
 	}
 	if err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, dst); err != nil {
-		os.Remove(tmp)
+		os.Remove(dst)
 		return err
 	}
 	return nil
@@ -594,13 +665,6 @@ func summarizeWinUSB(results map[string]string) string {
 	return fmt.Sprintf("%d installed, %d not installed (see the install log; reconnect the tablet or rerun the installer)", ok, failed)
 }
 
-func valueOr(s, fallback string) string {
-	if s == "" {
-		return fallback
-	}
-	return s
-}
-
 // -------------------------------------------------------------- uninstall
 
 func runUninstall(exe string, o installerOptions) int {
@@ -613,8 +677,18 @@ func runUninstall(exe string, o installerOptions) int {
 
 	// The uninstaller cannot delete the folder it runs from: relaunch from a
 	// temp copy and exit.
-	if os.Getenv(uninstallRelaunchEnv) == "" && pathInsideDir(exe, dir) {
-		tmp := filepath.Join(os.TempDir(), fmt.Sprintf("DrawSplay-Uninstall-%d.exe", os.Getpid()))
+	if os.Getenv(uninstallRelaunchEnv) == "" && pathWithin(exe, dir) {
+		f, err := os.CreateTemp(os.TempDir(), "DrawSplay-Uninstall-*.exe")
+		if err != nil {
+			installerReport(o.Quiet, "DrawSplay uninstall failed", fmt.Sprintf("prepare uninstaller: %v", err), showError)
+			return 1
+		}
+		tmp := f.Name()
+		if err := f.Close(); err != nil {
+			_ = os.Remove(tmp)
+			installerReport(o.Quiet, "DrawSplay uninstall failed", fmt.Sprintf("prepare uninstaller: %v", err), showError)
+			return 1
+		}
 		if err := copyFileReplacing(exe, tmp); err != nil {
 			installerReport(o.Quiet, "DrawSplay uninstall failed", fmt.Sprintf("prepare uninstaller: %v", err), showError)
 			return 1
@@ -652,18 +726,23 @@ func runUninstall(exe string, o installerOptions) int {
 
 	stopProcessesInDir(dir)
 
-	resultPath := filepath.Join(os.TempDir(), fmt.Sprintf("drawsplay-uninstall-%d.json", os.Getpid()))
-	_ = os.Remove(resultPath)
+	resultPath, err := newInstallerResultPath("drawsplay-uninstall")
+	if err != nil {
+		installerReport(o.Quiet, "DrawSplay uninstall failed", fmt.Sprintf("prepare result file: %v", err), showError)
+		return 1
+	}
 	defer os.Remove(resultPath)
-	reqPath := uninstallRequestPath(resultPath)
-	defer os.Remove(reqPath)
 	var problems []string
-	if err := writeJSONAtomic(reqPath, req); err != nil {
-		problems = append(problems, fmt.Sprintf("write dependency choices: %v", err))
+	args := fmt.Sprintf(`-uninstall-elevated "%s"`, resultPath)
+	if req.RemoveVDD {
+		args += " -uninstall-remove-vdd"
+	}
+	if req.RemoveZadig {
+		args += " -uninstall-remove-zadig"
 	}
 	if isProcessElevated() {
-		runUninstallElevated(resultPath)
-	} else if err := runElevatedAndWait(exe, fmt.Sprintf(`-uninstall-elevated "%s"`, resultPath), installElevateTimeout); err != nil {
+		runUninstallElevated(resultPath, req)
+	} else if err := runElevatedAndWait(elevatedUninstallerExe(exe, dir), args, installElevateTimeout); err != nil {
 		problems = append(problems, fmt.Sprintf("administrator phase: %v", err))
 	}
 	var res uninstallResult
@@ -743,10 +822,22 @@ func runUninstall(exe string, o installerOptions) int {
 }
 
 // runUninstallElevated is the administrator phase of uninstall.
-func runUninstallElevated(resultPath string) int {
+func runUninstallElevated(resultPath string, req uninstallRequest) int {
 	var res uninstallResult
 	dir := defaultInstallDir()
 	stopProcessesInDir(dir)
+	// Started from the installed copy: move it out of the folder (a running image can be renamed)
+	// into a protected staging folder, so the folder can be deleted; the copy is deleted on exit.
+	if self, err := os.Executable(); err == nil && pathWithin(self, dir) {
+		if stage, err := protectedStageDir("DrawSplay-uninstall-"); err == nil {
+			moved := filepath.Join(stage, filepath.Base(self))
+			if err := os.Rename(self, moved); err == nil {
+				defer scheduleTreeDelete(stage)
+			} else {
+				_ = os.Remove(stage)
+			}
+		}
+	}
 	for _, task := range []string{winusbBindTaskName} {
 		if out, err := runHiddenCommand(schtasksPath(), "/delete", "/tn", task, "/f"); err != nil {
 			if !strings.Contains(strings.ToLower(out), "cannot find") && !strings.Contains(strings.ToLower(out), "does not exist") {
@@ -755,8 +846,8 @@ func runUninstallElevated(resultPath string) int {
 		}
 	}
 	// Remove the task folder too (ignore failure: it may hold other tasks).
-	_, _ = runHiddenCommand(windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-		"$s=New-Object -ComObject Schedule.Service; $s.Connect(); try { $s.GetFolder('\\').DeleteFolder('DrawSplay',0) } catch {}")
+	_ = powerShellCommand(context.Background(),
+		"$s=New-Object -ComObject Schedule.Service; $s.Connect(); try { $s.GetFolder('\\').DeleteFolder('DrawSplay',0) } catch {}").Run()
 	if err := registry.DeleteKey(registry.LOCAL_MACHINE, uninstallRegKeyPath); err != nil && !errors.Is(err, registry.ErrNotExist) {
 		res.Errors = append(res.Errors, fmt.Sprintf("remove Apps & Features entry: %v", err))
 	}
@@ -770,14 +861,8 @@ func runUninstallElevated(resultPath string) int {
 	if rmErr != nil {
 		res.Errors = append(res.Errors, fmt.Sprintf("remove %s: %v", dir, rmErr))
 	}
-	var req uninstallRequest
-	if data, err := os.ReadFile(uninstallRequestPath(resultPath)); err == nil {
-		if err := json.Unmarshal(data, &req); err != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("read dependency choices: %v", err))
-		}
-	}
 	removeUninstallDeps(req, &res)
-	if err := writeJSONAtomic(resultPath, res); err != nil {
+	if err := writeElevatedResult(resultPath, res); err != nil {
 		return 1
 	}
 	if len(res.Errors) > 0 {
@@ -786,12 +871,35 @@ func runUninstallElevated(resultPath string) int {
 	return 0
 }
 
+// elevatedUninstallerExe picks the program to run with administrator rights.
+// The installed copy lives in the administrator-only install folder, so
+// nothing running as the user can swap it between the UAC prompt and its
+// start; the temporary copy in the user's temp folder could be. A portable
+// uninstall (nothing installed) has only its own executable.
+func elevatedUninstallerExe(exe, dir string) string {
+	installed := filepath.Join(dir, installHostExeName)
+	if fileExists(installed) {
+		return installed
+	}
+	return exe
+}
+
+// scheduleTreeDelete removes dir (holding this process's executable) after
+// the process exits.
+func scheduleTreeDelete(dir string) {
+	q := "'" + strings.ReplaceAll(dir, "'", "''") + "'"
+	script := "for($i=0;$i -lt 300;$i++){Remove-Item -LiteralPath " + q + " -Recurse -Force -ErrorAction SilentlyContinue; if(-not (Test-Path -LiteralPath " + q + ")){break}; Start-Sleep -Seconds 1}"
+	cmd := powerShellCommand(context.Background(), script)
+	if err := cmd.Start(); err == nil {
+		_ = cmd.Process.Release()
+	}
+}
+
 // scheduleSelfDelete removes the temporary uninstaller copy after it exits.
 func scheduleSelfDelete(exe string) {
 	q := "'" + strings.ReplaceAll(exe, "'", "''") + "'"
 	script := "for($i=0;$i -lt 300;$i++){Remove-Item -LiteralPath " + q + " -Force -ErrorAction SilentlyContinue; if(-not (Test-Path -LiteralPath " + q + ")){break}; Start-Sleep -Seconds 1}"
-	cmd := exec.Command(windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
-	hideChildWindow(cmd)
+	cmd := powerShellCommand(context.Background(), script)
 	if err := cmd.Start(); err == nil {
 		_ = cmd.Process.Release()
 	}
@@ -818,7 +926,7 @@ func stopProcessesInDir(dir string) {
 		}
 		buf := make([]uint16, windows.MAX_LONG_PATH)
 		n := uint32(len(buf))
-		if windows.QueryFullProcessImageName(h, 0, &buf[0], &n) == nil && pathInsideDir(windows.UTF16ToString(buf[:n]), dir) {
+		if windows.QueryFullProcessImageName(h, 0, &buf[0], &n) == nil && pathWithin(windows.UTF16ToString(buf[:n]), dir) {
 			if windows.TerminateProcess(h, 0) == nil {
 				_, _ = windows.WaitForSingleObject(h, 5000)
 			}
@@ -829,6 +937,16 @@ func stopProcessesInDir(dir string) {
 
 // installWantsAutostart is the sign-in autostart choice when not asking: the
 // explicit flag, else the current state on a reinstall, else enabled.
+// waitForProcessExit waits up to timeout for process pid to end.
+func waitForProcessExit(pid uint32, timeout time.Duration) {
+	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
+	if err != nil {
+		return // already gone
+	}
+	defer windows.CloseHandle(h)
+	_, _ = windows.WaitForSingleObject(h, uint32(timeout.Milliseconds()))
+}
+
 func installWantsAutostart(o installerOptions, reinstall bool) bool {
 	switch {
 	case o.NoAutostart:

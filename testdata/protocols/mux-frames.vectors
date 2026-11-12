@@ -1,0 +1,7 @@
+# Mux-v1 input-channel frames (every transport): magic 0x4453, version 1, stream, flags, sequence (4), payload length (4), payload; big-endian.
+# Streams: 1 control, 2 input, 3 video, 4 stats. Implementations: host/usbmux.go, android/.../transport/UsbMuxFrameCodec.kt.
+# Format of this file: one frame per line, name then key=value pairs; hex is lowercase, "-" is empty.
+hello stream=1 flags=0 seq=1 payload=7b2274797065223a2268656c6c6f227d wire=445301010000000001000000107b2274797065223a2268656c6c6f227d
+input stream=2 flags=0 seq=2 payload=7b2274223a22696e707574227d wire=4453010200000000020000000d7b2274223a22696e707574227d
+empty stream=1 flags=0 seq=3 payload=- wire=44530101000000000300000000
+flags-and-high-seq stream=2 flags=128 seq=4294967294 payload=78 wire=4453010280fffffffe0000000178

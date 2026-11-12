@@ -17,6 +17,13 @@ import (
 const driverStageSDDL = "O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
 
 func driverStageDir() (string, error) {
+	return protectedStageDir("DrawSplay-driver-")
+}
+
+// protectedStageDir creates a randomly named directory directly under the
+// machine's Program Files, owned by Administrators with a protected DACL
+// granting access only to SYSTEM and Administrators.
+func protectedStageDir(prefix string) (string, error) {
 	if !isProcessElevated() {
 		return "", errors.New("driver staging requires administrator approval")
 	}
@@ -33,7 +40,7 @@ func driverStageDir() (string, error) {
 	}
 	// Set owner and protected DACL at creation, not afterwards: even the
 	// installing user's filtered token must not be able to replace this ACL.
-	dir := filepath.Join(parent, "DrawSplay-driver-"+rand.Text())
+	dir := filepath.Join(parent, prefix+rand.Text())
 	path, err := windows.UTF16PtrFromString(dir)
 	if err != nil {
 		return "", err

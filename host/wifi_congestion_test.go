@@ -13,7 +13,7 @@ func feedWiFiStatsLines(t *testing.T, lines ...string) *sessionMonitor {
 	mon := newWiFiSessionMonitor()
 	done := make(chan struct{})
 	go func() {
-		mon.runStatsReader(hostConn)
+		mon.runFeedback(newLineFeedback(hostConn))
 		close(done)
 	}()
 	for _, line := range lines {

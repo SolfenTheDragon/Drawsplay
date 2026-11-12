@@ -66,12 +66,12 @@ func runElevatedAndWait(file, args string, timeout time.Duration) error {
 	ret, _, callErr := procShellExecuteExW.Call(uintptr(unsafe.Pointer(&info)))
 	if ret == 0 {
 		if errors.Is(callErr, windows.ERROR_CANCELLED) {
-			return fmt.Errorf("elevation declined by user")
+			return errors.New("elevation declined by user")
 		}
-		return fmt.Errorf("ShellExecuteEx: %v", callErr)
+		return fmt.Errorf("ShellExecuteEx: %w", callErr)
 	}
 	if info.hProcess == 0 {
-		return fmt.Errorf("process started but no handle returned")
+		return errors.New("process started but no handle returned")
 	}
 	defer windows.CloseHandle(info.hProcess)
 

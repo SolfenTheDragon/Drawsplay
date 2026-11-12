@@ -94,43 +94,15 @@ type winusbAttemptState struct {
 	Attempts map[string]winusbAttempt `json:"attempts"`
 }
 
-// userStateDir returns %APPDATA%\DrawSplay (os.UserConfigDir()/DrawSplay)
-// without creating it.
+// userStateDir returns the per-user DrawSplay directory (os.UserConfigDir()/
+// DrawSplay: %APPDATA%\DrawSplay on Windows) without creating it. configDir
+// is the same directory, created on demand.
 func userStateDir() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(base, "DrawSplay"), nil
-}
-
-// writeJSONAtomic writes v as indented JSON via temp file + rename.
-func writeJSONAtomic(path string, v any) error {
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	_, err = tmp.Write(append(data, '\n'))
-	closeErr := tmp.Close()
-	if err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	return nil
 }
 
 // readInstallManifest loads a manifest file. ok is false when the file does
@@ -201,20 +173,6 @@ func isUninstallerExeName(path string) bool {
 // arguments instead of offering a portable run.
 func isInstallerExeName(path string) bool {
 	return strings.Contains(strings.ToLower(filepath.Base(path)), "installer") && !isUninstallerExeName(path)
-}
-
-// pathInsideDir reports whether path is dir or lies beneath it, comparing
-// case-insensitively (Windows paths).
-func pathInsideDir(path, dir string) bool {
-	if path == "" || dir == "" {
-		return false
-	}
-	p := strings.ToLower(filepath.Clean(path))
-	d := strings.ToLower(filepath.Clean(dir))
-	if p == d {
-		return true
-	}
-	return strings.HasPrefix(p, strings.TrimRight(d, `\/`)+string(filepath.Separator))
 }
 
 // hiddenCommandContext is exec.CommandContext without a console window on

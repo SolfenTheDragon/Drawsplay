@@ -1,0 +1,977 @@
+//! dd-client: connects to a dd-host, shows its video in a window (or fullscreen) and sends
+//! mouse, keyboard, touch and pen input back.
+
+mod keys;
+mod pen;
+mod session;
+
+use dd_proto::{Message, PointerPhase, PointerSource, DEFAULT_PORT};
+use session::{FrameSlot, Settings, UiEvent};
+use std::collections::HashSet;
+use std::num::NonZeroU32;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Sender};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use winit::application::ApplicationHandler;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::event::{ElementState, Force, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::PhysicalKey;
+use winit::window::{Fullscreen, Window, WindowId};
+
+struct Args {
+    host: String,
+    width: u32,
+    height: u32,
+    fps: u32,
+    ffmpeg: String,
+    fullscreen: bool,
+    trust_all: bool,
+    hwdec: bool,
+    fit: bool,
+    size_given: bool,
+    show_key: bool,
+    trust_key: Option<String>,
+    list_trusted: bool,
+    forget: Option<String>,
+    manage_trusted: bool,
+    terminal: bool,
+}
+
+fn connection_entry(args: &mut Args) -> bool {
+    use dd_proto::desktop_ui::{choose, entry, manage};
+    loop {
+        match choose(
+            "DrawSplay Desktop",
+            "Connect to another PC running dd-host.\nOnly approve pairing when both screens show the same code.",
+            &["Connect", "Trusted devices", "Quit"],
+        )
+        .ok()
+        .flatten()
+        .as_deref()
+        {
+            Some("Connect") => {
+                let Some(host) =
+                    entry("Connect to PC", "Host name or IP address, optionally :PORT (IPv6: [address]:PORT)")
+                        .ok()
+                        .flatten()
+                else {
+                    continue;
+                };
+                if host.trim().is_empty() {
+                    continue;
+                }
+                args.host = with_default_port(host.trim());
+                match choose(
+                    "Display",
+                    "Choose how to display the remote PC.",
+                    &["Window - fit", "Fullscreen - fit", "Window - 1:1"],
+                )
+                .ok()
+                .flatten()
+                .as_deref()
+                {
+                    Some("Window - fit") => {
+                        args.fit = true;
+                        args.fullscreen = false;
+                    }
+                    Some("Fullscreen - fit") => {
+                        args.fit = true;
+                        args.fullscreen = true;
+                    }
+                    Some("Window - 1:1") => {
+                        args.fit = false;
+                        args.fullscreen = false;
+                    }
+                    _ => {
+                        args.host.clear();
+                        continue;
+                    }
+                }
+                if args.trust_all
+                    && !is_loopback_target(&args.host)
+                    && std::env::var("DD_INSECURE_TRUST_ALL").as_deref() != Ok("1")
+                {
+                    let _ = choose("Connection refused", "--trust-all is only allowed on loopback.", &["Back"]);
+                    args.host.clear();
+                    continue;
+                }
+                return true;
+            }
+            Some("Trusted devices") => {
+                let _ = manage("client", "trusted_hosts.txt");
+            }
+            _ => return false,
+        }
+    }
+}
+
+fn parse_args() -> Result<Args, String> {
+    let mut a = Args {
+        host: String::new(),
+        width: 1280,
+        height: 720,
+        fps: 60,
+        ffmpeg: "ffmpeg".into(),
+        fullscreen: false,
+        trust_all: false,
+        hwdec: true,
+        fit: false,
+        size_given: false,
+        show_key: false,
+        trust_key: None,
+        list_trusted: false,
+        forget: None,
+        manage_trusted: false,
+        terminal: false,
+    };
+    let mut it = std::env::args().skip(1);
+    while let Some(k) = it.next() {
+        match k.as_str() {
+            "--size" => {
+                let v = it.next().ok_or("--size WxH")?;
+                let (w, h) = v.split_once('x').ok_or("--size WxH")?;
+                a.width = w.parse().map_err(|e| format!("{e}"))?;
+                a.height = h.parse().map_err(|e| format!("{e}"))?;
+                if !dd_proto::video_size_ok(a.width, a.height) {
+                    return Err("--size out of range".into());
+                }
+                a.size_given = true;
+            }
+            "--fps" => a.fps = it.next().ok_or("--fps N")?.parse().map_err(|e| format!("{e}"))?,
+            "--ffmpeg" => a.ffmpeg = it.next().ok_or("--ffmpeg PATH")?,
+            "--fullscreen" => a.fullscreen = true,
+            "--trust-all" => a.trust_all = true,
+            "--no-hwdec" => a.hwdec = false,
+            "--fit" => a.fit = true,
+            "--show-key" => a.show_key = true,
+            "--list-trusted" => a.list_trusted = true,
+            "--manage-trusted" => a.manage_trusted = true,
+            "--terminal" => a.terminal = true,
+            "--forget" => a.forget = Some(it.next().ok_or("--forget KEY_PREFIX")?),
+            "--trust" => a.trust_key = Some(it.next().ok_or("--trust HOST_KEY")?),
+            "-h" | "--help" => {
+                println!(
+                    "dd-client [HOST[:PORT]] [--size WxH] [--fps N] [--fullscreen] [--no-hwdec] [--fit]\n          [--trust-all] [--ffmpeg PATH] [--terminal]\n          [--show-key] [--trust HOST_KEY] [--list-trusted] [--forget KEY_PREFIX] [--manage-trusted]\n\nWithout HOST, opens the connection/device manager.\n--terminal uses terminal prompts instead of native dialogs.\n--fullscreen uses this screen's native size unless --size is given.\n--fit scales the picture to fill the window (keeps the aspect ratio); otherwise it is shown 1:1.\n--trust-all skips the pairing-code check (testing only).\nCtrl+Alt+Shift+Q closes the client."
+                );
+                std::process::exit(0);
+            }
+            o if !o.starts_with('-') && a.host.is_empty() => a.host = o.to_string(),
+            o => return Err(format!("unknown argument {o}")),
+        }
+    }
+    a.host = with_default_port(&a.host);
+    // Without the pairing check anyone who answers at that address is taken for the host: it sees every
+    // key typed into this window and shows whatever it likes. Same rule as `dd-host --trust-all`.
+    if a.trust_all
+        && !a.host.is_empty()
+        && !is_loopback_target(&a.host)
+        && std::env::var("DD_INSECURE_TRUST_ALL").as_deref() != Ok("1")
+    {
+        return Err("--trust-all is only allowed for a loopback HOST (for example 127.0.0.1): without the pairing \
+                    check anyone on the network could pose as the host"
+            .into());
+    }
+    Ok(a)
+}
+
+/// Is `host` (`ADDR:PORT` or `name:PORT`) this computer itself?
+fn is_loopback_target(host: &str) -> bool {
+    use std::net::SocketAddr;
+    match host.parse::<SocketAddr>() {
+        Ok(a) => a.ip().is_loopback(),
+        Err(_) => host.rsplit_once(':').is_some_and(|(name, _)| name.eq_ignore_ascii_case("localhost")),
+    }
+}
+
+/// `host`, `1.2.3.4`, `::1` and `[::1]` get the default port; anything that already has one is kept.
+fn with_default_port(h: &str) -> String {
+    use std::net::{IpAddr, SocketAddr};
+    if h.is_empty() || h.parse::<SocketAddr>().is_ok() {
+        return h.to_string();
+    }
+    if let Ok(ip) = h.parse::<IpAddr>() {
+        return SocketAddr::new(ip, DEFAULT_PORT).to_string();
+    }
+    if h.starts_with('[') && h.ends_with(']') || !h.contains(':') {
+        return format!("{h}:{DEFAULT_PORT}");
+    }
+    h.to_string() // name:port
+}
+
+fn main() {
+    let mut args = match parse_args() {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(2);
+        }
+    };
+    dd_proto::desktop_ui::use_terminal(args.terminal);
+    match dd_proto::identity::key_commands(
+        "client",
+        "trusted_hosts.txt",
+        args.show_key,
+        args.trust_key.as_deref(),
+        args.list_trusted,
+        args.forget.as_deref(),
+    ) {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
+    }
+    if args.manage_trusted {
+        let _ = dd_proto::desktop_ui::manage("client", "trusted_hosts.txt");
+        return;
+    }
+    if args.host.is_empty() && !connection_entry(&mut args) {
+        return;
+    }
+    let mut builder = EventLoop::<UiEvent>::with_user_event();
+    #[cfg(windows)]
+    {
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+        // Reads pen tilt, barrel and eraser, which winit 0.30 drops (see `pen`).
+        builder.with_msg_hook(pen::windows_hook);
+    }
+    let event_loop = builder.build().expect("cannot create event loop");
+    event_loop.set_control_flow(ControlFlow::Wait);
+    let mut app = App::new(args, event_loop.create_proxy());
+    if let Err(e) = event_loop.run_app(&mut app) {
+        eprintln!("error: {e}");
+        app.exit_code = 1;
+    }
+    app.cancel.store(true, Ordering::Release);
+    app.tx = None;
+    for worker in app.workers.drain(..) {
+        let _ = worker.join();
+    }
+    std::process::exit(app.exit_code);
+}
+
+struct Gfx {
+    window: Rc<Window>,
+    surface: softbuffer::Surface<Rc<Window>, Rc<Window>>,
+}
+
+struct App {
+    args: Args,
+    proxy: winit::event_loop::EventLoopProxy<UiEvent>,
+    gfx: Option<Gfx>,
+    slot: Arc<FrameSlot>,
+    tx: Option<Sender<Message>>,
+    /// Video size once connected.
+    video: Option<(u32, u32)>,
+    last: Vec<u32>,
+    need_clear: bool,
+    exit_code: i32,
+    // input state
+    buttons: u8,
+    pos: PhysicalPosition<f64>,
+    pressed: HashSet<u16>,
+    /// Touch/pen contacts that went down on the video and have not lifted yet.
+    touches: HashSet<u64>,
+    /// The subset of `touches` that are pens.
+    pens: HashSet<u64>,
+    /// Last normalized position of each held touch, so a forced lift happens where the finger was.
+    touch_pos: std::collections::HashMap<u64, (f32, f32)>,
+    // stats
+    shown: u32,
+    stats_at: Instant,
+    rtt_ms: f32,
+    status: Option<String>,
+    online: Arc<AtomicBool>,
+    cancel: Arc<AtomicBool>,
+    finished: bool,
+    workers: Vec<std::thread::JoinHandle<()>>,
+}
+
+impl App {
+    fn new(args: Args, proxy: winit::event_loop::EventLoopProxy<UiEvent>) -> App {
+        App {
+            args,
+            proxy,
+            gfx: None,
+            slot: Arc::new(FrameSlot::default()),
+            tx: None,
+            video: None,
+            last: Vec::new(),
+            need_clear: true,
+            exit_code: 0,
+            buttons: 0,
+            pos: PhysicalPosition::new(0.0, 0.0),
+            pressed: HashSet::new(),
+            touches: HashSet::new(),
+            pens: HashSet::new(),
+            touch_pos: std::collections::HashMap::new(),
+            shown: 0,
+            stats_at: Instant::now(),
+            rtt_ms: 0.0,
+            status: Some("Connecting to PC...".into()),
+            online: Arc::new(AtomicBool::new(false)),
+            cancel: Arc::new(AtomicBool::new(false)),
+            finished: false,
+            workers: Vec::new(),
+        }
+    }
+
+    fn send(&self, m: Message) {
+        if let Some(tx) = self.tx.as_ref().filter(|_| self.online.load(Ordering::Acquire)) {
+            let _ = tx.send(m);
+        }
+    }
+
+    /// Where the video sits inside the window: (x, y, w, h), centered; scaled only with `--fit`.
+    fn video_rect(&self) -> Option<(i32, i32, u32, u32)> {
+        let (vw, vh) = self.video?;
+        let size = self.gfx.as_ref()?.window.inner_size();
+        let (dw, dh) = if self.args.fit { fit_size((vw, vh), (size.width, size.height)) } else { (vw, vh) };
+        Some(((size.width as i32 - dw as i32) / 2, (size.height as i32 - dh as i32) / 2, dw, dh))
+    }
+
+    /// Is the window position over the video itself (not the letterbox bars)?
+    fn over_video(&self, p: PhysicalPosition<f64>) -> bool {
+        self.video_rect().is_some_and(|(x, y, w, h)| {
+            p.x >= x as f64 && p.y >= y as f64 && p.x < (x + w as i32) as f64 && p.y < (y + h as i32) as f64
+        })
+    }
+
+    /// Window position -> 0..1 over the video (clamped to its edges).
+    fn normalize(&self, p: PhysicalPosition<f64>) -> Option<(f32, f32)> {
+        let (x, y, w, h) = self.video_rect()?;
+        let nx = ((p.x - x as f64) / (w.max(2) - 1) as f64).clamp(0.0, 1.0) as f32;
+        let ny = ((p.y - y as f64) / (h.max(2) - 1) as f64).clamp(0.0, 1.0) as f32;
+        Some((nx, ny))
+    }
+
+    fn pointer(
+        &self,
+        id: u8,
+        source: PointerSource,
+        phase: PointerPhase,
+        p: PhysicalPosition<f64>,
+        pressure: f32,
+        buttons: u8,
+    ) {
+        if let Some((x, y)) = self.normalize(p) {
+            self.send(Message::Pointer {
+                id,
+                source,
+                phase,
+                x,
+                y,
+                pressure,
+                buttons,
+                tilt_x: 0,
+                tilt_y: 0,
+                wheel_x: 0.0,
+                wheel_y: 0.0,
+            });
+        }
+    }
+
+    fn release_everything(&mut self) {
+        for code in self.pressed.drain().collect::<Vec<_>>() {
+            self.send(Message::Key { code, down: false });
+        }
+        for id in self.touches.drain().collect::<Vec<_>>() {
+            // Lift where the finger last was: some hosts (Windows) act on the position of the Up.
+            let (x, y) = self.touch_pos.remove(&id).unwrap_or((0.0, 0.0));
+            let source = if self.pens.remove(&id) { PointerSource::Pen } else { PointerSource::Touch };
+            pen::forget(id);
+            self.send(Message::Pointer {
+                id: (id & 0xFF) as u8,
+                source,
+                phase: PointerPhase::Up,
+                x,
+                y,
+                pressure: 0.0,
+                buttons: 0,
+                tilt_x: 0,
+                tilt_y: 0,
+                wheel_x: 0.0,
+                wheel_y: 0.0,
+            });
+        }
+        if self.buttons != 0 {
+            let p = self.pos;
+            self.buttons = 0;
+            self.pointer(0, PointerSource::Mouse, PointerPhase::Up, p, 0.0, 0);
+        }
+    }
+
+    fn draw(&mut self) {
+        if self.status.is_some() {
+            self.draw_status();
+            return;
+        }
+        let Some((vx, vy, vw, vh)) = self.video_rect() else { return };
+        if let Some(f) = self.slot.take() {
+            let old = std::mem::replace(&mut self.last, f);
+            if !old.is_empty() {
+                self.slot.recycle(old);
+            }
+            self.shown += 1;
+        }
+        let Some(g) = self.gfx.as_mut() else { return };
+        let size = g.window.inner_size();
+        let (Some(nw), Some(nh)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else { return };
+        if g.surface.resize(nw, nh).is_err() {
+            return;
+        }
+        let Ok(mut buf) = g.surface.buffer_mut() else { return };
+        let (ww, wh) = (size.width as i32, size.height as i32);
+        if self.need_clear {
+            buf.fill(0xFF00_0000);
+            self.need_clear = false;
+        } else if vx > 0 || vy > 0 || vx + vw as i32 != ww || vy + vh as i32 != wh {
+            // Letterboxed: repaint only the bars, not the picture area.
+            for y in 0..wh {
+                let row = (y as usize) * ww as usize;
+                if y < vy || y >= vy + vh as i32 {
+                    buf[row..row + ww as usize].fill(0xFF00_0000);
+                } else {
+                    let (l, r) = (vx.clamp(0, ww) as usize, (vx + vw as i32).clamp(0, ww) as usize);
+                    buf[row..row + l].fill(0xFF00_0000);
+                    buf[row + r..row + ww as usize].fill(0xFF00_0000);
+                }
+            }
+        }
+        if let Some((sw, sh)) = self.video.filter(|&(sw, sh)| self.last.len() == (sw * sh) as usize) {
+            blit(&self.last, (sw, sh), &mut buf, (size.width, size.height), (vx, vy, vw, vh));
+        }
+        let _ = buf.present();
+
+        if self.stats_at.elapsed() >= Duration::from_secs(5) {
+            eprintln!(
+                "{:.1} fps shown, rtt {:.1} ms",
+                self.shown as f32 / self.stats_at.elapsed().as_secs_f32(),
+                self.rtt_ms
+            );
+            self.shown = 0;
+            self.stats_at = Instant::now();
+        }
+    }
+}
+
+impl App {
+    fn manage_devices(&mut self) {
+        let cancelled = self.cancel.clone();
+        self.workers.push(std::thread::spawn(move || {
+            let _ = dd_proto::desktop_ui::manage_until("client", "trusted_hosts.txt", cancelled);
+        }));
+    }
+
+    fn show_status(&mut self, text: String) {
+        self.release_everything();
+        self.video = None;
+        self.last.clear();
+        self.slot.take();
+        self.status = Some(text);
+        if let Some(g) = &self.gfx {
+            g.window.request_redraw();
+        }
+    }
+
+    fn draw_status(&mut self) {
+        let Some(g) = self.gfx.as_mut() else { return };
+        let size = g.window.inner_size();
+        let (Some(w), Some(h)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else { return };
+        if g.surface.resize(w, h).is_err() {
+            return;
+        }
+        let Ok(mut buf) = g.surface.buffer_mut() else { return };
+        buf.fill(0x00182030);
+        let dims = (size.width as usize, size.height as usize);
+        status_text(&mut buf, dims, 16, 40, "DRAWSPLAY DESKTOP");
+        status_text(&mut buf, dims, 64, dims.1.saturating_sub(80), self.status.as_deref().unwrap_or(""));
+        status_text(
+            &mut buf,
+            dims,
+            dims.1.saturating_sub(64),
+            dims.1.saturating_sub(36),
+            if self.finished { "R:RETRY T:DEVICES" } else { "INPUT DISABLED" },
+        );
+        status_text(&mut buf, dims, dims.1.saturating_sub(32), dims.1, "Q / ESC: QUIT");
+        let _ = buf.present();
+    }
+
+    fn start_session(&mut self) {
+        self.cancel.store(true, Ordering::Release);
+        self.workers.retain(|worker| !worker.is_finished());
+        let (tx, rx) = channel();
+        self.tx = Some(tx);
+        self.cancel = Arc::new(AtomicBool::new(false));
+        self.finished = false;
+        self.status = Some("Connecting to PC...".into());
+        let settings = Settings {
+            host: self.args.host.clone(),
+            width: self.args.width,
+            height: self.args.height,
+            fps: self.args.fps,
+            ffmpeg: self.args.ffmpeg.clone(),
+            trust_all: self.args.trust_all,
+            hwdec: self.args.hwdec,
+            online: self.online.clone(),
+            cancel: self.cancel.clone(),
+        };
+        let slot = self.slot.clone();
+        let proxy = self.proxy.clone();
+        self.workers.push(std::thread::spawn(move || {
+            session::run(settings, rx, slot, move |ev| {
+                let _ = proxy.send_event(ev);
+            })
+        }));
+        if let Some(g) = &self.gfx {
+            g.window.request_redraw();
+        }
+    }
+}
+
+fn status_text(buf: &mut [u32], (width, height): (usize, usize), top: usize, bottom: usize, text: &str) {
+    use font8x8::UnicodeFonts;
+    let cols = (width / 16).saturating_sub(2).max(1);
+    let (mut x, mut y, mut col) = (16usize, top, 0usize);
+    for ch in text.chars() {
+        if ch == '\n' || col >= cols {
+            x = 16;
+            y += 20;
+            col = 0;
+            if ch == '\n' {
+                continue;
+            }
+        }
+        if y + 16 > bottom.min(height) {
+            break;
+        }
+        let glyph = font8x8::BASIC_FONTS.get(ch).unwrap_or_else(|| font8x8::BASIC_FONTS.get('?').unwrap());
+        for (gy, bits) in glyph.iter().enumerate() {
+            for gx in 0..8 {
+                if bits & (1 << gx) == 0 {
+                    continue;
+                }
+                for sy in 0..2 {
+                    for sx in 0..2 {
+                        let (px, py) = (x + gx * 2 + sx, y + gy * 2 + sy);
+                        if px < width {
+                            buf[py * width + px] = 0x00ffffff;
+                        }
+                    }
+                }
+            }
+        }
+        x += 16;
+        col += 1;
+    }
+}
+
+fn track_key(pressed: &mut HashSet<u16>, code: u16, down: bool, repeat: bool) -> bool {
+    if down {
+        if repeat && !pressed.contains(&code) {
+            return false; // A key held through a disconnect is not a new press.
+        }
+        pressed.insert(code);
+        true
+    } else {
+        pressed.remove(&code)
+    }
+}
+
+/// Largest size with the video's aspect ratio that fits the window.
+fn fit_size((vw, vh): (u32, u32), (ww, wh): (u32, u32)) -> (u32, u32) {
+    if vw == 0 || vh == 0 || ww == 0 || wh == 0 {
+        return (vw, vh);
+    }
+    if (ww as u64) * (vh as u64) <= (wh as u64) * (vw as u64) {
+        (ww, ((vh as u64 * ww as u64) / vw as u64).max(1) as u32)
+    } else {
+        (((vw as u64 * wh as u64) / vh as u64).max(1) as u32, wh)
+    }
+}
+
+/// Copy `src` into the window buffer at `dst_rect` (x, y, w, h), clipped to the window. When the
+/// rectangle is not the source size the picture is scaled (nearest neighbour).
+fn blit(
+    src: &[u32],
+    (sw, sh): (u32, u32),
+    dst: &mut [u32],
+    (ww, wh): (u32, u32),
+    (dx, dy, dw, dh): (i32, i32, u32, u32),
+) {
+    let (x0, x1) = (dx.max(0), (dx + dw as i32).min(ww as i32));
+    if x1 <= x0 {
+        return;
+    }
+    let xmap: Option<Vec<u32>> =
+        (dw != sw).then(|| (x0..x1).map(|x| ((x - dx) as u64 * sw as u64 / dw as u64) as u32).collect());
+    for y in dy.max(0)..(dy + dh as i32).min(wh as i32) {
+        let sy = if dh == sh { (y - dy) as u32 } else { ((y - dy) as u64 * sh as u64 / dh as u64) as u32 };
+        let srow = &src[(sy * sw) as usize..((sy + 1) * sw) as usize];
+        let d = (y as usize) * ww as usize;
+        let out = &mut dst[d + x0 as usize..d + x1 as usize];
+        match &xmap {
+            None => out.copy_from_slice(&srow[(x0 - dx) as usize..(x1 - dx) as usize]),
+            Some(m) => out.iter_mut().zip(m).for_each(|(o, &sx)| *o = srow[sx as usize]),
+        }
+    }
+}
+
+impl ApplicationHandler<UiEvent> for App {
+    fn resumed(&mut self, el: &ActiveEventLoop) {
+        if self.gfx.is_some() {
+            return;
+        }
+        let mut attrs = Window::default_attributes().with_title("DrawSplay Desktop");
+        if self.args.size_given || !self.args.fullscreen {
+            attrs = attrs.with_inner_size(PhysicalSize::new(self.args.width, self.args.height));
+        }
+        if self.args.fullscreen {
+            attrs = attrs.with_fullscreen(Some(Fullscreen::Borderless(None)));
+        }
+        let window = Rc::new(el.create_window(attrs).expect("cannot create window"));
+        let ctx = softbuffer::Context::new(window.clone()).expect("cannot create graphics context");
+        let surface = softbuffer::Surface::new(&ctx, window.clone()).expect("cannot create surface");
+
+        // Ask for the size we are actually going to show.
+        let (width, height) = if self.args.fullscreen && !self.args.size_given {
+            let s = window.current_monitor().map(|m| m.size()).unwrap_or(window.inner_size());
+            (s.width, s.height)
+        } else {
+            (self.args.width, self.args.height)
+        };
+        let refresh = window
+            .current_monitor()
+            .and_then(|m| m.refresh_rate_millihertz())
+            .map(|m| (m + 500) / 1000)
+            .filter(|_| self.args.fullscreen)
+            .unwrap_or(self.args.fps);
+        self.gfx = Some(Gfx { window, surface });
+
+        self.args.width = width;
+        self.args.height = height;
+        self.args.fps = refresh;
+        self.start_session();
+    }
+
+    fn user_event(&mut self, el: &ActiveEventLoop, ev: UiEvent) {
+        match ev {
+            UiEvent::Connected { width, height, fps } => {
+                eprintln!("connected: {width}x{height}@{fps}");
+                self.exit_code = 0;
+                self.video = Some((width, height));
+                self.need_clear = true;
+                self.status = Some("Connected. Waiting for first video frame...".into());
+                if let Some(g) = &self.gfx {
+                    g.window.request_redraw();
+                }
+            }
+            UiEvent::Frame => {
+                if self.online.load(Ordering::Acquire) && self.status.take().is_some() {
+                    eprintln!("video ready");
+                }
+                if let Some(g) = &self.gfx {
+                    g.window.request_redraw();
+                }
+            }
+            UiEvent::Rtt(ms) => self.rtt_ms = ms,
+            UiEvent::Closed(reason) => {
+                eprintln!("{reason}");
+                if reason != "connection closed" {
+                    self.exit_code = 1;
+                }
+                self.finished = true;
+                self.show_status(reason.clone());
+                if dd_proto::desktop_ui::graphical_available() {
+                    let request = self.cancel.clone();
+                    let proxy = self.proxy.clone();
+                    self.workers.push(std::thread::spawn(move || {
+                        let action = dd_proto::desktop_ui::choose_until(
+                            "DrawSplay: connection ended",
+                            &reason,
+                            &["Retry", "Trusted devices", "Quit"],
+                            || !request.load(Ordering::Acquire),
+                        )
+                        .ok()
+                        .flatten();
+                        let _ = proxy.send_event(UiEvent::Decision { action, request });
+                    }));
+                }
+            }
+            UiEvent::Status(text) => self.show_status(text),
+            UiEvent::Decision { action, request } => {
+                if request.load(Ordering::Acquire) {
+                    return;
+                }
+                match action.as_deref() {
+                    Some("Retry") => self.start_session(),
+                    Some("Trusted devices") => {
+                        self.manage_devices();
+                    }
+                    Some("Quit") => {
+                        self.cancel.store(true, Ordering::Release);
+                        self.tx = None;
+                        el.exit();
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        if self.status.is_some() || !self.online.load(Ordering::Acquire) {
+            match &event {
+                WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                    use winit::keyboard::KeyCode;
+                    match event.physical_key {
+                        PhysicalKey::Code(KeyCode::KeyQ | KeyCode::Escape) => {
+                            self.cancel.store(true, Ordering::Release);
+                            self.tx = None;
+                            el.exit();
+                        }
+                        PhysicalKey::Code(KeyCode::KeyR) if self.finished => self.start_session(),
+                        PhysicalKey::Code(KeyCode::KeyT) if self.finished => {
+                            self.manage_devices();
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
+                WindowEvent::CursorMoved { .. }
+                | WindowEvent::MouseInput { .. }
+                | WindowEvent::MouseWheel { .. }
+                | WindowEvent::Touch(_)
+                | WindowEvent::KeyboardInput { .. } => return,
+                _ => {}
+            }
+        }
+        match event {
+            WindowEvent::CloseRequested => {
+                self.cancel.store(true, Ordering::Release);
+                self.tx = None; // ends the session thread
+                el.exit();
+            }
+
+            WindowEvent::RedrawRequested => self.draw(),
+            WindowEvent::Resized(_) => {
+                self.need_clear = true;
+                if let Some(g) = &self.gfx {
+                    g.window.request_redraw();
+                }
+            }
+            WindowEvent::Focused(false) => self.release_everything(),
+            WindowEvent::CursorMoved { position, .. } => {
+                self.pos = position;
+                let (phase, pressure) =
+                    if self.buttons != 0 { (PointerPhase::Move, 1.0) } else { (PointerPhase::Hover, 0.0) };
+                self.pointer(0, PointerSource::Mouse, phase, position, pressure, self.buttons);
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let bit = match button {
+                    MouseButton::Left => 1,
+                    MouseButton::Right => 2,
+                    MouseButton::Middle => 4,
+                    _ => return,
+                };
+                let down = state == ElementState::Pressed;
+                if down && !self.over_video(self.pos) {
+                    return; // a click on the letterbox bars is not a click on the video edge
+                }
+                if !down && self.buttons & bit == 0 {
+                    return; // matching press was ignored
+                }
+                if down {
+                    self.buttons |= bit;
+                } else {
+                    self.buttons &= !bit;
+                }
+                let phase = if down { PointerPhase::Down } else { PointerPhase::Up };
+                let pressure = if self.buttons != 0 { 1.0 } else { 0.0 };
+                self.pointer(0, PointerSource::Mouse, phase, self.pos, pressure, self.buttons);
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let (dx, dy) = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => (x, y),
+                    MouseScrollDelta::PixelDelta(p) => (p.x as f32 / 40.0, p.y as f32 / 40.0),
+                };
+                if let Some((x, y)) = self.normalize(self.pos) {
+                    self.send(Message::Pointer {
+                        id: 0,
+                        source: PointerSource::Mouse,
+                        phase: PointerPhase::Wheel,
+                        x,
+                        y,
+                        pressure: 0.0,
+                        buttons: self.buttons,
+                        tilt_x: 0,
+                        tilt_y: 0,
+                        wheel_x: dx,
+                        wheel_y: dy,
+                    });
+                }
+            }
+            WindowEvent::Touch(t) => {
+                let phase = match t.phase {
+                    TouchPhase::Started => PointerPhase::Down,
+                    TouchPhase::Moved => PointerPhase::Move,
+                    TouchPhase::Ended | TouchPhase::Cancelled => PointerPhase::Up,
+                };
+                let touch_pressure = match t.force {
+                    Some(Force::Calibrated { force, max_possible_force, .. }) => {
+                        if max_possible_force > 0.0 {
+                            (force / max_possible_force) as f32
+                        } else {
+                            1.0
+                        }
+                    }
+                    Some(Force::Normalized(p)) => p as f32,
+                    None if phase == PointerPhase::Up => 0.0,
+                    None => 1.0,
+                };
+                // winit 0.30 reports a pen as a touch. On Windows the message hook in `pen` records
+                // which touches are pens, with their tilt and buttons; elsewhere this is always None.
+                let (source, pressure, tilt_x, tilt_y, buttons) = match pen::sample(t.id) {
+                    Some(s) => {
+                        (PointerSource::Pen, s.pressure.unwrap_or(touch_pressure), s.tilt_x, s.tilt_y, s.buttons())
+                    }
+                    None => (PointerSource::Touch, touch_pressure, 0, 0, 0),
+                };
+                if phase == PointerPhase::Up {
+                    pen::forget(t.id);
+                }
+                match phase {
+                    PointerPhase::Down if !self.over_video(t.location) => return,
+                    PointerPhase::Down => {
+                        self.touches.insert(t.id);
+                        if source == PointerSource::Pen {
+                            self.pens.insert(t.id);
+                        }
+                    }
+                    PointerPhase::Up => {
+                        self.pens.remove(&t.id);
+                        if !self.touches.remove(&t.id) {
+                            return;
+                        }
+                    }
+                    _ => {
+                        if !self.touches.contains(&t.id) {
+                            return;
+                        }
+                    }
+                }
+                if let Some((x, y)) = self.normalize(t.location) {
+                    if phase == PointerPhase::Up {
+                        self.touch_pos.remove(&t.id);
+                    } else {
+                        self.touch_pos.insert(t.id, (x, y));
+                    }
+                    self.send(Message::Pointer {
+                        id: (t.id & 0xFF) as u8,
+                        source,
+                        phase,
+                        x,
+                        y,
+                        pressure: pressure.clamp(0.0, 1.0),
+                        buttons,
+                        tilt_x,
+                        tilt_y,
+                        wheel_x: 0.0,
+                        wheel_y: 0.0,
+                    });
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let PhysicalKey::Code(code) = event.physical_key {
+                    if let Some(hid) = keys::hid(code) {
+                        let down = event.state == ElementState::Pressed;
+                        if !track_key(&mut self.pressed, hid, down, event.repeat) {
+                            return;
+                        }
+                        // Local escape hatch so a fullscreen client can always be left.
+                        if down
+                            && code == winit::keyboard::KeyCode::KeyQ
+                            && [0xE0u16, 0xE4].iter().any(|k| self.pressed.contains(k))
+                            && [0xE2u16, 0xE6].iter().any(|k| self.pressed.contains(k))
+                            && [0xE1u16, 0xE5].iter().any(|k| self.pressed.contains(k))
+                        {
+                            self.release_everything();
+                            self.tx = None;
+                            el.exit();
+                            return;
+                        }
+                        self.send(Message::Key { code: hid, down });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn held_keys_do_not_resume_after_connection_state_is_cleared() {
+        let mut pressed = std::collections::HashSet::new();
+        assert!(super::track_key(&mut pressed, 4, true, false));
+        assert!(super::track_key(&mut pressed, 4, true, true));
+        pressed.clear(); // Disconnect/focus loss releases local input state.
+        assert!(!super::track_key(&mut pressed, 4, true, true));
+        assert!(!super::track_key(&mut pressed, 4, false, false));
+        assert!(super::track_key(&mut pressed, 4, true, false));
+        assert!(super::track_key(&mut pressed, 4, false, false));
+    }
+
+    #[test]
+    fn trust_all_is_only_for_this_computer() {
+        for ok in ["127.0.0.1:47800", "[::1]:47800", "localhost:47800", "LOCALHOST:1"] {
+            assert!(super::is_loopback_target(ok), "{ok}");
+        }
+        for bad in
+            ["192.168.1.5:47800", "example.com:47800", "[2001:db8::1]:47800", "localhost.evil.com:47800", "10.0.0.1:1"]
+        {
+            assert!(!super::is_loopback_target(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn fit_keeps_aspect_and_fills_one_axis() {
+        assert_eq!(super::fit_size((1280, 720), (1920, 1080)), (1920, 1080));
+        assert_eq!(super::fit_size((1280, 720), (1920, 1200)), (1920, 1080)); // pillar/letterbox
+        assert_eq!(super::fit_size((1280, 720), (1000, 1000)), (1000, 562));
+        assert_eq!(super::fit_size((720, 1280), (1920, 1080)), (607, 1080));
+        assert_eq!(super::fit_size((640, 480), (640, 480)), (640, 480));
+    }
+
+    #[test]
+    fn blit_copies_scales_and_clips() {
+        // 2x2 source scaled to 4x4 inside a 6x4 window at x=1.
+        let src = [1u32, 2, 3, 4];
+        let mut win = vec![0u32; 6 * 4];
+        super::blit(&src, (2, 2), &mut win, (6, 4), (1, 0, 4, 4));
+        assert_eq!(&win[0..6], &[0, 1, 1, 2, 2, 0]);
+        assert_eq!(&win[3 * 6..4 * 6], &[0, 3, 3, 4, 4, 0]);
+        // 1:1 with part of it outside the window on the left.
+        let mut win = vec![0u32; 2 * 2];
+        super::blit(&src, (2, 2), &mut win, (2, 2), (-1, 0, 2, 2));
+        assert_eq!(win, vec![2, 0, 4, 0]);
+    }
+
+    use super::*;
+
+    #[test]
+    fn default_port_is_added_where_missing() {
+        assert_eq!(with_default_port("pc"), "pc:47800");
+        assert_eq!(with_default_port("pc:1234"), "pc:1234");
+        assert_eq!(with_default_port("10.0.0.5"), "10.0.0.5:47800");
+        assert_eq!(with_default_port("10.0.0.5:9"), "10.0.0.5:9");
+        assert_eq!(with_default_port("::1"), "[::1]:47800");
+        assert_eq!(with_default_port("[::1]"), "[::1]:47800");
+        assert_eq!(with_default_port("[::1]:9"), "[::1]:9");
+    }
+}

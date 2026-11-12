@@ -1,7 +1,21 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
+
+// Links filled from server data are limited to https://github.com pages.
+function safeHTTPSURL(value) {
+  if (typeof value !== "string" || !value) return "";
+  try {
+    const u = new URL(value);
+    if (u.protocol !== "https:" || u.hostname !== "github.com") return "";
+    return u.href;
+  } catch (_e) {
+    return "";
+  }
+}
 let autostartOn = false;
 let serviceBusy = false;
+const autostartToggles = document.querySelectorAll("[data-autostart-toggle]");
+let selectedTheme = "system";
 let csrfToken = "";
 let csrfPromise = null;
 let debugConsoleEnabled = false;
@@ -9,6 +23,13 @@ let debugLogNext = 0;
 let debugLogLines = [];
 let currentCalibrationDevice = "";
 let loadedSettings = null;
+let hostReachable = false;
+let savingSettings = false;
+let settingsDirty = false;
+let savedCalibration = null;
+let calibrationRequest = 0;
+let calibrationLoadingDevice = "";
+let hostStopped = false;
 let resolutionManagedByOS = false;
 // True once the user edits the resolution controls; otherwise Save resends the host's current resolution, which the OS display settings may have changed since the page loaded.
 let resolutionDirty = false;
@@ -44,6 +65,7 @@ function ensureNativeResolutionOption(nativeWidth, nativeHeight) {
   const hasNative = Number.isInteger(nativeWidth) && Number.isInteger(nativeHeight) &&
     nativeWidth > 0 && nativeHeight > 0;
   const nativeKey = hasNative ? `${nativeWidth}x${nativeHeight}` : "";
+  if (nativeKey === activeNativeResolutionKey) return;
 
   if (activeNativeResolutionKey) {
     const prior = select.querySelector(`option[value="${activeNativeResolutionKey}"]`);
@@ -51,6 +73,13 @@ function ensureNativeResolutionOption(nativeWidth, nativeHeight) {
       prior.textContent = resolutionBaseLabels.get(activeNativeResolutionKey);
     }
     if (nativeResolutionWasCreated && prior) {
+      if (prior.selected) {
+        const [width, height] = activeNativeResolutionKey.split("x");
+        $("width").value = width;
+        $("height").value = height;
+        select.value = CUSTOM_RESOLUTION;
+        setCustomResolutionVisibility();
+      }
       prior.remove();
     }
   }
@@ -77,10 +106,12 @@ function ensureNativeResolutionOption(nativeWidth, nativeHeight) {
 }
 
 function setCustomResolutionVisibility() {
+  const custom = $("resolution-preset").value === CUSTOM_RESOLUTION;
   $("resolution-custom-fields").classList.toggle(
     "visible",
-    $("resolution-preset").value === CUSTOM_RESOLUTION
+    custom
   );
+  $("width").disabled = $("height").disabled = !custom || resolutionManagedByOS;
 }
 
 function syncResolutionPreset(width, height) {
@@ -135,7 +166,12 @@ function chooseFramerate(requested, available) {
 function refreshFramerateOptions(preferredFPS) {
   const fpsSelect = $("fps");
   const { width, height } = selectedResolutionDimensions();
+  if (![width, height].every(value => Number.isFinite(value) && value > 0)) return;
   const options = availableFrameratesForResolution(width, height);
+  if (Number(preferredFPS) > 0 && !options.includes(Number(preferredFPS))) {
+    options.push(Number(preferredFPS));
+    options.sort((a, b) => a - b);
+  }
   const current = Number.parseInt(preferredFPS, 10) || Number.parseInt(fpsSelect.value, 10) || FPS_DEFAULT;
   const chosen = chooseFramerate(current, options);
 
@@ -150,18 +186,28 @@ function refreshFramerateOptions(preferredFPS) {
 }
 
 function applyTheme(theme) {
-  const isLight = theme === "light";
+  selectedTheme = theme;
+  const isLight = theme === "light" || (theme === "system" && window.matchMedia("(prefers-color-scheme: light)").matches);
   document.documentElement.setAttribute("data-theme", isLight ? "light" : "dark");
-  const toggle = $("theme-mode-toggle");
-  const label = $("theme-label");
-  if (toggle) toggle.checked = isLight;
-  if (label) label.textContent = isLight ? "Light mode" : "Dark mode";
+  const name = theme[0].toUpperCase() + theme.slice(1);
+  $("theme-mode-toggle").setAttribute("aria-label", `Theme: ${name}`);
+  $("theme-mode-toggle").title = `${name} theme`;
+  for (const icon of document.querySelectorAll("[data-theme-icon]")) icon.toggleAttribute("hidden", icon.dataset.themeIcon !== theme);
+  for (const option of document.querySelectorAll("[data-theme-option]")) {
+    option.setAttribute("aria-pressed", String(option.dataset.themeOption === theme));
+  }
 }
 
+let hostOSName = "";
+
 function applyPlatformVisibility(hostOS) {
+  hostOSName = hostOS || "";
   const showWindowsOnly = hostOS === "windows";
   for (const el of document.querySelectorAll("[data-windows-only]")) {
     el.hidden = !showWindowsOnly;
+  }
+  for (const el of document.querySelectorAll("[data-linux-only]")) {
+    el.hidden = hostOS !== "linux";
   }
 }
 
@@ -184,6 +230,7 @@ function renderWifiPairing() {
   const code = $("wifi-pair-code");
   const text = $("wifi-pair-text");
   const show = (id, on) => { $(id).hidden = !on; };
+  show("wifi-pair-expiry", p.phase === "waiting");
   code.hidden = p.phase !== "waiting" || !p.code;
   code.textContent = formatPairCode(p.code);
   show("wifi-pair-approve", p.phase === "approval");
@@ -194,17 +241,18 @@ function renderWifiPairing() {
   $("wifi-pair-start").textContent = v.paired ? "Pair another tablet" : "Show pairing code";
   if (p.phase === "waiting") {
     const left = Math.max(0, Math.round((p.expiresAtMs - Date.now()) / 1000));
-    text.textContent = "On the tablet tap Wi-Fi connect, then enter this code. Expires in " + left + "s.";
+    setText(text, "Enter this code in the tablet's Wi-Fi connect screen.");
+    $("wifi-pair-expiry").textContent = `Code expires in ${left}s.`;
   } else if (p.phase === "approval") {
-    text.textContent = "Allow \"" + p.tablet + "\" (fingerprint " + p.fingerprint + ") to use this computer as a display and input device?";
+    setText(text, "Allow \"" + p.tablet + "\" (fingerprint " + p.fingerprint + ") to use this computer as a display and input device?");
   } else if (p.phase === "failed") {
-    text.textContent = p.error || "Pairing failed.";
+    setText(text, p.error || "Pairing failed.");
   } else if (p.phase === "done") {
-    text.textContent = "Paired with \"" + p.tablet + "\". It will connect over Wi-Fi when USB is not plugged in.";
+    setText(text, "Paired with \"" + p.tablet + "\".");
   } else if (v.paired) {
-    text.textContent = "Paired with \"" + (v.pairedName || "tablet") + "\".";
+    setText(text, "Paired with \"" + (v.pairedName || "tablet") + "\".");
   } else {
-    text.textContent = "No tablet is paired yet.";
+    setText(text, "No tablet is paired yet.");
   }
 }
 
@@ -212,6 +260,7 @@ function renderWifiInterfaces(v) {
   const select = $("paired-wifi-interface");
   const wanted = wifiSelectedInterface || v.interface || "";
   const names = (v.interfaces || []).slice();
+  names.unshift("");
   if (wanted && !names.includes(wanted)) names.push(wanted);
   const signature = names.join("|");
   if (select.dataset.names !== signature) {
@@ -219,11 +268,12 @@ function renderWifiInterfaces(v) {
     select.innerHTML = "";
     for (const name of names) {
       const opt = document.createElement("option");
-      opt.value = opt.textContent = name;
+      opt.value = name;
+      opt.textContent = name || "Choose a network";
       select.appendChild(opt);
     }
   }
-  if (document.activeElement !== select && wanted) select.value = wanted;
+  if (document.activeElement !== select) select.value = wanted;
 }
 
 async function refreshWifiPairing() {
@@ -297,6 +347,7 @@ function applyResolutionPolicy(status) {
   }
   if (hint) hint.hidden = !windowsManaged;
   if (linuxHint) linuxHint.hidden = !linuxManaged;
+  setCustomResolutionVisibility();
 }
 
 function linuxSetupPrompt(warnings, hostOS) {
@@ -311,20 +362,23 @@ function linuxSetupPrompt(warnings, hostOS) {
   if (hasADBPermissionWarning) hints.push("install Android udev rules and reconnect USB");
   if (hasUinputWarning) hints.push("enable /dev/uinput write access and map DrawSplay Pen to the virtual monitor");
   if (hasPipewireWarning) hints.push("install GStreamer PipeWire packages for Wayland capture");
-  return `Linux setup required: ${hints.join("; ")}. This prompt disappears once setup is done.`;
+  return `Linux setup required: ${hints.join("; ")}.`;
 }
 
 function initializeTheme() {
-  let theme = "dark";
+  let theme = "system";
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === "light" || stored === "dark") {
+    if (["system", "light", "dark"].includes(stored)) {
       theme = stored;
     }
   } catch (_e) {
-    // Ignore storage failures and keep dark default.
+    // Follow the system when storage is unavailable.
   }
   applyTheme(theme);
+  window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
+    if (selectedTheme === "system") applyTheme("system");
+  });
 }
 
 function setDebugConsoleEnabled(enabled) {
@@ -415,56 +469,282 @@ async function api(path, opts) {
   }
 }
 
+// Form controls bound to a saved setting carry data-setting="<settings JSON
+// key>"; these two functions fill and read all of them. The server always
+// sends every setting with its default applied, so no defaults live here.
+function settingControls() {
+  return document.querySelectorAll("[data-setting]");
+}
+
+function fillSettingControls(s) {
+  for (const el of settingControls()) {
+    const value = s[el.dataset.setting];
+    if (el.type === "checkbox") el.checked = !!value;
+    else el.value = value ?? "";
+  }
+}
+
+function readSettingControls() {
+  const out = {};
+  for (const el of settingControls()) {
+    const key = el.dataset.setting;
+    if (el.type === "checkbox") out[key] = el.checked;
+    else if (el.type === "number") out[key] = Math.max(0, parseInt(el.value, 10) || 0);
+    else out[key] = el.value.trim();
+  }
+  return out;
+}
+
 async function loadSettings() {
   const s = await api("/api/settings");
   loadedSettings = s;
   resolutionDirty = false;
   syncResolutionPreset(s.width, s.height);
   refreshFramerateOptions(s.fps);
-  $("ffmpeg").value = s.ffmpeg;
-  $("adb").value = s.adb;
-  $("adb-serial").value = s.preferredADBSerial || "";
+  fillSettingControls(s);
   $("paired-wifi-enabled").checked = !!s.pairedWifiEnabled;
   wifiSelectedInterface = s.pairedWifiInterface || "";
-  // Legacy Wi-Fi transport (Advanced settings > Advanced systems).
-  $("wifi-enabled").checked = !!s.wifiEnabled;
-  $("wifi-service-name").value = s.wifiServiceName || "DrawSplay";
-  $("wifi-bind-address").value = s.wifiBindAddress || "0.0.0.0";
-  $("wifi-input-port").value = s.wifiInputPort || 37183;
-  $("wifi-video-port").value = s.wifiVideoPort || 37184;
-  $("wifi-max-bitrate").value = s.wifiMaxBitrate || "12M";
-  const wifiAuthConfigured = !!s.wifiAuthTokenConfigured;
-  $("wifi-auth-token").value = "";
-  $("wifi-auth-token").placeholder = wifiAuthConfigured
-    ? "configured (enter new token to rotate)"
-    : "shared token";
-  $("wifi-tls").checked = s.wifiTLS !== false;
-  $("aoa-enabled").checked = !!s.aoaEnabled;
-  $("aoa-auto-switch").checked = s.aoaAutoSwitch !== false;
-  $("adb-tunnel-enabled").checked = !!s.adbTunnelEnabled;
+  renderWifiInterfaces({ interface: wifiSelectedInterface, interfaces: [] });
   updateADBVisibility();
-  $("require-adb-serial").checked = !!s.requirePreferredADB;
-  $("touch-enabled").checked = s.touchEnabled !== false;
-  $("touch-gestures").checked = s.touchGestures !== false;
-  $("pen-enabled").checked = s.penEnabled !== false;
-  $("keyboard-enabled").checked = s.keyboardEnabled !== false;
-  $("keep-alive-on-background").checked = !!s.keepAliveOnBackground;
-  $("idle-display-timeout").value = Number.isFinite(s.idleDisplayTimeoutSec) ? s.idleDisplayTimeoutSec : 600;
-  $("pen-prediction").checked = !!s.penPrediction;
-  $("pen-ink-preview").checked = s.penInkPreview !== false;
-  $("idle-capture-gate").checked = !!s.idleCaptureGate;
-  $("x11-high-rate-capture").checked = !!s.x11HighRateCapture;
-  $("video-scaling").value = s.videoScaling || "fill";
-  $("auto-launch-android-app").checked = !!s.autoLaunchAndroidApp;
-  $("zero-copy-capture").checked = !!s.zeroCopyCapture;
-  $("temporal-layering").checked = !!s.temporalLayering;
-  $("allow-tool-auto-install").checked = s.allowToolAutoInstall !== false;
-  $("no-driver-install").checked = !!s.noDriverInstall;
+  updatePendingSettings();
+}
+
+function draftSettings() {
+  const dimensions = selectedResolutionDimensions();
+  const body = {
+    ...readSettingControls(), width: dimensions.width, height: dimensions.height,
+    fps: parseInt($("fps").value, 10),
+  };
+  if (resolutionManagedByOS || !resolutionDirty) {
+    body.width = loadedSettings?.width;
+    body.height = loadedSettings?.height;
+  }
+  if (featureFlags.wifi) {
+    body.pairedWifiEnabled = $("paired-wifi-enabled").checked;
+    body.pairedWifiInterface = $("paired-wifi-interface").value;
+  }
+  return body;
+}
+
+// settingEquals compares a form value with the saved one. The server omits
+// settings at their zero value (an empty string, false, 0), while the form
+// always reads a value of the control's type, so a missing saved value counts
+// as the zero of the form value's type rather than as a change.
+function settingEquals(draft, saved) {
+  if (saved === undefined || saved === null) {
+    if (typeof draft === "boolean") saved = false;
+    else if (typeof draft === "number") saved = 0;
+    else saved = "";
+  }
+  if (typeof draft === "number" || typeof saved === "number") {
+    return Number(draft) === Number(saved) || (Number.isNaN(Number(draft)) && Number.isNaN(Number(saved)));
+  }
+  if (typeof draft === "boolean" || typeof saved === "boolean") return !!draft === !!saved;
+  return String(draft) === String(saved);
+}
+
+function changedSettings() {
+  if (!loadedSettings) return [];
+  return Object.entries(draftSettings()).filter(([key, value]) => !settingEquals(value, loadedSettings[key])).map(([key]) => key);
+}
+
+// The save bar shows "Saved." for a moment after a save, then goes away
+// until the next edit. Editing during that moment turns it back into the
+// unsaved-changes bar at once.
+let savedFlashTimer = 0;
+const SAVED_FLASH_MS = 2500;
+
+function flashSaved(message) {
+  const bar = $("pending-changes");
+  clearTimeout(savedFlashTimer);
+  bar.classList.add("saved");
+  $("saved-message").textContent = message;
+  bar.hidden = false;
+  savedFlashTimer = setTimeout(() => {
+    savedFlashTimer = 0;
+    bar.classList.remove("saved");
+    bar.hidden = !settingsDirty;
+  }, SAVED_FLASH_MS);
+}
+
+function updatePendingSettings() {
+  settingsDirty = changedSettings().length > 0;
+  const bar = $("pending-changes");
+  if (savedFlashTimer && settingsDirty) {
+    clearTimeout(savedFlashTimer);
+    savedFlashTimer = 0;
+    bar.classList.remove("saved");
+  }
+  if (!savedFlashTimer) bar.hidden = !settingsDirty;
+  const available = hostReachable && !!loadedSettings && document.body.dataset.kind !== "pc";
+  $("settings-fields").disabled = !available || savingSettings;
+  $("save").disabled = !available || !settingsDirty || savingSettings;
+  $("discard-settings-btn").disabled = savingSettings;
+  $("paired-wifi-interface").required = featureFlags.wifi && $("paired-wifi-enabled").checked;
+  const restartRequired = changedSettings().some(key => ["aoaEnabled", "adbTunnelEnabled", "noDriverInstall"].includes(key));
+  $("change-impact").hidden = !restartRequired;
+  $("change-impact").textContent = restartRequired ? "Requires a host restart." : "";
+}
+
+function setText(element, text) {
+  if (element.textContent !== text) element.textContent = text;
+}
+
+function updateSectionNavigation() {
+  const links = [...document.querySelectorAll(".section-nav a")];
+  const current = links.find(link => !link.hidden && link.hash === location.hash) || links[0];
+  for (const link of links) {
+    if (link === current) link.setAttribute("aria-current", "location");
+    else link.removeAttribute("aria-current");
+  }
+}
+
+function revealNavigationTarget(hash) {
+  const target = $(hash.slice(1));
+  if (target instanceof HTMLDetailsElement) target.open = true;
+}
+
+document.querySelector(".section-nav").addEventListener("click", event => {
+  const link = event.target.closest("a");
+  if (link) revealNavigationTarget(link.hash);
+});
+window.addEventListener("hashchange", () => {
+  updateSectionNavigation();
+  revealNavigationTarget(location.hash);
+});
+updateSectionNavigation();
+revealNavigationTarget(location.hash);
+
+function updateLiveControls(connected) {
+  for (const id of ["input-lock-toggle", "pause-video-btn", "disconnect-session-btn", "clear-mode-btn"]) {
+    if (!$(id).dataset.busy) $(id).disabled = !connected;
+  }
+  for (const id of ["start-calibration-btn", "reset-calibration-btn", "cancel-calibration-btn", "save-calibration-btn"]) {
+    if (!$(id).dataset.busy) $(id).disabled = !connected || !savedCalibration;
+  }
+}
+
+function replaceWhenChanged(element, value, render) {
+  const signature = JSON.stringify(value);
+  if (element.dataset.signature === signature) return;
+  element.dataset.signature = signature;
+  element.replaceChildren();
+  render();
+}
+
+// ---- Connection kind: Android tablet (this host) or PC client (dd-host, read from its status file) ----
+
+function durationText(sinceMs) {
+  const s = Math.max(0, Math.floor((Date.now() - Number(sinceMs || 0)) / 1000));
+  if (!Number.isFinite(s) || !sinceMs) return "";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : (m > 0 ? `${m}m ${s % 60}s` : `${s}s`);
+}
+
+const PC_BACKEND_LABELS = {
+  "x11-virtual": "virtual X11 monitor",
+  "windows-virtual": "virtual Windows monitor",
+  "wayland-virtual": "virtual Wayland monitor",
+  "wayland-portal": "Wayland desktop portal",
+  "wayland-mirror": "Wayland screen mirror",
+  mirror: "screen mirror",
+  test: "test pattern",
+};
+
+function renderDesktopHost(st) {
+  const kind = ["android", "pc", "both"].includes(st.connectionKind) ? st.connectionKind : "none";
+  const pc = st.desktopHost || {};
+  const session = pc.running && pc.session ? pc.session : null;
+  const sessions = pc.running && Array.isArray(pc.sessions) && pc.sessions.length ? pc.sessions : (session ? [session] : []);
+  document.body.dataset.kind = kind;
+  for (const target of ["connections", "troubleshooting"]) {
+    document.querySelector(`.section-nav a[href="#${target}"]`).hidden = kind === "pc" || (target === "connections" && !featureFlags.wifi);
+  }
+  updateSectionNavigation();
+  updatePendingSettings();
+
+  // Badge and the small caption next to it.
+  const badge = $("client-badge");
+  badge.dataset.kind = kind;
+  badge.textContent = {
+    android: "Android display",
+    pc: `PC${session ? ` · ${session.client}${sessions.length > 1 ? ` +${sessions.length - 1}` : ""}` : ""}`,
+    both: "Android + PC",
+    none: "No client",
+  }[kind];
+  const hosts = ["Android host"];
+  if (pc.running) hosts.push("PC host");
+  $("status-meta").textContent = kind === "pc"
+    ? "PC host session"
+    : (pc.running ? `${hosts.join(" + ")} running` : "USB / LAN stream monitor");
+
+  // Status line: the existing renderer describes the Android pipeline only.
+  if (kind === "pc" && session) {
+    const parts = [`${session.width}x${session.height} @ ${session.fps} fps`];
+    if (session.encoder) parts.push(session.encoder);
+    $("dot").className = "dot on";
+    setText($("status"), sessions.length > 1
+      ? `Streaming to ${sessions.length} PC clients (${sessions.map((x) => x.client).join(", ")})`
+      : `Streaming to PC "${session.client}" (${parts.join(", ")})`);
+  } else if (kind === "none" && pc.running && !(st.video || {}).streaming) {
+    setText($("status"), "Waiting for a tablet or a PC display");
+  }
+
+  // PC panel: shown whenever dd-host is running, with the live session when there is one.
+  const panel = $("pc-panel");
+  panel.hidden = !pc.running;
+  $("pc-settings-note").hidden = kind !== "pc";
+  if (!pc.running) return;
+  $("pc-summary").textContent = session
+    ? (sessions.length > 1
+      ? `${sessions.length} PC clients connected.`
+      : `Connected for ${durationText(session.sinceUnixMs) || "a moment"}.`)
+    : `Waiting for a PC client on ${pc.listen || "the default port"} (dd-host ${pc.version || ""}, ${pc.encoder || "encoder unknown"}).`;
+  const dl = $("pc-session");
+  dl.hidden = !session;
+  replaceWhenChanged(dl, sessions, () => {
+   if (session) {
+    const rows = [];
+    sessions.forEach((x, i) => {
+      const n = sessions.length > 1 ? ` ${i + 1}` : "";
+      rows.push(
+        [`Client${n}`, x.client],
+        [`Address${n}`, x.peer],
+        [`Stream${n}`, `${x.width}x${x.height} @ ${x.fps} fps`],
+        [`Encoder${n}`, x.encoder],
+        [`Screen${n}`, `${PC_BACKEND_LABELS[x.backend] || x.backend}${x.virtualDisplay ? " (extends your desktop)" : ""}`],
+      );
+    });
+    for (const [k, v] of rows) {
+      const dt = document.createElement("dt");
+      dt.textContent = k;
+      const dd = document.createElement("dd");
+      dd.textContent = v || "—";
+      dl.append(dt, dd);
+    }
+   }
+  });
+  $("pc-disconnect-btn").hidden = !session;
+  const trusted = Array.isArray(pc.trusted) ? pc.trusted : [];
+  $("pc-trusted-summary").textContent = `Trusted PC clients (${trusted.length})`;
+  const list = $("pc-trusted-list");
+  replaceWhenChanged(list, trusted, () => {
+   for (const t of trusted) {
+    const li = document.createElement("li");
+    const code = document.createElement("code");
+    code.textContent = t.key;
+    li.append(code, document.createTextNode(` ${t.label || ""}`));
+    list.appendChild(li);
+   }
+  });
 }
 
 async function refreshStatus() {
   try {
     const st = await api("/api/status");
+    hostReachable = true;
+    hostStopped = false;
     applyResolutionPolicy(st);
     const versionEl = document.getElementById("host-version");
     if (versionEl && st.version) {
@@ -488,7 +768,7 @@ async function refreshStatus() {
     if (recW > 0 && recH > 0) {
       $("recommended-resolution-value").textContent = `${recW}x${recH}`;
       const why = activeClient.recommendedReason ? `Because of ${activeClient.recommendedReason}. ` : "";
-      $("recommended-resolution-reason").textContent = `${why}Higher resolutions may cause lag or freezes on this device.`;
+      $("recommended-resolution-reason").textContent = `${why}Higher resolutions may stutter.`;
       recHint.hidden = false;
     } else {
       recHint.hidden = true;
@@ -505,55 +785,78 @@ async function refreshStatus() {
       .join(" ");
     const activeClientLabel = activeClientName ? `${activeClientName}${nativeLabel}` : nativeLabel.trim();
     const displayMode = String(v.displayMode || "").trim();
-    const modeLabel = displayMode ? `, ${displayMode}` : "";
     $("dot").className = "dot" + (v.streaming ? " on" : "");
-    $("status").textContent = v.streaming
-      ? `Streaming (${v.encoder} @ ${v.bitrate}${modeLabel})`
-      : "Idle — waiting for client";
+    if (st.connectionKind !== "pc") {
+      setText($("status"), v.streaming
+        ? `Display connected${displayMode ? ` (${displayMode})` : ""}`
+        : "Waiting for a display");
+    }
     const warnings = Array.isArray(st.warnings) ? st.warnings : [];
     const setupPrompt = linuxSetupPrompt(warnings, st.hostOS);
     const lines = warnings.map((w) => `Warning: ${w}`);
     if (setupPrompt) lines.push(setupPrompt);
     $("warnings").hidden = warnings.length === 0;
-    $("warnings").textContent = lines.join("\n");
+    setText($("warnings"), lines.join("\n"));
     const targetInfo = $("target-info");
     targetInfo.hidden = !activeClientLabel;
     targetInfo.textContent = activeClientLabel ? `Target Information: ${activeClientLabel}` : "";
     renderConnectionInfo(st);
     renderMetrics(st.metrics || {}, v, st.clientVideoStats || null);
+    renderDesktopHost(st);
     renderSetupChecklist(st.setup || {});
+    renderConnectionGuidance(st);
     const inputLockToggle = $("input-lock-toggle");
-    if (!inputLockToggle.disabled) inputLockToggle.checked = !!st.inputLocked;
+    if (!inputLockToggle.dataset.busy) inputLockToggle.checked = !!st.inputLocked;
     autostartOn = !!st.autostart;
-    const serviceToggle = $("autostart-toggle");
-    serviceToggle.checked = autostartOn;
-    serviceToggle.disabled = !!st.autostartError || serviceBusy;
-    serviceToggle.title = st.autostartError
-      ? `Unavailable: ${st.autostartError}`
-      : (st.autostartImplementation || "Platform login service");
+    for (const toggle of autostartToggles) {
+      if (!serviceBusy) toggle.checked = autostartOn;
+      toggle.disabled = !!st.autostartError || serviceBusy;
+      toggle.title = st.autostartError
+        ? `Unavailable: ${st.autostartError}`
+        : (st.autostartImplementation || "Platform login service");
+    }
     const activeDevice = String(st.activeInputDevice || "").trim();
     if (activeDevice !== currentCalibrationDevice) {
+      const discarded = calibrationDirty();
+      if ($("calibration-dialog").open) $("calibration-dialog").close();
       currentCalibrationDevice = activeDevice;
-      loadCalibration(activeDevice).catch((e) => showMsg(e.message, false));
+      savedCalibration = null;
+      setCalibrationForm(activeDevice, {});
+      loadCalibration(activeDevice).catch((e) => showMsg(e.message, false, $("start-calibration-btn")));
+      if (discarded) showMsg("The connected tablet changed. Its unsaved calibration was discarded.", false, $("start-calibration-btn"));
+    } else if (activeDevice && !savedCalibration && calibrationLoadingDevice !== activeDevice) {
+      loadCalibration(activeDevice).catch((e) => showMsg(e.message, false, $("start-calibration-btn")));
     }
+    updateLiveControls(!!activeDevice);
   } catch (e) {
+    hostReachable = false;
     $("dot").className = "dot";
-    $("status").textContent = "Host unreachable";
+    setText($("status"), hostStopped ? "Host stopped" : "Cannot reach DrawSplay");
+    document.body.dataset.kind = "none";
+    $("client-badge").dataset.kind = "none";
+    $("client-badge").textContent = "No client";
     $("warnings").hidden = true;
     $("connection-info").textContent = "";
     $("metrics-summary").textContent = "";
-    $("setup-checklist").textContent = "Host unreachable";
+    setText($("connection-guidance"), hostStopped
+      ? "Start DrawSplay to reconnect."
+      : "Check that DrawSplay is running. Retrying automatically.");
+    $("connection-guidance").hidden = false;
+    updatePendingSettings();
+    updateLiveControls(false);
+    for (const toggle of autostartToggles) toggle.disabled = true;
   }
 }
 
 function setCalibrationForm(device, calibration) {
   $("calibration-device").value = device || "";
-  $("calibration-scale-x").value = Number(calibration.scaleX ?? 1).toFixed(2);
-  $("calibration-scale-y").value = Number(calibration.scaleY ?? 1).toFixed(2);
-  $("calibration-offset-x").value = Number(calibration.offsetX ?? 0).toFixed(2);
-  $("calibration-offset-y").value = Number(calibration.offsetY ?? 0).toFixed(2);
-  const enabled = !!device;
+  $("calibration-scale-x").value = Number(calibration.scaleX ?? 1).toFixed(4);
+  $("calibration-scale-y").value = Number(calibration.scaleY ?? 1).toFixed(4);
+  $("calibration-offset-x").value = Number(calibration.offsetX ?? 0).toFixed(4);
+  $("calibration-offset-y").value = Number(calibration.offsetY ?? 0).toFixed(4);
+  const enabled = !!device && !!savedCalibration;
   $("save-calibration-btn").disabled = !enabled;
+  for (const id of ["start-calibration-btn", "reset-calibration-btn", "cancel-calibration-btn"]) $(id).disabled = !enabled;
   $("calibration-scale-x").disabled = !enabled;
   $("calibration-scale-y").disabled = !enabled;
   $("calibration-offset-x").disabled = !enabled;
@@ -561,18 +864,55 @@ function setCalibrationForm(device, calibration) {
 }
 
 async function loadCalibration(device) {
-  if (!device) {
-    setCalibrationForm("", { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 });
-    return;
+  const request = ++calibrationRequest;
+  calibrationLoadingDevice = device;
+  try {
+    if (!device) {
+      setCalibrationForm("", { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 });
+      return;
+    }
+    const body = await api(`/api/calibration?device=${encodeURIComponent(device)}`);
+    if (request !== calibrationRequest || device !== currentCalibrationDevice) return;
+    savedCalibration = body.calibration || { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 };
+    setCalibrationForm(body.device || device, savedCalibration);
+  } finally {
+    if (request === calibrationRequest) calibrationLoadingDevice = "";
   }
-  const body = await api(`/api/calibration?device=${encodeURIComponent(device)}`);
-  setCalibrationForm(body.device || device, body.calibration || {});
 }
 
-function showMsg(text, ok) {
-  const el = $("msg");
-  el.textContent = text;
-  el.className = ok ? "ok" : "err";
+function showMsg(text, ok, origin) {
+  const panel = (origin || feedbackSource)?.closest(".panel");
+  let feedback = $("msg");
+  if (panel) {
+    feedback = panel.querySelector("#settings-feedback, :scope > .action-feedback");
+    if (!feedback) {
+      feedback = document.createElement("div");
+      feedback.setAttribute("role", "status");
+      panel.append(feedback);
+    }
+  }
+  feedback.className = `action-feedback ${ok ? "ok" : "err"}`;
+  feedback.setAttribute("role", ok ? "status" : "alert");
+  setText(feedback, text);
+}
+
+let feedbackSource = null;
+document.addEventListener("click", event => {
+  const control = event.target.closest("button, input, select");
+  if (control) feedbackSource = control;
+}, true);
+
+function renderConnectionGuidance(st) {
+  const v = st.video || {};
+  const state = st.aoa?.state;
+  let text = "";
+  if (v.streaming) {
+    if (st.inputLocked) text = "Input locked. Unlock in Session controls.";
+  } else if (state === "waiting-app") text = "Open DrawSplay and approve USB access on the tablet.";
+  else if (state === "switching") text = "Keep the cable connected while USB mode changes.";
+  else if (state === "error") text = "USB error. Check Troubleshooting.";
+  setText($("connection-guidance"), text);
+  $("connection-guidance").hidden = !text;
 }
 
 const AOA_STATE_LABELS = {
@@ -654,65 +994,75 @@ function renderConnectionInfo(st) {
 function renderSetupChecklist(setup) {
   const el = $("setup-checklist");
   const items = Array.isArray(setup?.items) ? setup.items : [];
-  el.replaceChildren();
+  const existing = new Map([...el.querySelectorAll(".setup-item")].map(row => [row.dataset.key, row]));
   if (items.length === 0) {
-    el.textContent = "No setup data yet.";
+    if (el.contains(document.activeElement)) $("troubleshooting").querySelector("summary").focus();
+    setText(el, "Setup checks are unavailable. Try Re-check setup.");
     return;
   }
-  for (const item of items) {
-    const row = document.createElement("section");
-    row.className = `setup-item${item.ok ? " ready" : " needs-attention"}`;
-
-    const heading = document.createElement("div");
-    heading.className = "setup-item-heading";
-    const indicator = document.createElement("span");
-    indicator.className = "setup-item-indicator";
-    indicator.setAttribute("aria-hidden", "true");
-    indicator.textContent = item.ok ? "✓" : "!";
-    const label = document.createElement("strong");
-    label.textContent = item.label || "Setup check";
-    const state = document.createElement("span");
-    state.className = "setup-item-state";
-    state.textContent = item.ok ? "Ready" : "Action needed";
-    heading.append(indicator, label, state);
-    row.appendChild(heading);
-
-    const detail = document.createElement("div");
-    detail.className = "setup-item-detail";
-    detail.textContent = item.detail || "";
-    row.appendChild(detail);
-
-    if (!item.ok && item.action) {
+  if (!existing.size) el.replaceChildren();
+  for (const [index, item] of items.entries()) {
+    const key = String(item.id || item.label || index);
+    let row = existing.get(key);
+    existing.delete(key);
+    if (!row) {
+      row = document.createElement("section");
+      row.dataset.key = key;
+      const heading = document.createElement("div");
+      heading.className = "setup-item-heading";
+      const indicator = document.createElement("span");
+      indicator.className = "setup-item-indicator";
+      indicator.setAttribute("aria-hidden", "true");
+      const label = document.createElement("strong");
+      const state = document.createElement("span");
+      state.className = "setup-item-state";
+      heading.append(indicator, label, state);
+      const detail = document.createElement("div");
+      detail.className = "setup-item-detail";
       const instructions = document.createElement("div");
       instructions.className = "setup-item-action-text";
-      instructions.textContent = item.action;
-      row.appendChild(instructions);
-    }
-
-    if (!item.ok && item.command) {
       const command = document.createElement("code");
       command.className = "setup-item-command";
-      command.textContent = item.command;
       const copy = document.createElement("button");
       copy.type = "button";
       copy.className = "setup-copy-button";
       copy.textContent = "Copy";
-      copy.setAttribute("aria-label", `Copy instructions for ${item.label || "setup check"}`);
       copy.addEventListener("click", async () => {
         try {
-          await navigator.clipboard.writeText(item.command);
+          await navigator.clipboard.writeText(row.dataset.command);
           copy.textContent = "Copied";
+          showMsg("Setup command copied.", true, copy);
           window.setTimeout(() => { copy.textContent = "Copy"; }, 1400);
         } catch (e) {
-          showMsg(`Could not copy command: ${e.message}`, false);
+          showMsg(`Could not copy command: ${e.message}`, false, copy);
         }
       });
       const commandRow = document.createElement("div");
       commandRow.className = "setup-item-command-row";
       commandRow.append(command, copy);
-      row.appendChild(commandRow);
+      row.append(heading, detail, instructions, commandRow);
+      el.appendChild(row);
     }
-    el.appendChild(row);
+    row.className = `setup-item${item.ok ? " ready" : " needs-attention"}`;
+    setText(row.querySelector(".setup-item-indicator"), item.ok ? "✓" : "!");
+    setText(row.querySelector("strong"), item.label || "Setup check");
+    setText(row.querySelector(".setup-item-state"), item.ok ? "Ready" : "Action needed");
+    setText(row.querySelector(".setup-item-detail"), item.detail || "");
+    setText(row.querySelector(".setup-item-action-text"), item.action || "");
+    row.querySelector(".setup-item-action-text").hidden = item.ok || !item.action;
+    row.dataset.command = item.command || "";
+    setText(row.querySelector("code"), row.dataset.command);
+    row.querySelector("button").setAttribute("aria-label", `Copy instructions for ${item.label || "setup check"}`);
+    const commandRow = row.querySelector(".setup-item-command-row");
+    const hideCommand = item.ok || !item.command;
+    if (hideCommand && commandRow.contains(document.activeElement)) {
+      $("troubleshooting").querySelector("summary").focus();
+    }
+    commandRow.hidden = hideCommand;
+  }
+  for (const row of existing.values()) {
+    if (row.contains(document.activeElement)) $("troubleshooting").querySelector("summary").focus();
+    row.remove();
   }
 }
 
@@ -732,78 +1082,68 @@ function renderMetrics(metrics, video, clientVideoStats) {
 
 $("form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  $("save").disabled = true;
+  if (!hostReachable || document.body.dataset.kind === "pc" || savingSettings || !settingsDirty) return;
+  savingSettings = true;
+  updatePendingSettings();
   try {
-    let resolution = selectedResolutionDimensions();
-    if ((resolutionManagedByOS || !resolutionDirty) && loadedSettings) {
-      const current = await api("/api/settings");
-      const lockedWidth = Number.parseInt(current.width, 10);
-      const lockedHeight = Number.parseInt(current.height, 10);
-      if (Number.isFinite(lockedWidth) && Number.isFinite(lockedHeight) && lockedWidth > 0 && lockedHeight > 0) {
-        resolution = { width: lockedWidth, height: lockedHeight };
-      }
-    }
-    const body = {
-      fps: parseInt($("fps").value, 10),
-      width: resolution.width,
-      height: resolution.height,
-      ffmpeg: $("ffmpeg").value.trim(),
-      adb: $("adb").value.trim(),
-      preferredADBSerial: $("adb-serial").value.trim(),
-      requirePreferredADB: $("require-adb-serial").checked,
-      touchEnabled: $("touch-enabled").checked,
-      touchGestures: $("touch-gestures").checked,
-      penEnabled: $("pen-enabled").checked,
-      keyboardEnabled: $("keyboard-enabled").checked,
-      keepAliveOnBackground: $("keep-alive-on-background").checked,
-      idleDisplayTimeoutSec: Math.max(0, parseInt($("idle-display-timeout").value, 10) || 0),
-      penPrediction: $("pen-prediction").checked,
-      penInkPreview: $("pen-ink-preview").checked,
-      idleCaptureGate: $("idle-capture-gate").checked,
-      x11HighRateCapture: $("x11-high-rate-capture").checked,
-      videoScaling: $("video-scaling").value,
-      autoLaunchAndroidApp: $("auto-launch-android-app").checked,
-      zeroCopyCapture: $("zero-copy-capture").checked,
-      temporalLayering: $("temporal-layering").checked,
-      allowToolAutoInstall: $("allow-tool-auto-install").checked,
-      noDriverInstall: $("no-driver-install").checked,
-      aoaEnabled: $("aoa-enabled").checked,
-      aoaAutoSwitch: $("aoa-auto-switch").checked,
-      adbTunnelEnabled: $("adb-tunnel-enabled").checked,
-    };
-    if (featureFlags.wifi) {
-      body.pairedWifiEnabled = $("paired-wifi-enabled").checked;
-      body.pairedWifiInterface = $("paired-wifi-interface").value;
-      body.wifiEnabled = $("wifi-enabled").checked;
-      body.wifiServiceName = $("wifi-service-name").value.trim();
-      body.wifiBindAddress = $("wifi-bind-address").value.trim();
-      body.wifiInputPort = parseInt($("wifi-input-port").value, 10);
-      body.wifiVideoPort = parseInt($("wifi-video-port").value, 10);
-      body.wifiMaxBitrate = $("wifi-max-bitrate").value.trim();
-      const wifiAuthToken = $("wifi-auth-token").value;
-      if (wifiAuthToken.trim() !== "") {
-        body.wifiAuthToken = wifiAuthToken;
-      }
-      body.wifiTLS = $("wifi-tls").checked;
-    }
+    const changes = new Set(changedSettings());
+    const body = Object.fromEntries(Object.entries(draftSettings()).filter(([key]) => changes.has(key)));
     const res = await api("/api/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    loadedSettings = { ...(loadedSettings || {}), ...body };
+    loadedSettings = res.settings || { ...(loadedSettings || {}), ...body };
     resolutionDirty = false;
-    showMsg(res.restarted ? "Saved — stream restarting with new settings." : "Saved — applies on next connection.", true);
+    fillSettingControls(loadedSettings);
+    syncResolutionPreset(loadedSettings.width, loadedSettings.height);
+    refreshFramerateOptions(loadedSettings.fps);
+    $("paired-wifi-enabled").checked = !!loadedSettings.pairedWifiEnabled;
+    wifiSelectedInterface = loadedSettings.pairedWifiInterface || "";
+    renderWifiInterfaces({ ...(wifiView || {}), interface: wifiSelectedInterface });
+    updateADBVisibility();
+    const message = res.restarted ? "Saved. Reconnecting video."
+      : res.inputRestarted ? "Saved. Reconnecting input."
+      : "Saved.";
+    // Announced by the status region; nothing is focused, so the page does
+    // not scroll away from the control the user just changed.
+    showMsg(message, true, $("form"));
+    flashSaved(message);
   } catch (e) {
     showMsg(e.message, false);
   } finally {
-    $("save").disabled = false;
+    savingSettings = false;
+    updatePendingSettings();
   }
+});
+
+$("form").addEventListener("input", updatePendingSettings);
+$("form").addEventListener("change", updatePendingSettings);
+$("form").addEventListener("invalid", event => {
+  const details = event.target.closest("details");
+  if (details) details.open = true;
+}, true);
+$("discard-settings-btn").addEventListener("click", () => {
+  if (!loadedSettings || savingSettings) return;
+  fillSettingControls(loadedSettings);
+  syncResolutionPreset(loadedSettings.width, loadedSettings.height);
+  refreshFramerateOptions(loadedSettings.fps);
+  $("paired-wifi-enabled").checked = !!loadedSettings.pairedWifiEnabled;
+  wifiSelectedInterface = loadedSettings.pairedWifiInterface || "";
+  $("paired-wifi-interface").value = wifiSelectedInterface;
+  resolutionDirty = false;
+  updateADBVisibility();
+  updatePendingSettings();
+  showMsg("Changes discarded.", true, $("form"));
+});
+window.addEventListener("beforeunload", event => {
+  if (settingsDirty || calibrationDirty()) { event.preventDefault(); event.returnValue = ""; }
 });
 
 $("input-lock-toggle").addEventListener("change", async (ev) => {
   const toggle = ev.target;
   const locked = !!toggle.checked;
+  toggle.dataset.busy = "true";
   toggle.disabled = true;
   try {
     await api("/api/session/input-lock", {
@@ -816,33 +1156,51 @@ $("input-lock-toggle").addEventListener("change", async (ev) => {
     toggle.checked = !locked;
     showMsg(e.message, false);
   } finally {
-    toggle.disabled = false;
+    delete toggle.dataset.busy;
+    toggle.disabled = !hostReachable || !currentCalibrationDevice;
+  }
+});
+
+$("pc-disconnect-btn").addEventListener("click", async () => {
+  const btn = $("pc-disconnect-btn");
+  btn.disabled = true;
+  try {
+    await api("/api/desktop/disconnect", { method: "POST" });
+    showMsg("PC client disconnect requested.", true);
+  } catch (e) {
+    showMsg(e.message, false);
+  } finally {
+    btn.disabled = false;
   }
 });
 
 $("disconnect-session-btn").addEventListener("click", async () => {
   const btn = $("disconnect-session-btn");
+  btn.dataset.busy = "true";
   btn.disabled = true;
   try {
     await api("/api/session/disconnect", { method: "POST" });
-    showMsg("Active client session disconnected. The app will auto-reconnect.", true);
+    showMsg("Connection reset. Reconnecting.", true);
   } catch (e) {
     showMsg(e.message, false);
   } finally {
-    btn.disabled = false;
+    delete btn.dataset.busy;
+    btn.disabled = !hostReachable || !currentCalibrationDevice;
   }
 });
 
 $("pause-video-btn").addEventListener("click", async () => {
   const btn = $("pause-video-btn");
+  btn.dataset.busy = "true";
   btn.disabled = true;
   try {
     await api("/api/session/reconnect-video", { method: "POST" });
-    showMsg("Video stream reconnect requested.", true);
+    showMsg("Reconnecting video.", true);
   } catch (e) {
     showMsg(e.message, false);
   } finally {
-    btn.disabled = false;
+    delete btn.dataset.busy;
+    btn.disabled = !hostReachable || !currentCalibrationDevice;
   }
 });
 
@@ -854,13 +1212,17 @@ function updateADBVisibility() {
     : "Re-check setup";
 }
 $("adb-tunnel-enabled").addEventListener("change", () => {
-  if (!$("adb-tunnel-enabled").checked) $("aoa-enabled").checked = true;
+  if (!$("adb-tunnel-enabled").checked && !$("aoa-enabled").checked) {
+    $("aoa-enabled").checked = true;
+    showMsg("USB accessory enabled; at least one USB transport is required.", true, $("adb-tunnel-enabled"));
+  }
   updateADBVisibility();
 });
 $("aoa-enabled").addEventListener("change", () => {
   if (!$("aoa-enabled").checked) {
     $("adb-tunnel-enabled").checked = true;
     updateADBVisibility();
+    showMsg("ADB enabled; at least one USB transport is required.", true, $("aoa-enabled"));
   }
 });
 
@@ -936,10 +1298,55 @@ $("show-debug-console").addEventListener("change", (ev) => {
 });
 
 const themeToggle = $("theme-mode-toggle");
-if (themeToggle) {
-  themeToggle.addEventListener("change", (ev) => {
-    const theme = ev.target.checked ? "light" : "dark";
+const themePicker = themeToggle.closest(".theme-picker");
+const themeOptions = [...document.querySelectorAll("[data-theme-option]")];
+let themeMenuPinned = false;
+
+function setThemeMenuOpen(open) {
+  $("theme-options").hidden = !open;
+  themeToggle.setAttribute("aria-expanded", String(open));
+  if (!open) themeMenuPinned = false;
+}
+
+themePicker.addEventListener("pointerenter", event => {
+  if (event.pointerType === "mouse") setThemeMenuOpen(true);
+});
+themePicker.addEventListener("pointerleave", () => {
+  if (!themeMenuPinned && !themePicker.contains(document.activeElement)) setThemeMenuOpen(false);
+});
+themePicker.addEventListener("focusout", event => {
+  if (!themePicker.contains(event.relatedTarget)) setThemeMenuOpen(false);
+});
+themeToggle.addEventListener("click", () => {
+  const open = !themeMenuPinned;
+  setThemeMenuOpen(open);
+  themeMenuPinned = open;
+});
+themePicker.addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    setThemeMenuOpen(false);
+    themeToggle.focus();
+  } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+    event.preventDefault();
+    setThemeMenuOpen(true);
+    let index = themeOptions.indexOf(document.activeElement);
+    if (event.key === "Home") index = 0;
+    else if (event.key === "End") index = themeOptions.length - 1;
+    else if (index < 0) index = event.key === "ArrowDown" ? 0 : themeOptions.length - 1;
+    else index = (index + (event.key === "ArrowDown" ? 1 : -1) + themeOptions.length) % themeOptions.length;
+    themeOptions[index].focus();
+  }
+});
+document.addEventListener("pointerdown", event => {
+  if (!themePicker.contains(event.target)) setThemeMenuOpen(false);
+});
+for (const option of themeOptions) {
+  option.addEventListener("click", () => {
+    const theme = option.dataset.themeOption;
     applyTheme(theme);
+    setThemeMenuOpen(false);
+    themeToggle.focus();
     try {
       localStorage.setItem(THEME_STORAGE_KEY, theme);
     } catch (_e) {
@@ -948,24 +1355,32 @@ if (themeToggle) {
   });
 }
 
-$("autostart-toggle").addEventListener("change", async () => {
-  const want = $("autostart-toggle").checked;
-  const button = $("autostart-toggle");
-  serviceBusy = true;
-  button.disabled = true;
-  try {
-    await api("/api/autostart", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: want }),
-    });
-  } catch (e) {
-    showMsg(e.message, false);
-  } finally {
-    serviceBusy = false;
-    await refreshStatus();
-  }
-});
+for (const toggle of autostartToggles) {
+  toggle.addEventListener("change", async () => {
+    if (serviceBusy) return;
+    const want = toggle.checked;
+    serviceBusy = true;
+    for (const control of autostartToggles) {
+      control.checked = want;
+      control.disabled = true;
+    }
+    try {
+      await api("/api/autostart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: want }),
+      });
+      autostartOn = want;
+      showMsg(want ? "Startup enabled." : "Startup disabled.", true, toggle);
+    } catch (e) {
+      for (const control of autostartToggles) control.checked = autostartOn;
+      showMsg(e.message, false, toggle);
+    } finally {
+      serviceBusy = false;
+      await refreshStatus();
+    }
+  });
+}
 
 $("stop-btn").addEventListener("click", async () => {
   if (!confirm("Stop the DrawSplay host? The client will show \u201cWaiting for host\u201d until it is started again.")) return;
@@ -973,6 +1388,9 @@ $("stop-btn").addEventListener("click", async () => {
   btn.disabled = true;
   try {
     await api("/api/stop", { method: "POST" });
+    hostStopped = true;
+    hostReachable = false;
+    updatePendingSettings();
     $("dot").className = "dot";
     $("status").textContent = "Host stopped";
   } catch (e) {
@@ -984,6 +1402,7 @@ $("stop-btn").addEventListener("click", async () => {
 $("clear-mode-btn").addEventListener("click", async () => {
   if (!confirm("Clear the connected client's saved display resolution preference?")) return;
   const btn = $("clear-mode-btn");
+  btn.dataset.busy = "true";
   btn.disabled = true;
   try {
     await api("/api/tablet/clear-display-mode", { method: "POST" });
@@ -991,7 +1410,8 @@ $("clear-mode-btn").addEventListener("click", async () => {
   } catch (e) {
     showMsg(e.message, false);
   } finally {
-    btn.disabled = false;
+    delete btn.dataset.busy;
+    btn.disabled = !hostReachable || !currentCalibrationDevice;
   }
 });
 
@@ -1015,26 +1435,305 @@ $("save-calibration-btn").addEventListener("click", async () => {
     return;
   }
   const btn = $("save-calibration-btn");
+  btn.dataset.busy = "true";
   btn.disabled = true;
   try {
+    const calibration = readCalibration();
+    if (![calibration.scaleX, calibration.scaleY].every(value => Number.isFinite(value) && value >= 0.5 && value <= 1.5) ||
+        ![calibration.offsetX, calibration.offsetY].every(value => Number.isFinite(value) && Math.abs(value) <= 0.25)) {
+      throw new Error("Enter scales between 0.5 and 1.5, and offsets between -0.25 and 0.25.");
+    }
     await api("/api/calibration", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         device,
-        calibration: {
-          scaleX: parseFloat($("calibration-scale-x").value),
-          scaleY: parseFloat($("calibration-scale-y").value),
-          offsetX: parseFloat($("calibration-offset-x").value),
-          offsetY: parseFloat($("calibration-offset-y").value),
-        },
+        calibration,
       }),
     });
-    showMsg("Calibration saved for connected client.", true);
+    if (device === currentCalibrationDevice) savedCalibration = calibration;
+    showMsg("Calibration saved.", true, btn);
   } catch (e) {
     showMsg(e.message, false);
   } finally {
-    btn.disabled = false;
+    delete btn.dataset.busy;
+    btn.disabled = !hostReachable || !currentCalibrationDevice || !savedCalibration;
+  }
+});
+
+function readCalibration() {
+  return {
+    scaleX: parseFloat($("calibration-scale-x").value),
+    scaleY: parseFloat($("calibration-scale-y").value),
+    offsetX: parseFloat($("calibration-offset-x").value),
+    offsetY: parseFloat($("calibration-offset-y").value),
+  };
+}
+
+function calibrationDirty() {
+  return !!savedCalibration && Object.entries(readCalibration()).some(([key, value]) =>
+    Math.abs(value - savedCalibration[key]) > 0.00006 || !Number.isFinite(value));
+}
+
+$("reset-calibration-btn").addEventListener("click", () => {
+  setCalibrationForm(currentCalibrationDevice, { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 });
+  showMsg("Defaults ready. Save calibration to apply.", true, $("reset-calibration-btn"));
+});
+$("cancel-calibration-btn").addEventListener("click", () => {
+  if (savedCalibration) setCalibrationForm(currentCalibrationDevice, savedCalibration);
+  showMsg("Calibration changes discarded.", true, $("cancel-calibration-btn"));
+});
+
+const calibrationTargets = [[0.2, 0.3], [0.8, 0.3], [0.8, 0.75], [0.2, 0.75]];
+let calibrationSamples = [];
+let calibrationCandidate = null;
+let calibrationBasis = null;
+
+function positionCalibrationTarget() {
+  const [x, y] = calibrationTargets[calibrationSamples.length] || [0.5, 0.5];
+  $("calibration-target").style.left = `${x * 100}%`;
+  $("calibration-target").style.top = `${y * 100}%`;
+  $("calibration-step").textContent = calibrationSamples.length < 4
+    ? `Tap target ${calibrationSamples.length + 1} of 4 with your pen.`
+    : "Move your pen. The dot previews the corrected position.";
+}
+
+$("start-calibration-btn").addEventListener("click", () => {
+  if (!savedCalibration || !currentCalibrationDevice) return;
+  calibrationSamples = [];
+  calibrationCandidate = null;
+  calibrationBasis = { ...savedCalibration };
+  $("calibration-begin").hidden = false;
+  $("calibration-begin").textContent = "Enter fullscreen & start";
+  $("calibration-accept").hidden = true;
+  $("calibration-area").hidden = true;
+  $("calibration-preview").hidden = true;
+  $("calibration-instructions").textContent = "Move this window to the tablet display. Tap four targets with your pen in fullscreen.";
+  $("calibration-dialog").showModal();
+});
+$("calibration-begin").addEventListener("click", async () => {
+  try {
+    if (document.fullscreenElement !== $("calibration-workspace")) await $("calibration-workspace").requestFullscreen();
+    $("calibration-area").hidden = false;
+    $("calibration-begin").hidden = true;
+    $("calibration-instructions").textContent = "Tap each target with your pen. Escape cancels.";
+    positionCalibrationTarget();
+  } catch (_e) {
+    $("calibration-instructions").textContent = "Fullscreen unavailable. Use Manual adjustments or allow fullscreen and retry.";
+  }
+});
+$("calibration-area").addEventListener("pointerup", event => {
+  if (calibrationCandidate || calibrationSamples.length >= 4 || event.button !== 0 ||
+      document.fullscreenElement !== $("calibration-workspace")) return;
+  const [x, y] = calibrationTargets[calibrationSamples.length];
+  calibrationSamples.push({
+    targetX: x, targetY: y, observedX: event.clientX / innerWidth, observedY: event.clientY / innerHeight,
+  });
+  if (calibrationSamples.length === 4) {
+    try {
+      calibrationCandidate = solvePenCalibration(calibrationSamples, calibrationBasis);
+      $("calibration-accept").hidden = false;
+      $("calibration-preview").hidden = false;
+    } catch (e) {
+      $("calibration-instructions").textContent = e.message;
+      $("calibration-area").hidden = true;
+      $("calibration-begin").hidden = false;
+      $("calibration-begin").textContent = "Try again";
+      calibrationSamples = [];
+      return;
+    }
+  }
+  positionCalibrationTarget();
+});
+$("calibration-area").addEventListener("pointermove", event => {
+  if (!calibrationCandidate) return;
+  for (const [axis, coordinate, size, property] of [["X", event.clientX, innerWidth, "left"], ["Y", event.clientY, innerHeight, "top"]]) {
+    const raw = (coordinate / size - calibrationBasis[`offset${axis}`]) / calibrationBasis[`scale${axis}`];
+    const corrected = raw * calibrationCandidate[`scale${axis}`] + calibrationCandidate[`offset${axis}`];
+    $("calibration-preview").style[property] = `${Math.max(0, Math.min(1, corrected)) * 100}%`;
+  }
+});
+$("calibration-accept").addEventListener("click", () => {
+  if (!calibrationCandidate) return;
+  setCalibrationForm(currentCalibrationDevice, calibrationCandidate);
+  $("calibration-dialog").close();
+  showMsg("Calibration ready. Save calibration to apply.", true, $("start-calibration-btn"));
+});
+$("calibration-exit").addEventListener("click", () => $("calibration-dialog").close());
+$("calibration-dialog").addEventListener("close", () => {
+  if (document.fullscreenElement === $("calibration-workspace")) document.exitFullscreen().catch(() => {});
+});
+document.addEventListener("fullscreenchange", () => {
+  if ($("calibration-dialog").open && !$("calibration-area").hidden &&
+      document.fullscreenElement !== $("calibration-workspace")) $("calibration-dialog").close();
+});
+
+// ---- Updates (update.go) ----
+const UPDATE_BUSY = new Set(["checking", "downloading", "installing", "restarting"]);
+let updateView = null;
+// Set while an install runs: the version that was running when it started,
+// and whether the host has gone away since (it restarts into the new one).
+let updateInstallFrom = "";
+let updateHostWentAway = false;
+
+function formatMiB(bytes) {
+  return (Number(bytes || 0) / 1048576).toFixed(1) + " MB";
+}
+
+function updateSummaryText(v) {
+  switch (v.state) {
+    case "checking": return ["Checking for updates…", ""];
+    case "current": return [`${v.current} is the latest version.`, "ok"];
+    case "available": return [`DrawSplay ${v.latest} is available. You have ${v.current}.`, "available"];
+    case "dev": return [`Development build ${v.current}. The latest release is ${v.latest}.`, ""];
+    case "downloading": {
+      const of = v.total ? ` of ${formatMiB(v.total)}` : "";
+      return [`Downloading ${v.latest}… ${formatMiB(v.downloaded)}${of}`, "available"];
+    }
+    case "installing": return [`Installing ${v.latest}…`, "available"];
+    case "restarting": return [`Restarting into ${v.latest}…`, "available"];
+    case "failed": return [`You have ${v.current}.`, ""];
+    default: return [v.autoCheck ? "Checking for updates…" : `You have ${v.current}. Not checked yet.`, ""];
+  }
+}
+
+function renderUpdate(v) {
+  updateView = v;
+  const busy = UPDATE_BUSY.has(v.state);
+  const [text, tone] = updateSummaryText(v);
+  setText($("update-summary"), text);
+  $("update-summary").setAttribute("aria-live", v.state === "downloading" ? "off" : "polite");
+  $("update-summary").className = "update-summary" + (tone ? " " + tone : "");
+
+  const progress = $("update-progress");
+  progress.hidden = !(v.state === "downloading" || v.state === "installing" || v.state === "restarting");
+  if (v.state === "downloading" && v.total > 0) {
+    progress.value = Math.max(0, Math.min(100, (100 * v.downloaded) / v.total));
+  } else progress.removeAttribute("value");
+
+  const showNotes = !!v.notes && v.latest && v.state !== "current";
+  $("update-notes-box").hidden = !showNotes;
+  if (showNotes) {
+    $("update-notes-version").textContent = v.latest;
+    if ($("update-notes").textContent !== v.notes) $("update-notes").textContent = v.notes;
+  }
+
+  let note = v.state === "available" || v.state === "dev" ? (v.installNote || "") : "";
+  if (v.state === "current" && v.checkedAt) {
+    note = "Last checked " + new Date(v.checkedAt).toLocaleString() + ".";
+  }
+  if (v.state === "available" && v.canInstall) {
+    note += (note ? " " : "") + "The tablet app offers its own update on its waiting screen.";
+  }
+  $("update-note").textContent = note;
+
+  const result = $("update-result");
+  const r = v.lastResult;
+  replaceWhenChanged(result, r, () => {
+   if (r) {
+    const line = document.createElement("div");
+    line.className = r.ok ? "update-summary ok" : "update-error";
+    line.textContent = r.ok
+      ? `Updated from ${r.from} to ${r.to}.`
+      : `The update to ${r.to} did not finish, so ${v.current} is still running. If Windows asked for approval, it may have been declined.`;
+    result.append(line);
+    for (const w of r.warnings || []) {
+      const el = document.createElement("div");
+      el.className = "update-warning";
+      el.textContent = w;
+      result.append(el);
+    }
+   }
+  });
+  result.hidden = !r;
+
+  $("update-error").hidden = !v.error;
+  setText($("update-error"), v.error || "");
+
+  const install = $("update-install-btn");
+  install.hidden = !(v.canInstall && (v.state === "available" || busy));
+  install.disabled = busy;
+  install.textContent = v.latest ? `Install ${v.latest}` : "Install update";
+
+  const link = $("update-release-link");
+  const releaseURL = safeHTTPSURL(v.releaseURL);
+  link.hidden = !releaseURL;
+  if (releaseURL) link.href = releaseURL;
+  else link.removeAttribute("href");
+  link.textContent = v.state === "available" && !v.canInstall ? "Download from the release page" : "Release page";
+
+  $("update-check-btn").disabled = busy;
+
+  const footer = $("footer-update");
+  footer.hidden = v.state !== "available";
+  footer.textContent = v.latest ? `· ${v.latest} available` : "";
+}
+
+async function refreshUpdate() {
+  let v;
+  try {
+    v = await api("/api/update");
+  } catch (_e) {
+    if (updateInstallFrom) {
+      // The host is restarting into the new version.
+      updateHostWentAway = true;
+      $("update-summary").textContent = "Restarting DrawSplay… this page reloads when it is back.";
+    }
+    return;
+  }
+  if (updateInstallFrom && (updateHostWentAway || v.current !== updateInstallFrom)) {
+    location.reload();
+    return;
+  }
+  if (updateInstallFrom && !UPDATE_BUSY.has(v.state)) updateInstallFrom = ""; // the install failed
+  renderUpdate(v);
+}
+
+// Runs every second like the other panels, but asks the host only every 15 s
+// unless an update is under way.
+let updateLastRefresh = 0;
+let updateRefreshing = false;
+async function tickUpdate() {
+  const busy = updateInstallFrom || (updateView && UPDATE_BUSY.has(updateView.state));
+  if (updateRefreshing || (!busy && Date.now() - updateLastRefresh < 15000)) return;
+  updateRefreshing = true;
+  updateLastRefresh = Date.now();
+  try {
+    await refreshUpdate();
+  } finally {
+    updateRefreshing = false;
+  }
+}
+
+$("update-check-btn").addEventListener("click", async () => {
+  $("update-check-btn").disabled = true;
+  $("update-summary").textContent = "Checking for updates…";
+  try {
+    renderUpdate(await api("/api/update/check", { method: "POST" }));
+  } catch (e) {
+    $("update-error").hidden = false;
+    $("update-error").textContent = e.message;
+    $("update-check-btn").disabled = false;
+  }
+});
+
+$("update-install-btn").addEventListener("click", async () => {
+  const v = updateView;
+  if (!v || !v.latest) return;
+  const ok = confirm(
+    `Install DrawSplay ${v.latest} now?\n\nDrawSplay restarts to finish the update, so a connected tablet disconnects for a few seconds.` +
+    (hostOSName === "windows" ? " Windows asks for administrator approval." : ""));
+  if (!ok) return;
+  $("update-install-btn").disabled = true;
+  try {
+    updateInstallFrom = v.current;
+    updateHostWentAway = false;
+    renderUpdate(await api("/api/update/install", { method: "POST" }));
+  } catch (e) {
+    updateInstallFrom = "";
+    $("update-error").hidden = false;
+    $("update-error").textContent = e.message;
+    $("update-install-btn").disabled = false;
   }
 });
 
@@ -1063,7 +1762,9 @@ if (window.EventSource) {
     window.addEventListener("focus", clear);
   });
 }
+tickUpdate();
 setInterval(refreshStatus, 2000);
+setInterval(tickUpdate, 1000);
 setInterval(refreshWifiPairing, 2000);
 setInterval(renderWifiPairing, 1000);
 $("wifi-pair-start").addEventListener("click", () => wifiPairAction("start", { replace: !!(wifiView && wifiView.paired) }));

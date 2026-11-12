@@ -48,29 +48,3 @@ func (tc *temporalController) onClean() bool {
 func (tc *temporalController) droppingNonRef() bool {
 	return tc != nil && tc.dropNonRef
 }
-
-// isDroppableNonRefNAL reports whether a unit is a non-reference AVC
-// VCL NAL (type 1 with nal_ref_idc=0), which can be dropped safely when the
-// stream was encoded with non-reference P-frame support.
-func isDroppableNonRefNAL(unit []byte) bool {
-	offset := annexBNALHeaderOffset(unit)
-	if offset < 0 || offset >= len(unit) {
-		return false
-	}
-	header := unit[offset]
-	nalType := header & 0x1F
-	nalRefIDC := (header >> 5) & 0x03
-	return nalType == 1 && nalRefIDC == 0
-}
-
-func annexBNALHeaderOffset(unit []byte) int {
-	// 00 00 01 <hdr>
-	if len(unit) >= 4 && unit[0] == 0 && unit[1] == 0 && unit[2] == 1 {
-		return 3
-	}
-	// 00 00 00 01 <hdr>
-	if len(unit) >= 5 && unit[0] == 0 && unit[1] == 0 && unit[2] == 0 && unit[3] == 1 {
-		return 4
-	}
-	return -1
-}

@@ -56,7 +56,7 @@ func run(arguments []string, out, diagnostics io.Writer) int {
 			return
 		}
 		if len(seen) >= 64 {
-			outputErr = fmt.Errorf("candidate limit reached (64); refusing further discovery")
+			outputErr = errors.New("candidate limit reached (64); refusing further discovery")
 			cancel()
 			return
 		}

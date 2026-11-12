@@ -27,6 +27,8 @@ const captureProcessNiceDelta = -10
 // the real work happens post-start (see applyCaptureProcessPriorityPostStart).
 func applyCaptureProcessPriority(cmd *exec.Cmd) {}
 
+func setCaptureProcessPriority(cmd *exec.Cmd, foreground bool) error { return nil }
+
 // applyCaptureProcessPriorityPostStart best-effort renices the just-started
 // capture/encode subprocess (gst-launch-1.0 or ffmpeg) to reduce the chance
 // that compositor/browser/CPU-governor scheduling jitter delays a video

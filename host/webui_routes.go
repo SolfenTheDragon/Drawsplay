@@ -2,10 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"log"
 	"net/http"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -15,29 +15,21 @@ type webUIAPI struct {
 	store     *settingsStore
 	csrfToken string
 	stop      func()
+	exit      func()
 }
 
-type settingsView struct {
-	settings
-	WifiAuthTokenConfigured bool `json:"wifiAuthTokenConfigured"`
-}
-
-func redactedSettingsView(s settings) settingsView {
-	return settingsView{
-		settings:                redactSettingsSecrets(s),
-		WifiAuthTokenConfigured: strings.TrimSpace(s.WifiAuthToken) != "",
-	}
-}
-
-func redactSettingsSecrets(s settings) settings {
-	s.WifiAuthToken = ""
-	return s
-}
+// webUIContentSecurityPolicy confines the settings page to its own embedded
+// script and stylesheet: no inline script, no foreign origins, no framing.
+// Script-driven style properties (element.style.x) stay allowed; inline
+// style attributes and javascript: URLs do not.
+const webUIContentSecurityPolicy = "default-src 'self'; img-src 'self' data:; " +
+	"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 
 // newWebUIHandler builds the web UI routes (separate from runWebUI so tests
 // can drive the handler with httptest). stop is invoked, shortly after the
-// response is written, by POST /api/stop.
-func newWebUIHandler(store *settingsStore, stop func()) http.Handler {
+// response is written, by POST /api/stop. exit ends the whole host process
+// gracefully, for an update to restart it.
+func newWebUIHandler(store *settingsStore, stop, exit func()) http.Handler {
 	mux := http.NewServeMux()
 	csrfToken := newCSRFToken()
 
@@ -47,13 +39,21 @@ func newWebUIHandler(store *settingsStore, stop func()) http.Handler {
 	}
 	mux.Handle("/", http.FileServer(http.FS(static)))
 
-	api := webUIAPI{store: store, csrfToken: csrfToken, stop: stop}
+	api := webUIAPI{store: store, csrfToken: csrfToken, stop: stop, exit: exit}
 	api.register(mux)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// DNS rebinding: a hostile page can point its own name at 127.0.0.1
+		// and then read this API as same-origin. Its requests still carry its
+		// own name in Host, so only loopback names are served.
+		if !localHostHeader(r.Host) {
+			httpError(w, http.StatusMisdirectedRequest, "this settings page only answers requests addressed to localhost")
+			return
+		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Content-Security-Policy", webUIContentSecurityPolicy)
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Cache-Control", "no-store")
 		}
@@ -77,12 +77,34 @@ func (api webUIAPI) register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/tablet/switch-aoa", securePost(api.csrfToken, api.handleSwitchAOA))
 	mux.HandleFunc("/api/session/input-lock", securePost(api.csrfToken, api.handleSessionInputLock))
 	mux.HandleFunc("/api/session/disconnect", securePost(api.csrfToken, api.handleSessionDisconnect))
-	mux.HandleFunc("/api/wifi/pairing", getOnly(api.handleWifiPairing))
-	mux.HandleFunc("/api/wifi/pairing/start", securePost(api.csrfToken, api.handleWifiPairStart))
-	mux.HandleFunc("/api/wifi/pairing/approve", securePost(api.csrfToken, api.handleWifiPairApprove))
-	mux.HandleFunc("/api/wifi/pairing/deny", securePost(api.csrfToken, api.handleWifiPairDeny))
-	mux.HandleFunc("/api/wifi/pairing/cancel", securePost(api.csrfToken, api.handleWifiPairCancel))
+	mux.HandleFunc("/api/wifi/pairing", getOnly(api.handleWiFiPairing))
+	mux.HandleFunc("/api/wifi/pairing/start", securePost(api.csrfToken, api.handleWiFiPairStart))
+	mux.HandleFunc("/api/wifi/pairing/approve", securePost(api.csrfToken, api.handleWiFiPairApprove))
+	mux.HandleFunc("/api/wifi/pairing/deny", securePost(api.csrfToken, api.handleWiFiPairDeny))
+	mux.HandleFunc("/api/wifi/pairing/cancel", securePost(api.csrfToken, api.handleWiFiPairCancel))
+	mux.HandleFunc("/api/desktop/disconnect", securePost(api.csrfToken, api.handleDesktopDisconnect))
 	mux.HandleFunc("/api/session/reconnect-video", securePost(api.csrfToken, api.handleSessionReconnectVideo))
+	mux.HandleFunc("/api/update", getOnly(api.handleUpdate))
+	mux.HandleFunc("/api/update/check", securePost(api.csrfToken, api.handleUpdateCheck))
+	mux.HandleFunc("/api/update/install", securePost(api.csrfToken, api.handleUpdateInstall))
+}
+
+func (api webUIAPI) handleUpdate(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, hostUpdater.status(api.store.get().UpdateCheck))
+}
+
+func (api webUIAPI) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	hostUpdater.checkNow(r.Context())
+	writeJSON(w, hostUpdater.status(api.store.get().UpdateCheck))
+}
+
+func (api webUIAPI) handleUpdateInstall(w http.ResponseWriter, _ *http.Request) {
+	if err := hostUpdater.startInstall(api.exit); err != nil {
+		httpError(w, http.StatusConflict, "%v", err)
+		return
+	}
+	log.Printf("Update install requested via web UI")
+	writeJSON(w, hostUpdater.status(api.store.get().UpdateCheck))
 }
 
 func (api webUIAPI) handleCSRF(w http.ResponseWriter, _ *http.Request) {
@@ -92,24 +114,30 @@ func (api webUIAPI) handleCSRF(w http.ResponseWriter, _ *http.Request) {
 func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, redactedSettingsView(api.store.get()))
+		writeJSON(w, api.store.get())
 	case http.MethodPut, http.MethodPost:
 		if !requireCSRF(w, r, api.csrfToken) {
 			return
 		}
-		// Decode over the current settings so older clients that omit a
-		// newly added field preserve its value instead of zeroing it.
-		old := api.store.get()
-		s := old
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&s); err != nil {
+		var patch json.RawMessage
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&patch); err != nil {
 			httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
 			return
 		}
-		if err := api.store.update(s); err != nil {
+		var decodeErr error
+		old, s, err := api.store.modify(func(next *settings) error {
+			decodeErr = json.Unmarshal(patch, next)
+			return decodeErr
+		})
+		if decodeErr != nil {
+			httpError(w, http.StatusBadRequest, "invalid JSON: %v", decodeErr)
+			return
+		}
+		if err != nil {
 			httpError(w, http.StatusUnprocessableEntity, "%v", err)
 			return
 		}
-		applyPairedWifiSettings(api.store, old, api.store.get())
+		applyPairedWiFiSettings(api.store, old, s)
 		fps := 0
 		if old.FPS != s.FPS {
 			fps = s.FPS
@@ -124,7 +152,10 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 		if modeW > 0 && modeH > 0 {
 			publishModeChange(modeW, modeH, fps)
 		}
-		restarted := restartActiveVideoSession()
+		restarted := false
+		if videoSettingsChanged(old, s) {
+			restarted = restartActiveVideoSession()
+		}
 		inputRestarted := false
 		if old.TouchEnabled != s.TouchEnabled ||
 			old.PenEnabled != s.PenEnabled ||
@@ -135,7 +166,9 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 			old.VideoScaling != s.VideoScaling {
 			inputRestarted = restartActiveInputSessions()
 		}
-		runBackgroundPreflight(api.store.get())
+		if old.FFmpeg != s.FFmpeg || old.ADB != s.ADB || old.AllowToolAutoInstall != s.AllowToolAutoInstall {
+			runBackgroundPreflight(s)
+		}
 		log.Printf("Settings updated via web UI: fps=%d bitrate=%s %dx%d touch=%v pen=%v keyboard=%v keepAliveOnBackground=%v videoScaling=%s preferredADBSerial=%q requirePreferredADB=%v autoLaunchAndroidApp=%v zeroCopyCapture=%v temporalLayering=%v allowToolAutoInstall=%v noDriverInstall=%v (videoRestarted=%v inputRestarted=%v)",
 			s.FPS, s.Bitrate, s.Width, s.Height, s.TouchEnabled, s.PenEnabled,
 			s.KeyboardEnabled, s.KeepAliveOnBackground, s.VideoScaling, s.PreferredADBSerial, s.RequirePreferredADB, s.AutoLaunchAndroidApp, s.ZeroCopyCapture, s.TemporalLayering, s.AllowToolAutoInstall,
@@ -144,6 +177,7 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 			"ok":             true,
 			"restarted":      restarted,
 			"inputRestarted": inputRestarted,
+			"settings":       s,
 		})
 	default:
 		w.Header().Set("Allow", "GET, PUT")
@@ -151,32 +185,34 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func videoSettingsChanged(old, next settings) bool {
+	return old.FFmpeg != next.FFmpeg ||
+		old.FPS != next.FPS ||
+		old.Bitrate != next.Bitrate ||
+		old.Width != next.Width ||
+		old.Height != next.Height ||
+		old.ZeroCopyCapture != next.ZeroCopyCapture ||
+		old.TemporalLayering != next.TemporalLayering ||
+		old.IdleCaptureGate != next.IdleCaptureGate ||
+		old.X11HighRateCapture != next.X11HighRateCapture ||
+		old.NativeMediaHelper != next.NativeMediaHelper
+}
+
 func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {
-	enabled, autostartErr := autostartEnabled()
-	status := map[string]any{
-		"video":                   currentVideoStatus(),
-		"clientVideoStats":        currentClientVideoStats(),
-		"adb":                     currentADBStatus(),
-		"aoa":                     currentAOAStatus(),
-		"adbTunnelEnabled":        api.store.get().ADBTunnelEnabled,
-		"aoaEnabled":              api.store.get().AOAEnabled,
-		"warnings":                currentOperationalWarnings(),
-		"metrics":                 currentOperationalMetrics(),
-		"setup":                   currentSetupChecklist(api.store.get()),
-		"autostart":               enabled,
-		"autostartImplementation": autostartImplementation(),
-		"hostOS":                  runtime.GOOS,
-		"version":                 hostVersion(),
-		"featureFlags":            map[string]bool{"wifi": wifiFeatureEnabled()},
-		"activeTransport":         hostSessionOwnership.currentTransport(),
-		"activeClient":            activeClientIdentity(),
-		"activeInputDevice":       activeInputDevice(),
-		"inputLocked":             sessionInputLocked(),
+	writeJSON(w, currentHostStatus(api.store.get()))
+}
+
+// handleDesktopDisconnect ends the PC client session served by dd-host.
+func (api webUIAPI) handleDesktopDisconnect(w http.ResponseWriter, _ *http.Request) {
+	if err := requestDesktopDisconnect(desktopHostDir(), time.Now()); err != nil {
+		if errors.Is(err, errNoDesktopSession) {
+			httpError(w, http.StatusConflict, "%v", err)
+			return
+		}
+		httpError(w, http.StatusInternalServerError, "could not send the disconnect request: %v", err)
+		return
 	}
-	if autostartErr != nil {
-		status["autostartError"] = autostartErr.Error()
-	}
-	writeJSON(w, status)
+	writeJSON(w, map[string]bool{"ok": true})
 }
 
 func (api webUIAPI) handleSetupCheck(w http.ResponseWriter, _ *http.Request) {
@@ -225,29 +261,7 @@ func shouldRestartX11AfterSetupRepair(x11Session bool, video videoStatusInfo, vi
 }
 
 func (api webUIAPI) handleDiagnostics(w http.ResponseWriter, _ *http.Request) {
-	lines, next := currentDebugLogs(0)
-	writeJSON(w, map[string]any{
-		"generatedAt": time.Now().UTC().Format(time.RFC3339),
-		"runtime": map[string]any{
-			"goVersion": runtime.Version(),
-			"goOS":      runtime.GOOS,
-			"goArch":    runtime.GOARCH,
-			"cpus":      runtime.NumCPU(),
-		},
-		"settings":          redactedSettingsView(api.store.get()),
-		"video":             currentVideoStatus(),
-		"clientVideoStats":  currentClientVideoStats(),
-		"activeClient":      activeClientIdentity(),
-		"adb":               currentADBStatus(),
-		"aoa":               currentAOAStatus(),
-		"warnings":          currentOperationalWarnings(),
-		"metrics":           currentOperationalMetrics(),
-		"setup":             currentSetupChecklist(api.store.get()),
-		"activeInputDevice": activeInputDevice(),
-		"inputLocked":       sessionInputLocked(),
-		"logCursor":         next,
-		"logLines":          lines,
-	})
+	writeJSON(w, currentHostDiagnostics(api.store.get()))
 }
 
 func (api webUIAPI) handleCalibration(w http.ResponseWriter, r *http.Request) {

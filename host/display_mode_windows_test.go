@@ -20,12 +20,12 @@ func useTempDisplayModeStore(t *testing.T) {
 func TestDesiredDisplayModePrefersTabletNative(t *testing.T) {
 	useTempDisplayModeStore(t)
 	const session = 7301
-	bindSessionClientIdentity(session, clientIdentity{
+	bindTestIdentity(session, clientIdentity{
 		Platform: "android", NativeWidth: 2960, NativeHeight: 1848,
 		RefreshRates: []int{60, 120},
 		PrefWidth:    1920, PrefHeight: 1080, PrefFPS: 60,
 	})
-	defer unbindSessionClientIdentity(session)
+	defer unbindClientSession(session)
 
 	w, h, hz, nw, nh := desiredDisplayMode(videoOptions{Width: 1920, Height: 1080, FPS: 60})
 	if w != 2960 || h != 1848 || hz != 120 {
@@ -39,11 +39,11 @@ func TestDesiredDisplayModePrefersTabletNative(t *testing.T) {
 func TestDesiredDisplayModeUsesWindowsChoice(t *testing.T) {
 	useTempDisplayModeStore(t)
 	const session = 7303
-	bindSessionClientIdentity(session, clientIdentity{
+	bindTestIdentity(session, clientIdentity{
 		Platform: "android", NativeWidth: 2960, NativeHeight: 1848,
 		RefreshRates: []int{60, 120},
 	})
-	defer unbindSessionClientIdentity(session)
+	defer unbindClientSession(session)
 
 	if err := rememberWindowsDisplayMode(2960, 1848, 2560, 1440); err != nil {
 		t.Fatal(err)
@@ -93,8 +93,8 @@ func TestEncodeIDDAddMonitorV2Layout(t *testing.T) {
 func TestDesiredDisplayModeFallsBackWithoutNativeSize(t *testing.T) {
 	useTempDisplayModeStore(t)
 	const session = 7302
-	bindSessionClientIdentity(session, clientIdentity{Platform: "windows"})
-	defer unbindSessionClientIdentity(session)
+	bindTestIdentity(session, clientIdentity{Platform: "windows"})
+	defer unbindClientSession(session)
 
 	if w, h, _, _, _ := desiredDisplayMode(videoOptions{Width: 2560, Height: 1440}); w != 2560 || h != 1440 {
 		t.Fatalf("mode = %dx%d, want host setting 2560x1440", w, h)

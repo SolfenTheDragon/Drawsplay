@@ -4,10 +4,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,6 +32,11 @@ func setupWindowsDisplayDriver(installIDD func() string, iddReady func() bool,
 	if iddReady() {
 		return windowsDriverSetupResult{status: status}
 	}
+	if status == driverStatusPendingReboot {
+		// The DrawSplay driver is staged and only needs a reboot; adding a
+		// second virtual display driver now would leave two installed.
+		return windowsDriverSetupResult{status: status}
+	}
 	log.Printf("DrawSplay virtual display setup: %s; trying signed Parsec VDD fallback", status)
 	owned, err := installParsec()
 	if err != nil {
@@ -51,7 +56,7 @@ func installWindowsDisplayDriver() windowsDriverSetupResult {
 // selection never downloads, installs or restarts a shared Parsec adapter.
 func installParsecFallback() (bool, error) {
 	if !isProcessElevated() {
-		return false, fmt.Errorf("Parsec fallback installation requires administrator approval")
+		return false, errors.New("Parsec fallback installation requires administrator approval")
 	}
 	if _, err := parsecDevicePath(); err == nil {
 		log.Println("Using existing Parsec VDD fallback; no download or install needed")
@@ -59,10 +64,10 @@ func installParsecFallback() (bool, error) {
 	}
 	_, _, haveUninstaller := parsecVDDUninstaller()
 	if haveUninstaller || len(scanParsecVDDInfs()) > 0 {
-		return false, fmt.Errorf("Parsec VDD is installed but unavailable; repair it or restart Windows (existing shared driver was not replaced)")
+		return false, errors.New("Parsec VDD is installed but unavailable; repair it or restart Windows (existing shared driver was not replaced)")
 	}
 	if !loadSettings().AllowToolAutoInstall {
-		return false, fmt.Errorf("Parsec VDD is missing and automatic tool installation is disabled")
+		return false, errors.New("Parsec VDD is missing and automatic tool installation is disabled")
 	}
 	dir, err := driverStageDir()
 	if err != nil {
@@ -106,7 +111,7 @@ func installParsecFallback() (bool, error) {
 			return owned, nil
 		}
 		if time.Now().After(deadline) {
-			return owned, fmt.Errorf("Parsec installed but its control interface is unavailable; restart Windows and retry")
+			return owned, errors.New("Parsec installed but its control interface is unavailable; restart Windows and retry")
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -114,30 +119,24 @@ func installParsecFallback() (bool, error) {
 
 func downloadParsecInstaller(path string) error {
 	log.Printf("Downloading fallback driver only after DrawSplay driver failure: %s", parsecInstallerURL)
-	client := &http.Client{Timeout: 2 * time.Minute}
-	resp, err := client.Get(parsecInstallerURL)
-	if err != nil {
-		return fmt.Errorf("download Parsec fallback: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download Parsec fallback: HTTP %s", resp.Status)
-	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	const limit = 64 << 20
-	n, copyErr := io.Copy(file, io.LimitReader(resp.Body, limit+1))
-	closeErr := file.Close()
-	if copyErr != nil {
-		return fmt.Errorf("download Parsec fallback: %w", copyErr)
+	d := download{
+		URL: parsecInstallerURL,
+		// The file is pinned by SHA-256 and its publisher's signature, so any
+		// HTTPS mirror Parsec redirects to will do.
+		Allowed: func(u *url.URL) bool { return u.Scheme == "https" },
+		Timeout: 2 * time.Minute,
+		Limit:   64 << 20,
 	}
-	if closeErr != nil {
-		return closeErr
+	err = d.to(context.Background(), file)
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
 	}
-	if n > limit {
-		return fmt.Errorf("Parsec installer exceeds 64 MiB limit")
+	if err != nil {
+		return fmt.Errorf("download Parsec fallback: %w", err)
 	}
 	return nil
 }
@@ -152,9 +151,7 @@ func verifyParsecInstaller(path string) error {
 		"{ throw ('Parsec installer publisher verification failed: '+$s.Status) }"
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, windowsPowerShellPath(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
-	cmd.Env = append(os.Environ(), "DRAWSPLAY_PARSEC_INSTALLER="+path)
-	hideChildWindow(cmd)
+	cmd := powerShellCommand(ctx, script, "DRAWSPLAY_PARSEC_INSTALLER="+path)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("verify Parsec Authenticode signature: %w (%s)", err, strings.TrimSpace(string(out)))
 	}

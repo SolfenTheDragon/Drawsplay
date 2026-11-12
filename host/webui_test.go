@@ -1,14 +1,155 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
+
+type pausedSettingsBody struct {
+	io.Reader
+	started chan struct{}
+	resume  <-chan struct{}
+	once    sync.Once
+}
+
+func (b *pausedSettingsBody) Read(p []byte) (int, error) {
+	b.once.Do(func() {
+		close(b.started)
+		<-b.resume
+	})
+	return b.Reader.Read(p)
+}
+
+func TestSettingsConcurrentPatchesPreserveChanges(t *testing.T) {
+	for _, resolutionChange := range []bool{false, true} {
+		t.Run(fmt.Sprintf("resolution=%v", resolutionChange), func(t *testing.T) {
+			store := newTestStore(t)
+			api := webUIAPI{store: store, csrfToken: "test"}
+			resume := make(chan struct{})
+			var resumeOnce sync.Once
+			unblock := func() { resumeOnce.Do(func() { close(resume) }) }
+			defer unblock()
+			body := &pausedSettingsBody{
+				Reader:  strings.NewReader(`{"keyboardEnabled":false}`),
+				started: make(chan struct{}),
+				resume:  resume,
+			}
+			req := httptest.NewRequest(http.MethodPut, "/api/settings", body)
+			req.Header.Set("X-DrawSplay-CSRF", "test")
+			res := httptest.NewRecorder()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				api.handleSettings(res, req)
+			}()
+			select {
+			case <-body.started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("request did not begin reading its body")
+			}
+			if resolutionChange {
+				if err := store.updateResolution(2560, 1440); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"touchEnabled":false}`))
+				req.Header.Set("X-DrawSplay-CSRF", "test")
+				res := httptest.NewRecorder()
+				api.handleSettings(res, req)
+				if res.Code != http.StatusOK {
+					t.Fatalf("concurrent update failed: %d %s", res.Code, res.Body)
+				}
+			}
+			unblock()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("request did not finish")
+			}
+			if res.Code != http.StatusOK {
+				t.Fatalf("delayed update failed: %d %s", res.Code, res.Body)
+			}
+			got := store.get()
+			if got.KeyboardEnabled || (!resolutionChange && got.TouchEnabled) ||
+				(resolutionChange && (got.Width != 2560 || got.Height != 1440)) {
+				t.Fatalf("concurrent change lost: %+v", got)
+			}
+			if saved := loadSettings(); saved != got {
+				t.Fatalf("disk and memory disagree: saved=%+v memory=%+v", saved, got)
+			}
+		})
+	}
+}
+
+func TestSettingsApplyOnlyAffectedSessions(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantVideo bool
+		wantInput bool
+	}{
+		{"unchanged", `{}`, false, false},
+		{"update preference", `{"updateCheck":false}`, false, false},
+		{"keyboard policy is read live", `{"keyboardEnabled":false}`, false, false},
+		{"pen policy", `{"penPrediction":false}`, false, true},
+		{"touch input", `{"touchEnabled":false}`, false, true},
+		{"scaling policy", `{"videoScaling":"fit"}`, false, true},
+		{"bitrate", `{"bitrate":"12M"}`, true, false},
+		{"frame rate", `{"fps":60}`, true, false},
+		{"resolution", `{"width":1280,"height":720}`, true, false},
+		{"native capture", `{"nativeMediaHelper":"off"}`, true, false},
+		{"capture gating", `{"idleCaptureGate":true}`, true, false},
+		{"temporal layers", `{"temporalLayering":true}`, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newTestStore(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			setActiveVideoSession(cancel, nil)
+			defer func() { setActiveVideoSession(nil, nil); cancel() }()
+			input, peer := net.Pipe()
+			defer input.Close()
+			defer peer.Close()
+			registerInputConnection(987654, input)
+			defer unregisterInputConnection(987654)
+			srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
+			defer srv.Close()
+			res := protectedRequest(t, http.MethodPut, srv.URL, "/api/settings", tt.body, testCSRFToken(t, srv.URL))
+			defer res.Body.Close()
+			var body struct {
+				Restarted      bool     `json:"restarted"`
+				InputRestarted bool     `json:"inputRestarted"`
+				Settings       settings `json:"settings"`
+			}
+			if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if res.StatusCode != http.StatusOK || body.Restarted != tt.wantVideo || body.InputRestarted != tt.wantInput {
+				t.Fatalf("status=%d video=%v input=%v; want video=%v input=%v", res.StatusCode, body.Restarted, body.InputRestarted, tt.wantVideo, tt.wantInput)
+			}
+			if (ctx.Err() != nil) != tt.wantVideo {
+				t.Fatalf("video cancellation = %v, want %v", ctx.Err(), tt.wantVideo)
+			}
+			if body.Settings != store.get() {
+				t.Fatal("response does not contain the saved settings")
+			}
+		})
+	}
+}
 
 // newTestStore builds a store whose saves go to a temp config dir.
 func newTestStore(t *testing.T) *settingsStore {
@@ -54,7 +195,7 @@ func protectedRequest(t *testing.T, method, serverURL, path, body, token string)
 
 func TestSettingsAPIRoundTrip(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -63,19 +204,16 @@ func TestSettingsAPIRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var getBody struct {
-		WifiAuthToken           string `json:"wifiAuthToken"`
-		WifiAuthTokenConfigured bool   `json:"wifiAuthTokenConfigured"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&getBody); err != nil {
+	raw, err := io.ReadAll(res.Body)
+	res.Body.Close()
+	if err != nil {
 		t.Fatal(err)
 	}
-	res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("GET status = %d", res.StatusCode)
 	}
-	if getBody.WifiAuthToken != "" || getBody.WifiAuthTokenConfigured {
-		t.Fatalf("expected redacted default tokens, got %+v", getBody)
+	if bytes.Contains(raw, []byte("wifiAuthToken")) || bytes.Contains(raw, []byte(`"wifiEnabled"`)) {
+		t.Fatalf("retired token Wi-Fi settings still exposed: %s", raw)
 	}
 
 	// PUT applies a valid change.
@@ -104,19 +242,13 @@ func TestSettingsAPIPreservesWiFiFieldsWhenFeatureDisabled(t *testing.T) {
 	t.Setenv(wifiFeatureFlagEnv, "0")
 	store := newTestStore(t)
 	initial := defaultSettings()
-	initial.WifiEnabled = true
-	initial.WifiBindAddress = "10.0.0.5"
-	initial.WifiInputPort = 40001
-	initial.WifiVideoPort = 40002
-	initial.WifiServiceName = "SavedService"
-	initial.WifiTLS = true
-	initial.WifiAuthToken = "saved-token"
-	initial.WifiMaxBitrate = "9M"
+	initial.PairedWiFiEnabled = true
+	initial.PairedWiFiInterface = "wlan0"
 	if err := store.update(initial); err != nil {
 		t.Fatalf("store.update(initial): %v", err)
 	}
 
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -129,75 +261,50 @@ func TestSettingsAPIPreservesWiFiFieldsWhenFeatureDisabled(t *testing.T) {
 	}
 
 	got := store.get()
-	if got.WifiAuthToken != "saved-token" ||
-		got.WifiBindAddress != "10.0.0.5" ||
-		got.WifiInputPort != 40001 ||
-		got.WifiVideoPort != 40002 ||
-		got.WifiServiceName != "SavedService" ||
-		got.WifiMaxBitrate != "9M" ||
-		!got.WifiTLS {
-		t.Fatalf("wifi settings were unexpectedly changed: %+v", got)
+	if got.PairedWiFiInterface != "wlan0" {
+		t.Fatalf("wifi interface was unexpectedly changed: %+v", got)
 	}
-	if got.WifiEnabled {
-		t.Fatalf("wifiEnabled should be forced off while feature is disabled")
+	if got.PairedWiFiEnabled {
+		t.Fatalf("pairedWifiEnabled should be forced off while feature is disabled")
 	}
 }
 
-func TestSettingsAndDiagnosticsRedactAuthTokens(t *testing.T) {
-	store := newTestStore(t)
-	s := defaultSettings()
-	s.WifiEnabled = true
-	s.WifiAuthToken = "wifi-secret"
-	if err := store.update(s); err != nil {
-		t.Fatalf("store.update: %v", err)
-	}
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
-	defer srv.Close()
-
-	res, err := http.Get(srv.URL + "/api/settings")
+func TestLegacyWiFiSettingsAreDroppedFromConfig(t *testing.T) {
+	newTestStore(t)
+	path, err := configPath()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var settingsBody struct {
-		WifiAuthToken           string `json:"wifiAuthToken"`
-		WifiAuthTokenConfigured bool   `json:"wifiAuthTokenConfigured"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&settingsBody); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	res.Body.Close()
-	if settingsBody.WifiAuthToken != "" {
-		t.Fatalf("expected settings token redaction, got %+v", settingsBody)
+	legacy := `{"ffmpeg":"ffmpeg","fps":60,"bitrate":"24M","width":1920,"height":1080,"wifiEnabled":true,"wifiAuthToken":"old-secret","wifiTLS":true}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if !settingsBody.WifiAuthTokenConfigured {
-		t.Fatalf("expected configured flags true, got %+v", settingsBody)
+	cert := filepath.Join(filepath.Dir(path), "wifi_tls_key.pem")
+	if err := os.WriteFile(cert, []byte("key"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-
-	res, err = http.Get(srv.URL + "/api/diagnostics")
+	removeLegacyWiFiFiles()
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var diagnosticsBody struct {
-		Settings struct {
-			WifiAuthToken           string `json:"wifiAuthToken"`
-			WifiAuthTokenConfigured bool   `json:"wifiAuthTokenConfigured"`
-		} `json:"settings"`
+	if bytes.Contains(data, []byte("old-secret")) || bytes.Contains(data, []byte("wifiAuthToken")) {
+		t.Fatalf("legacy token left in config: %s", data)
 	}
-	if err := json.NewDecoder(res.Body).Decode(&diagnosticsBody); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(cert); !os.IsNotExist(err) {
+		t.Fatalf("legacy TLS key not removed: %v", err)
 	}
-	res.Body.Close()
-	if diagnosticsBody.Settings.WifiAuthToken != "" {
-		t.Fatalf("expected diagnostics token redaction, got %+v", diagnosticsBody.Settings)
-	}
-	if !diagnosticsBody.Settings.WifiAuthTokenConfigured {
-		t.Fatalf("expected diagnostics configured flags true, got %+v", diagnosticsBody.Settings)
+	if got := loadSettings(); got.FPS != 60 {
+		t.Fatalf("other settings lost: %+v", got)
 	}
 }
 
 func TestStatusAPIExposesWarningsAndMetrics(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 
 	res, err := http.Get(srv.URL + "/api/status")
@@ -236,7 +343,7 @@ func TestAutostartImplementationNamesLinuxXDGAutostart(t *testing.T) {
 
 func TestLogsAPIExposesBufferedConsoleOutput(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 
 	logLine := "webui-log-test-line"
@@ -274,7 +381,7 @@ func TestLogsAPIExposesBufferedConsoleOutput(t *testing.T) {
 
 func TestDiagnosticsAPIIncludesSnapshot(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 
 	res, err := http.Get(srv.URL + "/api/diagnostics")
@@ -298,7 +405,7 @@ func TestDiagnosticsAPIIncludesSnapshot(t *testing.T) {
 
 func TestSessionInputLockAPI(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -315,7 +422,7 @@ func TestSessionInputLockAPI(t *testing.T) {
 
 func TestSessionReconnectVideoAndSetupRemediationAPIs(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -378,7 +485,7 @@ func TestInputAllowedBySettings(t *testing.T) {
 
 func TestSettingsAPIRejectsInvalid(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -411,12 +518,10 @@ func TestCalibrationAPIRoundTrip(t *testing.T) {
 	calibrationState.mu.Lock()
 	calibrationState.loaded = false
 	calibrationState.values = make(map[string]deviceCalibration)
-	calibrationState.session = make(map[uint64]string)
-	calibrationState.active = ""
 	calibrationState.mu.Unlock()
 
 	store := newSettingsStore(defaultSettings())
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -462,7 +567,7 @@ func TestCalibrationAPIRoundTrip(t *testing.T) {
 
 func TestStateChangingAPIRequiresCSRFAndLocalOrigin(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 	body := `{"fps":30}`
@@ -492,7 +597,7 @@ func TestStateChangingAPIRequiresCSRFAndLocalOrigin(t *testing.T) {
 
 func TestSettingsAPIRejectsUnsafeToolPaths(t *testing.T) {
 	store := newTestStore(t)
-	srv := httptest.NewServer(newWebUIHandler(store, func() {}))
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
 	defer srv.Close()
 	token := testCSRFToken(t, srv.URL)
 
@@ -507,6 +612,55 @@ func TestSettingsAPIRejectsUnsafeToolPaths(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusUnprocessableEntity {
 			t.Errorf("PUT %s status = %d, want 422", body, res.StatusCode)
+		}
+	}
+}
+
+func TestWebUIRefusesRebindedHostNames(t *testing.T) {
+	store := newTestStore(t)
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
+	defer srv.Close()
+	for _, path := range []string{"/api/wifi/pairing", "/api/logs", "/api/csrf", "/api/settings", "/"} {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		req.Host = "evil.example:27180"
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusMisdirectedRequest {
+			t.Errorf("%s with a foreign Host: status %d, want %d", path, res.StatusCode, http.StatusMisdirectedRequest)
+		}
+	}
+	for _, host := range []string{"localhost:27180", "127.0.0.1:27180", "[::1]:27180", "LOCALHOST"} {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/csrf", nil)
+		req.Host = host
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Errorf("Host %q refused: %d", host, res.StatusCode)
+		}
+	}
+}
+
+func TestWebUISetsContentSecurityPolicy(t *testing.T) {
+	store := newTestStore(t)
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
+	defer srv.Close()
+	for _, path := range []string{"/", "/api/status"} {
+		res, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		csp := res.Header.Get("Content-Security-Policy")
+		for _, want := range []string{"default-src 'self'", "frame-ancestors 'none'", "object-src 'none'"} {
+			if !strings.Contains(csp, want) {
+				t.Errorf("%s: CSP %q lacks %q", path, csp, want)
+			}
 		}
 	}
 }

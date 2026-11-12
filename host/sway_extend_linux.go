@@ -295,7 +295,7 @@ func (s *swayOutput) Configure(c wlExtConfig) error {
 	return swayRun(s.sock, cmds...)
 }
 
-func (s *swayOutput) Remove(moves []x11OutputPos, fallback string) error {
+func (s *swayOutput) Remove(moves []outputPos, fallback string) error {
 	s.mu.Lock()
 	if s.events != nil {
 		s.events.Close()

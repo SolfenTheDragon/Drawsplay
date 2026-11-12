@@ -7,200 +7,185 @@ Use your Android tablet as a touch- and pen-enabled extension of your computer's
 - Extended desktop on the tablet (mirroring when a virtual display isn't available)
 - Touch, multi-touch and pen input, including pressure, tilt and buttons
 - Connects automatically over USB; no IP addresses or pairing codes
-- Wi-Fi connection (**beta**, opt-in) for cable-free use; USB remains the preferred connection
-- Tablet's native resolution and highest refresh rate by default (60 fps on Linux), remembered per computer
-- Local settings page for bitrate, input toggles and diagnostics
-- Windows and Linux hosts
+- Wi-Fi connection (**beta**, opt-in) for cable-free use
+- Tablet's native resolution and highest refresh rate by default, remembered per computer
+- Windows and Linux computers
 
 ## Download
 
 Get the latest [DrawSplay release](https://github.com/SolfenTheDragon/Drawsplay/releases/latest):
 
-- **Windows:** `DrawSplay-windows-vX.Y.Z.zip` (a folder with the installer and the APK)
-- **Linux (x86-64):** `DrawSplay-linux-vX.Y.Z.tar.gz` (a folder with the host, install/uninstall scripts, icon, udev rule and the APK)
-- **Android app:** `DrawSplay.APK` (also inside both folders)
-
-No source build is required.
+- **Windows:** `DrawSplay-windows-vX.Y.Z.zip` (the installer and the tablet app)
+- **Linux (x86-64):** `DrawSplay-linux-vX.Y.Z.tar.gz` (the program, install/uninstall scripts and the tablet app)
+- **Tablet app only:** `DrawSplay.APK`
 
 ## Requirements
 
-- A USB cable between the computer and the tablet
-- **Windows:** Windows 10/11 (the extended display needs Windows 10 version 1903 or later; any NVIDIA, AMD or Intel GPU works), with the WinUSB driver bound to the tablet (see Install). Internet access during install: the installer downloads the newest ffmpeg build compatible with your Windows version and CPU (SHA-256 verified). adb is not needed or downloaded.
-- **Linux:** an x86-64 computer with ffmpeg. Wayland is preferred (GNOME, KDE Plasma 6, sway and Hyprland support an extended desktop); X11 also works: for an extended desktop it uses an unplugged HDMI port of your GPU as the tablet's display (forced on while the tablet is connected, with one password prompt), or the `vkms` kernel module (tried first; skipped automatically on kernels where it fails). Without a virtual display DrawSplay mirrors your screen instead. On X11 with an Intel GPU an optional native helper (`drawsplay-media`, see `BUILD.md`) lowers latency; ffmpeg remains the automatic fallback, and AMD/NVIDIA keep using ffmpeg unless you opt in.
-- **Tablet:** an Android device. No Developer options or USB debugging are needed.
+- A USB cable between the computer and the tablet.
+- **Windows:** Windows 10 (version 1903 or later) or Windows 11, and internet access while installing (the installer downloads ffmpeg).
+- **Linux:** an x86-64 computer with ffmpeg. The extended desktop works on GNOME, KDE Plasma 6, sway and Hyprland (Wayland), and on X11 when your graphics card has an unused HDMI port. Otherwise DrawSplay mirrors your screen.
+- **Tablet:** Android 8 or later. Developer options and USB debugging are not needed.
 
 ## Install
 
 ### Windows
 
 1. Install the app on the tablet: copy `DrawSplay.APK` to it, open it and allow installs from that source if asked.
-2. Extract `DrawSplay-windows-vX.Y.Z.zip` and run `drawsplay_installer_vX.Y.Z.exe`. It asks about a desktop shortcut, sign-in startup, and installing the virtual display (including local certificate trust), then Windows asks for administrator approval **once**; setup then:
-   - installs DrawSplay to `C:\Program Files\DrawSplay\` (with `DrawSplay-Uninstall.exe`),
-   - installs DrawSplay's bundled virtual display driver and `ffmpeg`,
-   - installs a WinUSB driver for the tablet (signed on your PC, so Zadig is not needed) and a helper so newly attached tablets get it without another UAC prompt,
-   - stores settings, logs and install state in `%APPDATA%\DrawSplay\`, adds Start Menu shortcuts (and a desktop shortcut if you choose it) and, if you choose it, starts DrawSplay at sign-in (changeable later on the settings page).
+2. Extract the zip and run `drawsplay_installer_vX.Y.Z.exe`. Choose the desktop shortcut and startup preferences on one setup screen. Select **Enable an extra screen** to install the virtual display driver; leave it off for mirror-only setup without a new display driver. Setup explains any local signing-certificate change before you proceed. Click **Install**, then approve the administrator prompt once. A progress window stays visible while files, ffmpeg and USB drivers are installed.
+3. DrawSplay runs in the **system tray**. Right-click the tray icon to open settings, start/stop or exit.
 
-   If the virtual-display catalog is unsigned, setup signs it on your PC with a unique certificate, trusts its public certificate in the machine's Trusted Root and Trusted Publishers stores, and deletes the private signing key immediately. An already trusted catalog is preserved. Secure Boot and signature enforcement are not changed; managed security policies may still block installation.
+If the tablet isn't detected, unplug and reconnect it. If it still isn't detected, run the installer again.
 
-   Driver signing and fallback downloads use temporary, administrator-only
-   workspaces under Program Files, never your writable temporary folder.
-   Setup refuses signing if those permissions cannot be verified.
+For a silent install, run `drawsplay_installer_vX.Y.Z.exe -install -quiet` (add `-desktop-shortcut`, `-no-autostart` or `-no-driver-install` as wanted).
 
-   **Parsec is a fallback, not a second required driver.** If DrawSplay's driver works, setup does not download or install Parsec. Only if DrawSplay's driver fails to become available does setup reuse an existing Parsec VDD or download and install the verified Parsec VDD 0.41 fallback. Disabling automatic tool installation prevents that download. If neither driver works, DrawSplay mirrors your screen. The fallback offers only the modes already supported by Parsec; your tablet's exact native size/refresh is not guaranteed.
-
-   For an unattended install run `drawsplay_installer_vX.Y.Z.exe -install -quiet`, adding `-desktop-shortcut` and/or `-no-autostart` (or `-autostart`) as wanted; a quiet reinstall keeps the existing shortcut and sign-in setting. Quiet installation also authorizes local virtual-display signing/trust; add `-no-driver-install` to skip it and use mirror mode.
-3. DrawSplay runs in the **system tray** (no console window). Right-click the tray icon to open settings, start/stop, or exit.
-4. If the tablet isn't detected, unplug and reconnect it; DrawSplay binds its WinUSB driver to the tablet automatically (normal mode first, then accessory mode). If it still isn't detected, rerun the installer. This replaces the tablet's file-transfer/ADB USB driver while DrawSplay's driver is bound; uninstalling DrawSplay restores it.
-
-To uninstall, use **Apps & Features**, the **Uninstall DrawSplay** Start Menu shortcut, or `C:\Program Files\DrawSplay\DrawSplay-Uninstall.exe` (add `-quiet` for no dialogs, `-keep-settings` to keep `%APPDATA%\DrawSplay`). The uninstaller also removes DrawSplay's dependencies: the bundled ffmpeg, WinUSB drivers DrawSplay installed (and their signing certificate), and DrawSplay's own virtual display driver and local signing certificates. If a virtual-display package cannot be removed, its certificates are retained with a warning until driver removal succeeds. A newly installed Parsec fallback is removed automatically only when the Parsec app is absent. Pre-existing Parsec drivers, legacy drivers with ambiguous ownership, drivers shared with the Parsec app, and Zadig WinUSB bindings are removed only if you confirm (`-remove-shared` with `-quiet`).
-
-To run DrawSplay without installing (portable), rename the downloaded file to `DrawSplay.exe`, run it and choose **No** when it offers to install; it then asks for administrator approval only when a driver is first needed, and never twice for the same USB device. For a console with live logs, run `DrawSplay.exe -background=false` from a terminal.
-
-**USB mode note:** while DrawSplay runs it switches the tablet into USB accessory mode, which replaces the tablet's *File transfer (MTP)* mode (Android shows the "allow DrawSplay" prompt and the mode reverts). On Linux, DrawSplay leaves a tablet alone while it is in File transfer/PTP mode, so choose that mode to move files, then pick *No data transfer* to resume DrawSplay. On Windows, quit DrawSplay (or uninstall it) to use file transfer.
-
-If you want to keep the tablet in File transfer mode until you choose otherwise, turn off **Switch the tablet to accessory mode automatically** in the settings page (`-aoa-auto-switch=false`) and press **Switch to USB accessory mode** in the host overview when you want to use DrawSplay.
+**Uninstall** from **Apps & Features** or the **Uninstall DrawSplay** Start Menu shortcut. Add `-keep-settings` when running `DrawSplay-Uninstall.exe` by hand to keep your settings.
 
 ### Linux
 
-1. Download and extract `DrawSplay-linux-vX.Y.Z.tar.gz` (`tar -xzf DrawSplay-linux-*.tar.gz`), open the extracted folder, then run:
+1. Extract the download and run the installer from the extracted folder, as your normal user (not with `sudo`):
    ```bash
-   chmod +x install-drawsplay-host-linux.sh
+   tar -xzf DrawSplay-linux-*.tar.gz
+   cd DrawSplay-linux-*/
    ./install-drawsplay-host-linux.sh
    ```
-   Run it as your normal user, not with `sudo`. It installs the host, menu and desktop launchers and start at login; on Ubuntu/Debian it also installs missing tools and sets up USB/input permissions (asking for your password). Log out and back in or restart afterwards if asked. Use `--no-install-deps` to keep system changes manual.
+   It adds DrawSplay to your menu and to start at login, installs missing tools on Ubuntu/Debian, and asks for your password to set up USB and input permissions. Log out and back in if it asks you to.
 2. Install the app on the tablet: copy `DrawSplay.APK` to it, open it and allow installs from that source if asked.
-3. Remove the host with `./uninstall-drawsplay-host-linux.sh` (settings and logs are kept).
 
-For smoother streaming, install your GPU's VA-API driver (for example `intel-media-va-driver-non-free` or `mesa-va-drivers`).
+For smoother streaming, install your graphics card's VA-API driver (`intel-media-va-driver-non-free` for Intel, `mesa-va-drivers` for AMD).
 
-More per-desktop detail (X11, GNOME, KDE, sway, Hyprland) is in the project wiki.
+To remove DrawSplay, run `./uninstall-drawsplay-host-linux.sh` (your settings are kept).
 
 ## Use
 
-1. Connect the tablet by USB.
-2. Start the host (`DrawSplay.exe` on Windows, the DrawSplay menu entry or desktop shortcut on Linux).
+1. Connect the tablet by USB. The first time, accept the prompt on the tablet.
+2. Start DrawSplay on the computer (it starts at sign-in if you chose that).
 3. Open DrawSplay on the tablet.
 
-The tablet connects on its own, shows the extended desktop and sends touch and pen input back. It reconnects after drops and unplugging.
+The tablet shows the extended desktop and sends touch and pen input back. It reconnects by itself after drops and unplugging. While the display is shown, swipe from a screen edge and press **Back** for **Connection options**.
 
-While a display is connected, swipe from a screen edge to reveal Android
-navigation and use **Back** to open **Connection options**. You can return to
-the display or manage wireless pairing without a permanent drawing toolbar.
-The setup screens keep Android navigation visible.
+The waiting screen follows the tablet's light/dark theme. **Show setup help** expands connection instructions. A once-only hint explains Back without blocking drawing; local setup screens and dialogs keep keyboard input on the tablet instead of forwarding it to the computer.
 
-## Connection mode
+**USB file transfer:** while DrawSplay runs, it takes over the tablet's USB connection, so *File transfer* mode is not available. On Linux, pick *File transfer* on the tablet to move files, then *No data transfer* to return to DrawSplay. On Windows, quit DrawSplay to transfer files. To switch only when you choose, turn off **Switch the tablet to accessory mode automatically** in the settings and use **Switch to USB accessory mode** when you want DrawSplay.
 
-DrawSplay connects to the tablet over USB. The first time, accept the prompt on the tablet.
+## Settings
 
-**USB is the preferred connection**: it has the lowest latency and the most consistent frame rate. Wi-Fi works but is in beta (see [Wi-Fi (beta)](#wi-fi-beta)). When both are available, USB always takes priority.
+While DrawSplay is running, open `http://127.0.0.1:27180` (or **Settings** in the tray menu) to:
 
-### Developer USB measurements
+- change tablet scaling and turn touch or pen input on and off
+- reset a connection, lock input for a while, or reconnect video
+- see setup checks and connection health, and download a diagnostics file
+- turn **Run at login** and **Open the tablet app when USB connects** on or off
 
-The external [USB resource collector](tools/usb_baseline/README.md) records
-read-only Linux/ADB observations without replacing the running host or app.
-It is preparation for Wi-Fi performance validation, **not** a complete
-latency/FPS/power benchmark or proof that USB is unaffected.
+The navigation groups **Overview**, **Display & input**, **Connections**, **Troubleshooting**, and **Settings & about**. Appearance can follow the system or use light/dark mode. Preference edits show a **Save changes / Discard** bar; only changed preferences are sent, and unrelated changes do not restart video. Startup and live session controls apply immediately. Tablet settings are disabled during a PC-only session or when the host cannot be reached; unsaved edits are kept on this page.
 
-## Configuration
+**Pen alignment:** in **Pen calibration**, choose **Calibrate with targets**, move the browser onto the tablet's display, and enter fullscreen. Tap the four targets with your pen, inspect the corrected-position preview, then choose **Use these adjustments** and **Save calibration**. Nothing is saved by entering or cancelling the guide. Manual adjustments, reset and discard are also available.
 
-While the host is running, open `http://127.0.0.1:27180` to:
-
-- change bitrate and toggle touch/pen input
-- set the `ffmpeg` path
-- disconnect the tablet, lock input temporarily, or reconnect video
-- see the first-run checklist and live health counters
-- download a diagnostics snapshot
-- toggle **Run at login**
-- toggle **Auto-launch Android app on USB connect**
-
-Video setting changes restart the stream automatically.
-
-**Resolution and refresh rate.** The first time a tablet connects to a computer it uses the tablet's native resolution at its highest refresh rate (60 fps on Linux hosts). Changes you make are remembered by the tablet, separately for each computer.
-
-- Windows: use **Windows Display Settings**. The tablet's native resolution is offered at its panel's highest refresh rate (for example 120 Hz), and DrawSplay never streams faster than the tablet's screen can show.
-- GNOME Wayland: **Settings > Displays**.
-- X11: your desktop's display settings (the `HDMI-1` or `Virtual-1-1` display).
-- sway / Hyprland: their output commands.
-- KDE Plasma: DrawSplay's settings page.
-
-On Linux the frame rate is limited to 60, except on X11 hosts with VA-API (Intel/AMD) where the tablet may request up to 120. The settings page can turn that 120 fps capture off, and can pause X11 capture while the screen is idle (saves CPU and bandwidth; off by default). Some compositors, such as Muffin, report damage for the whole X screen, so any animation on any monitor keeps capture running.
+**Resolution and refresh rate:** change them in your computer's display settings (Windows Display Settings; GNOME Settings > Displays; on X11, the `HDMI-1` or `Virtual-1-1` display). On KDE Plasma use DrawSplay's settings page. Linux streams at up to 60 fps (up to 120 on X11 with Intel or AMD graphics).
 
 ## Troubleshooting
 
-**Tablet doesn't connect over USB.** Check the Linux udev rule or the Windows WinUSB driver (see Install), replug the cable and accept the USB prompt on the tablet.
+**Tablet doesn't connect.** Unplug and replug the cable and accept the prompt on the tablet. On Windows, run the installer again; on Linux, run the install script again and log out and back in.
 
-**Linux: `no permissions` or pen/touch not working.** Check that the Android USB rules are installed and you're in `plugdev`; for input, check the `/dev/uinput` rule and `input` group. Log out and back in afterwards.
+**Linux: pen or touch does nothing.** Run the install script again, then log out and back in.
 
-**Linux: the mouse cursor disappears after starting DrawSplay.** Press Ctrl+Alt+Del to open the session menu and move the mouse to bring the cursor back. This comes from the desktop's "hide the pointer while typing" setting reacting to DrawSplay's virtual keyboard and pen devices; turning that setting off prevents it.
+**Linux: the mouse cursor disappears.** Press Ctrl+Alt+Del and move the mouse. Turning off your desktop's "hide the pointer while typing" setting prevents it.
 
 **Linux shows a mirror instead of an extra display.**
-- Wayland: use GNOME, KDE Plasma 6, sway or Hyprland. Other Wayland desktops can't extend and show only X11 apps.
-- X11: the GPU needs an unplugged HDMI port (`ls /sys/class/drm | grep HDMI`); DrawSplay forces it on when the tablet connects and asks for your password once (`pkexec`), or run the host with passwordless `sudo`. Without a spare HDMI port, set `DRAWSPLAY_X11_VKMS_AUTOLOAD=1` to let DrawSplay load `vkms`, or load it yourself with `sudo modprobe vkms`. vkms can crash the X session on some kernels (seen on Linux 7.0 OEM with the `modesetting` driver), which is why DrawSplay guards it and falls back to the HDMI port. The installer adds a udev rule (`70-drawsplay-drm-connector.rules`) so members of `plugdev` can force the HDMI port without a password; without it you get one prompt per boot. `DRAWSPLAY_X11_VKMS_AUTOLOAD=0` turns vkms off, `=1` overrides the guard. If the host or X server dies while a virtual display is being set up, DrawSplay remembers it (`display-guard.json` in its config folder), stops using that method for a week and falls back to the next one, or to mirroring. It also ignores vkms outputs once the kernel log shows the failure. When the tablet disconnects the display is switched off, but the port stays forced until you reboot or run `echo detect | sudo tee /sys/class/drm/card0-HDMI-A-1/status` (use your card and port); nothing is kept across reboots.
-- The host log states the reason, and the settings page shows warnings.
+- Wayland: use GNOME, KDE Plasma 6, sway or Hyprland.
+- X11: DrawSplay first tries the `vkms` virtual-display module, then an unused HDMI port, then mirroring. It may ask for your password when the tablet connects. Automatic `vkms` loading is enabled by default but blocked after detected setup crashes or known kernel failures. Set `DRAWSPLAY_X11_VKMS_AUTOLOAD=0` to disable loading it. Setting it to `1` **overrides the crash guards** and can crash the desktop session; do not use that as a routine repair.
+- The settings page shows the reason.
 
-**Multi-touch gestures don't work in an X11 app.** Some apps need touch enabled; for Firefox start it with `MOZ_USE_XINPUT2=1 firefox`.
+**Windows: no extended display.** Run the installer again and restart Windows if it asks.
 
-**Black screen or no video.** Check `ffmpeg -version` (or `"C:\Program Files\DrawSplay\runtime\ffmpeg\ffmpeg.exe" -version`), keep the host and tablet app open, and try a lower bitrate or resolution on the settings page.
+**Black screen or no video.** Keep both apps open and try a lower bitrate or resolution in the settings.
 
-**Windows: no extended display.** Run the installer (or `"C:\Program Files\DrawSplay\DrawSplay.exe" -install`) again to repair the driver setup (one UAC prompt); reboot if Windows asks. DrawSplay tries its own driver first, then an available Parsec VDD, then mirroring. Setup downloads Parsec only if the preferred driver fails and Parsec is missing. If an existing Parsec driver is broken, repair it rather than overwriting a shared installation. The Parsec fallback does not add custom resolutions or restart its shared adapter.
+**Video lags or stutters on an older tablet.** The settings page shows a **Recommended maximum for this tablet** resolution when the tablet is connected. Set the tablet's display to that size in your computer's display settings.
 
-**Video lags, freezes for a few seconds or catches up in bursts (older or low-memory tablets).** The tablet may not be able to decode the video at its full panel resolution. Open the settings page: when the tablet is connected, a **Recommended maximum for this tablet** resolution (for example `1280x800`) is shown above the resolution controls, with the reason. It is based on the tablet's RAM and hardware video decoder and is only a suggestion; DrawSplay never applies it by itself. To use it:
-- Linux: set the tablet's display to that resolution in the desktop's display settings (GNOME: Settings > Displays; X11 such as Cinnamon: the "Virtual-1-1" display). DrawSplay remembers the choice for that tablet.
-- Windows: choose the resolution in Windows Display Settings.
-- If the settings page doesn't show a recommendation, the tablet's native size is fine or the app is older; update the tablet app.
-- If the stream is still choppy at the recommended size, try a lower one and keep the tablet app in the foreground.
+**Multi-touch doesn't work in an X11 app.** Some apps need touch turned on; for Firefox start it with `MOZ_USE_XINPUT2=1 firefox`.
 
-**The resolution keeps changing back.** Reload the settings page (it can be out of date) and set the resolution again; recent versions no longer overwrite a resolution chosen in the OS display settings when you press Save.
-
-**Tablet app stays on "waiting for host" after being reinstalled or restarted.** Update the host; recent versions reconnect automatically when the tablet app is relaunched. If it still doesn't connect, unplug and replug the tablet, or restart the host and reopen the app.
-
-**Tablet shows no prompt / doesn't open when plugged in.** Turn on **Auto-launch Android app on USB connect** on the settings page, or open the app manually.
+**The tablet doesn't open DrawSplay when plugged in.** Turn on **Open the tablet app when USB connects** in the settings and save, or open the app yourself.
 
 ## Wi-Fi (beta)
 
-Wi-Fi streaming works end to end, display plus touch and pen input, but it is still **in beta**. Expect more latency than USB and occasional hitches on busy or weak networks. **Use USB whenever you can**; Wi-Fi is for when a cable isn't practical.
+Wi-Fi works for display, touch and pen, but it is in beta: expect more delay than USB. Use USB when you can; when both are connected, USB is used.
 
-To use it:
+1. In the settings (`http://127.0.0.1:27180`), turn on **Wi-Fi**, choose your network and save. A pairing code appears in **Host overview**.
+2. On the tablet, tap **Wi-Fi connect** and enter the eight digits.
+3. When the tablet says the code is verified, click **Approve** on the computer.
 
-1. Start the host normally. The Wi-Fi section is visible by default but toggled off (set `DRAWSPLAY_FEATURE_WIFI=0` to hide and disable it).
-2. On the settings page (`http://127.0.0.1:27180`), turn on **Wi-Fi** in the configuration, choose your network interface and save. A pairing code appears in **Host overview**.
-3. On the tablet, tap **Wi-Fi connect**, enter all eight digits, then click
-   **Approve** in the computer's pairing card when the tablet says the code is
-   verified. Keep both apps open. If pairing fails or expires, request a fresh
-   code on the computer and tap **Try again** on the tablet. The tablet switches
-   to the display after the first picture arrives and reconnects to the paired
-   computer automatically afterwards.
+The tablet then reconnects to that computer by itself. Both must be on the same network (not a guest network). Connections are encrypted and only paired devices are accepted. For the best picture use a 5 GHz network with a strong signal; **Host overview** shows the signal strength.
 
-Notes:
+**Switch to a different computer:** on the tablet's waiting screen, tap **Forget wireless host**, confirm, then pair with the new computer. If the display is showing, use **Back → Connection options** first.
 
-- The computer and tablet must be on the same local network. Connections are encrypted (mutual TLS) and only paired devices are accepted.
-- USB always takes priority. Plugging in the cable stops the Wi-Fi session, and Wi-Fi resumes when it's unplugged.
-- **Host overview** shows a live signal-strength indicator for the tablet's Wi-Fi link. For the best results use a 5 GHz network with a strong signal ("Good" or better). If the image lags or hitches, move closer to the router or switch to USB.
-- The stream adapts its bitrate to the link, so quality may drop on a congested network.
+**Wi-Fi doesn't connect:** unplug the USB cable (USB takes priority), and check that DrawSplay on the computer has Wi-Fi turned on with the right network chosen.
 
-**Switch to a different computer:** on the tablet's **Waiting for host** screen,
-tap **Forget wireless host** (shown when a Wi-Fi pairing is saved) and confirm.
-If the display is already connected, use **Back → Connection options** first.
-This stops
-reconnecting to that computer and clears the tablet's saved pairing. Then tap
-**Wi-Fi connect** and pair with the new computer using its code. USB connections
-and saved display settings are unchanged. This forgets the pairing on the tablet
-only; it does not remove the tablet from the old computer's saved devices.
+## DrawSplay Desktop (a PC as the second screen)
 
-**Wireless stays on the waiting screen:** unplug USB to test Wi-Fi; USB
-accessory mode, and USB power with USB debugging enabled, take priority over
-wireless. Check the computer is running DrawSplay with Wi-Fi enabled and the
-correct network interface saved, and both devices are on the same non-guest
-network. The tablet distinguishes missing Wi-Fi from unreadable saved trust
-or an unavailable Android secure identity. A trust error offers local
-forget-and-repair; an identity error may need an Android restart or Keystore
-repair and is never silently reset. USB remains available.
+DrawSplay Desktop turns one computer into an extra display for another, with mouse, keyboard, touch and pen sent back. It is a separate download (`DrawSplayDesktop-…` on the release page) and does not use the tablet app.
 
-Developer tools for Wi-Fi testing are in [`tools/wifi_enrollment`](tools/wifi_enrollment/README.md) and [`tools/android_wifi_probe`](tools/android_wifi_probe/README.md).
+- **`dd-host`** runs on the computer whose desktop you want to extend.
+- **`dd-client`** runs on the computer that becomes the extra display.
+
+Windows and Linux work in any combination.
+
+### Requirements
+
+- `ffmpeg` installed on both computers.
+- A network connection between them (Wi-Fi, Ethernet or a USB network cable).
+- **Windows host:** the DrawSplay virtual display driver (installed by the DrawSplay installer).
+- **Linux host:** an X11 session with a spare display output, or Wayland: sway or Hyprland with `wf-recorder`, or GNOME/KDE with `gstreamer1.0-tools` and `gstreamer1.0-pipewire`.
+- **Linux host, for touch, pen and the full keyboard:** run `install-linux.sh --udev` from the download once, then log out and back in.
+
+### Start
+
+```sh
+dd-host --bind 0.0.0.0:47800              # on the computer to extend
+dd-client                               # on the computer that becomes the display
+```
+
+The client launcher offers **Connect**, **Trusted devices**, and **Quit**. Enter the host's LAN address, then choose a fitted window, fitted fullscreen, or a 1:1 window. For terminal/automated use, `dd-client HOST_IP --fullscreen` still works. Linux graphical dialogs need `zenity`; unavailable dialogs fall back to terminal prompts. `--terminal` explicitly uses terminal prompts.
+
+The host command above listens on all interfaces; prefer `--bind YOUR_LAN_IP:47800` to select one interface. Allow the chosen port through your firewall if necessary. Bare `dd-host` offers a local start/device-management menu, but still listens only on `127.0.0.1:47800`; that menu does not enable LAN access.
+
+Press `Ctrl+Alt+Shift+Q` to close the client. `--size 1920x1080` opens a window instead of fullscreen, `--fit` scales the picture to the window, and `--help` lists all options.
+
+### Pairing
+
+The first time, both computers show their identities and a 10-digit code. Approve on both only if the codes match; otherwise reject. With terminal prompts, type `y` to approve or `n` to reject. Requests expire after two minutes and close when the peer disconnects. After approval, the computers recognise each other.
+
+For deployments without graphical dialogs or an interactive terminal, pair by exchanging keys:
+
+```
+dd-client --show-key        # on the client: prints its key
+dd-host --trust <that key>  # on the host
+dd-host --show-key          # on the host
+dd-client --trust <that key>
+```
+
+**Trusted devices** in the launcher, or `--manage-trusted` on either binary, lets you name or remove paired computers. Removal asks for confirmation. `--list-trusted` and `--forget KEY_PREFIX` remain available for terminal use.
+
+A paired computer can type, click and draw on the host as you, so pair only computers you trust. The host listens only on loopback unless you choose another bind address; the peer-address filter still rejects public-network peers by default. If it can't create an extra display it shows your real screen instead; start it with `--require-virtual` to prevent that.
+
+If a connection drops, the client clears the stale picture, stops forwarding input and shows reconnect progress even in fullscreen. It retries for about a minute, then offers retry, trusted-device management or quit.
+
+### Limitations
+
+- No audio.
+- One client at a time unless the host is started with `--max-clients N`.
+- Pen pressure, tilt and the pen's buttons work only when the client runs on Windows. On a Linux client the pen acts as a mouse.
+- Display mode choices are made at startup; there is no live drawing toolbar.
 
 ## Privacy
 
-The host listens only on your computer (localhost) and the settings page is local-only. In Wi-Fi mode (beta) the host connects out to the paired tablet on your local network over encrypted, mutually authenticated TLS. See [PRIVACY.md](PRIVACY.md) for the full privacy policy.
+DrawSplay's settings page and connections stay on your computer, except Wi-Fi mode, which connects to your paired tablet over encrypted connections on your local network. See [PRIVACY.md](PRIVACY.md).
+
+## Security
+
+Report security problems privately as described in [SECURITY.md](SECURITY.md).
+
+## Building from source
+
+See [BUILD.md](BUILD.md).
 
 ## License
 

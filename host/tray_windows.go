@@ -8,11 +8,10 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/getlantern/systray"
+	"fyne.io/systray"
 )
 
 //go:embed drawsplay-host.ico
@@ -24,7 +23,8 @@ type trayRuntimeController struct {
 	done   chan struct{}
 }
 
-func (c *trayRuntimeController) start(parent context.Context, store *settingsStore) bool {
+// exit ends the whole process (the tray included), for an update.
+func (c *trayRuntimeController) start(parent context.Context, store *settingsStore, exit func()) bool {
 	c.mu.Lock()
 	if c.cancel != nil {
 		c.mu.Unlock()
@@ -38,7 +38,7 @@ func (c *trayRuntimeController) start(parent context.Context, store *settingsSto
 
 	go func() {
 		defer close(done)
-		if err := runHostRuntime(ctx, store, func() { c.stop() }); err != nil && ctx.Err() == nil {
+		if err := runHostRuntime(ctx, store, func() { c.stop() }, exit); err != nil && ctx.Err() == nil {
 			log.Printf("Host runtime stopped with error: %v", err)
 		}
 		c.mu.Lock()
@@ -80,7 +80,7 @@ func runBackgroundTrayController(background bool, parent context.Context, cancel
 	}
 
 	ctrl := &trayRuntimeController{}
-	ctrl.start(parent, store)
+	ctrl.start(parent, store, cancel)
 
 	var (
 		menuStatus *systray.MenuItem
@@ -100,7 +100,7 @@ func runBackgroundTrayController(background bool, parent context.Context, cancel
 			menuStart.Enable()
 			menuStop.Disable()
 		}
-		statusLabel := trayConnectionStatusLabel(running, activeInputDevice())
+		statusLabel, _ := trayStatusText(running, activeInputDevice(), videoStatusInfo{})
 		menuStatus.SetTitle(statusLabel)
 	}
 
@@ -141,7 +141,7 @@ func runBackgroundTrayController(background bool, parent context.Context, cancel
 				case <-menuOpen.ClickedCh:
 					openSettingsWebUI()
 				case <-menuStart.ClickedCh:
-					if ctrl.start(parent, store) {
+					if ctrl.start(parent, store, cancel) {
 						log.Printf("Host runtime started from tray")
 					}
 					updateMenu()
@@ -172,30 +172,7 @@ func runBackgroundTrayController(background bool, parent context.Context, cancel
 
 func openSettingsWebUI() {
 	url := fmt.Sprintf("http://127.0.0.1:%d", webuiPort)
-	if err := exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start(); err != nil {
+	if err := exec.Command(system32Path("rundll32.exe"), "url.dll,FileProtocolHandler", url).Start(); err != nil {
 		log.Printf("Open Web UI failed: %v", err)
 	}
-}
-
-func trayConnectionStatusLabel(running bool, device string) string {
-	if !running {
-		return "🔴 Disconnected"
-	}
-	device = normalizeTrayDeviceName(device)
-	if device == "" {
-		return "🔴 Disconnected"
-	}
-	return "🟢 Connected: " + device
-}
-
-func normalizeTrayDeviceName(device string) string {
-	device = strings.TrimSpace(device)
-	device = strings.ReplaceAll(device, "\r", " ")
-	device = strings.ReplaceAll(device, "\n", " ")
-	device = strings.ReplaceAll(device, "\t", " ")
-	device = strings.TrimSpace(device)
-	if device == "" || device == "unknown-tablet" || device == "unknown-client" {
-		return ""
-	}
-	return device
 }

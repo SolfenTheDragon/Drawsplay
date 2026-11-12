@@ -225,7 +225,7 @@ func TestPlanX11Layout(t *testing.T) {
 		outputs    []xrandrOutput
 		maxW       int
 		w, h       int
-		remembered *x11Placement
+		remembered *displayPlacement
 		want       x11Layout
 		err        string
 	}{
@@ -242,7 +242,7 @@ func TestPlanX11Layout(t *testing.T) {
 			w: 1920, h: 1080,
 			want: x11Layout{
 				Rect:  displayRect{X: 4480, Y: 0, W: 1920, H: 1080},
-				Moves: []x11OutputPos{{Name: "eDP-1", X: 0, Y: 200}, {Name: "HDMI-1", X: 1920, Y: 0}},
+				Moves: []outputPos{{Name: "eDP-1", X: 0, Y: 200}, {Name: "HDMI-1", X: 1920, Y: 0}},
 			},
 		},
 		{
@@ -263,34 +263,34 @@ func TestPlanX11Layout(t *testing.T) {
 			w:       1920, h: 1200,
 			want: x11Layout{
 				Rect:  displayRect{X: 0, Y: 0, W: 1920, H: 1200},
-				Moves: []x11OutputPos{{Name: "eDP-1", X: 1920, Y: 0}},
+				Moves: []outputPos{{Name: "eDP-1", X: 1920, Y: 0}},
 			},
 		},
 		{
 			name:    "back on the left",
 			outputs: []xrandrOutput{panel, off},
 			w:       1920, h: 1080,
-			remembered: &x11Placement{Side: "left"},
+			remembered: &displayPlacement{Side: "left"},
 			want: x11Layout{
 				Rect:  displayRect{X: 0, Y: 0, W: 1920, H: 1080},
-				Moves: []x11OutputPos{{Name: "eDP-1", X: 1920, Y: 0}},
+				Moves: []outputPos{{Name: "eDP-1", X: 1920, Y: 0}},
 			},
 		},
 		{
 			name:    "back above, shifted along the edge",
 			outputs: []xrandrOutput{panel, off},
 			w:       1280, h: 800,
-			remembered: &x11Placement{Side: "above", Offset: 100},
+			remembered: &displayPlacement{Side: "above", Offset: 100},
 			want: x11Layout{
 				Rect:  displayRect{X: 100, Y: 0, W: 1280, H: 800},
-				Moves: []x11OutputPos{{Name: "eDP-1", X: 0, Y: 800}},
+				Moves: []outputPos{{Name: "eDP-1", X: 0, Y: 800}},
 			},
 		},
 		{
 			name:    "an offset past the edge still touches the displays",
 			outputs: []xrandrOutput{panel, off},
 			w:       1280, h: 800,
-			remembered: &x11Placement{Side: "below", Offset: 5000},
+			remembered: &displayPlacement{Side: "below", Offset: 5000},
 			want:       x11Layout{Rect: displayRect{X: 1919, Y: 1080, W: 1280, H: 800}},
 		},
 		{
@@ -309,10 +309,10 @@ func TestPlanX11Layout(t *testing.T) {
 			name:    "mirroring another display at another size returns to where it was",
 			outputs: []xrandrOutput{panel, on(displayRect{X: 0, Y: 0, W: 1920, H: 1080})},
 			w:       2960, h: 1848,
-			remembered: &x11Placement{Side: "left"},
+			remembered: &displayPlacement{Side: "left"},
 			want: x11Layout{
 				Rect:  displayRect{X: 0, Y: 0, W: 2960, H: 1848},
-				Moves: []x11OutputPos{{Name: "eDP-1", X: 2960, Y: 0}},
+				Moves: []outputPos{{Name: "eDP-1", X: 2960, Y: 0}},
 			},
 		},
 		{
@@ -630,9 +630,9 @@ func withFakeX11Ext(t *testing.T, f *fakeXrandr) *fakeX11Session {
 	resetX11Ext()
 
 	const sessionID = 1 << 60
-	bindSessionClientIdentity(sessionID, clientIdentity{Platform: "android", NativeWidth: 2960, NativeHeight: 1848})
+	bindTestIdentity(sessionID, clientIdentity{Platform: "android", NativeWidth: 2960, NativeHeight: 1848})
 	t.Cleanup(func() {
-		unbindSessionClientIdentity(sessionID)
+		unbindClientSession(sessionID)
 		resetX11Ext()
 		xrandrRun, mapX11Tablet = prevRun, prevMap
 		x11OfferSteppedSizes = prevStep
@@ -645,10 +645,10 @@ func withFakeX11Ext(t *testing.T, f *fakeXrandr) *fakeX11Session {
 func resetX11Ext() {
 	x11Ext.mu.Lock()
 	defer x11Ext.mu.Unlock()
-	stopX11ReleaseTimerLocked()
+	x11Ext.stopTimerLocked()
 	x11Ext.gen, x11Ext.claimed, x11Ext.exiting = 0, false, false
 	x11Ext.enabled = map[string]x11EnabledOutput{}
-	x11Ext.placement = map[string]*x11Placement{}
+	x11Ext.placement = map[string]*displayPlacement{}
 	x11Ext.released = map[string]*x11ReleasedOutput{}
 }
 
@@ -873,7 +873,7 @@ func TestX11ExtendedDisplaySwitchesOffAfterTheGracePeriod(t *testing.T) {
 	x11Ext.mu.Lock()
 	placement := x11Ext.placement[":0/Virtual-1-1"]
 	x11Ext.mu.Unlock()
-	if placement == nil || *placement != (x11Placement{Side: "right"}) {
+	if placement == nil || *placement != (displayPlacement{Side: "right"}) {
 		t.Fatalf("remembered placement = %+v, want right", placement)
 	}
 }

@@ -34,7 +34,7 @@ func startPairedWiFiRuntime(parent context.Context, store *settingsStore) *paire
 	if !wifiFeatureEnabled() {
 		return nil
 	}
-	if store != nil && !store.get().PairedWifiEnabled {
+	if store != nil && !store.get().PairedWiFiEnabled {
 		return nil
 	}
 	iface := wifiPairedIface(store)

@@ -64,7 +64,7 @@ func TestCongestionGateForgetsStaleReports(t *testing.T) {
 }
 
 // congestedMonitor returns a monitor whose next consumeCongestion reports
-// congestion once, the way runStatsReader leaves it after a bad stats line.
+// congestion once, the way runFeedback leaves it after a bad stats line.
 func congestedMonitor() *sessionMonitor {
 	mon := &sessionMonitor{}
 	mon.congested.Store(true)

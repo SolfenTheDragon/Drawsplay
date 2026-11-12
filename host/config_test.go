@@ -26,8 +26,48 @@ func TestValidateConfiguredExecutableAllowsDefaultsAndLocalFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("test executable"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := validateConfiguredExecutable(path, "adb"); err != nil {
 		t.Fatalf("local executable rejected: %v", err)
+	}
+}
+
+func TestValidateConfiguredExecutableRejectsGroupWritableFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX mode bits are not meaningful on Windows")
+	}
+	path := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(path, []byte("test executable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateConfiguredExecutable(path, "ffmpeg"); err == nil {
+		t.Fatal("group-writable executable unexpectedly accepted")
+	}
+}
+
+func TestValidateConfiguredExecutableRejectsWritableAncestor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX mode bits are not meaningful on Windows")
+	}
+	root := t.TempDir()
+	ancestor := filepath.Join(root, "shared")
+	path := filepath.Join(ancestor, "private", "ffmpeg")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("test executable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(ancestor, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateConfiguredExecutable(path, "ffmpeg"); err == nil {
+		t.Fatal("executable under a writable ancestor unexpectedly accepted")
 	}
 }
 

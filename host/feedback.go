@@ -17,12 +17,8 @@ package main
 // session summary log.
 
 import (
-	"bufio"
-	"encoding/json"
-	"log"
-	"net"
+	"drawsplay/host/internal/h264"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -98,7 +94,7 @@ func noteFrameForwarded() { frameAcks.forwarded.Add(1) }
 // first_slice_segment_in_pic_flag set. Both are the first bit after the NAL
 // header (ue(v) zero encodes as a single 1 bit).
 func nalStartsPicture(codec string, unit []byte) bool {
-	off := annexBNALHeaderOffset(unit)
+	off := h264.HeaderOffset(unit)
 	if off < 0 {
 		return false
 	}
@@ -109,11 +105,8 @@ func nalStartsPicture(codec string, unit []byte) bool {
 		nalType := (unit[off] >> 1) & 0x3F
 		return nalType <= 31 && unit[off+2]&0x80 != 0
 	}
-	if off+1 >= len(unit) {
-		return false
-	}
 	nalType := unit[off] & 0x1F
-	return (nalType == 1 || nalType == 5) && unit[off+1]&0x80 != 0
+	return (nalType == h264.TypeSlice || nalType == h264.TypeIDR) && h264.IsFirstSlice(unit[off+1:])
 }
 
 // resetFrameAcks marks every frame forwarded so far as settled: frames sent
@@ -157,21 +150,16 @@ func newWiFiSessionMonitor() *sessionMonitor {
 	return &sessionMonitor{minDropPercent: wifiMinDropPercent, excludeStaleDrops: true}
 }
 
-var latestClientVideoStats = struct {
-	sync.RWMutex
-	value *clientStatsMsg
-}{}
+var latestClientVideoStats latest[*clientStatsMsg]
 
-// runStatsReader consumes upstream stats lines until the connection dies.
-// Run as a goroutine; it owns the read half of conn.
-func (m *sessionMonitor) runStatsReader(conn net.Conn) {
-	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, 0, 512), maxStatsLineBytes)
+// runFeedback consumes the tablet's upstream messages until it is gone.
+// Run as a goroutine; it owns src.
+func (m *sessionMonitor) runFeedback(src feedbackSource) {
 	resetFrameAcks()
-	for scanner.Scan() {
-		var stats clientStatsMsg
-		if err := json.Unmarshal(scanner.Bytes(), &stats); err != nil {
-			continue // tolerate unknown upstream traffic
+	for {
+		stats, err := src.Next()
+		if err != nil {
+			break
 		}
 		if stats.Type == "keyframe" {
 			m.keyframeWanted.Store(true)
@@ -258,51 +246,23 @@ func (m *sessionMonitor) gone() bool { return m.clientGone.Load() }
 // stats returns the most recent client report, or nil before the first one.
 func (m *sessionMonitor) stats() *clientStatsMsg { return m.lastStats.Load() }
 
-// monitoredWriter wraps the video connection: every write carries a
-// dead-peer deadline, and slow (buffer-full) writes raise the congestion
-// signal.
-type monitoredWriter struct {
-	conn net.Conn
-	mon  *sessionMonitor
-}
-
-func (w *monitoredWriter) Write(p []byte) (int, error) {
-	if err := w.conn.SetWriteDeadline(time.Now().Add(videoWriteTimeout)); err != nil {
-		return 0, err
-	}
-	start := time.Now()
-	n, err := w.conn.Write(p)
-	w.mon.bytesSent.Add(int64(n))
-	if d := time.Since(start); d > slowWriteThreshold && err == nil {
-		w.mon.linkStalled.Store(true)
-		w.mon.congested.Store(true)
-		log.Printf("Video send stalled %v (link congested)", d.Round(time.Millisecond))
-	}
-	return n, err
-}
-
 func publishLatestClientVideoStats(stats *clientStatsMsg) {
 	if stats == nil {
 		return
 	}
 	copyStats := *stats
-	latestClientVideoStats.Lock()
-	latestClientVideoStats.value = &copyStats
-	latestClientVideoStats.Unlock()
+	latestClientVideoStats.Set(&copyStats)
 }
 
 func clearLatestClientVideoStats() {
-	latestClientVideoStats.Lock()
-	latestClientVideoStats.value = nil
-	latestClientVideoStats.Unlock()
+	latestClientVideoStats.Set(nil)
 }
 
 func currentClientVideoStats() *clientStatsMsg {
-	latestClientVideoStats.RLock()
-	defer latestClientVideoStats.RUnlock()
-	if latestClientVideoStats.value == nil {
+	stats := latestClientVideoStats.Get()
+	if stats == nil {
 		return nil
 	}
-	copyStats := *latestClientVideoStats.value
+	copyStats := *stats
 	return &copyStats
 }

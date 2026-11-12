@@ -1,15 +1,19 @@
 # DrawSplay Build Guide
 
-This guide walks through building both parts of DrawSplay:
+This guide walks through building DrawSplay:
 
 1. `host/` (Go desktop host service)
 2. `android/` (Android tablet app)
+3. `native/` (optional Linux and Windows media helpers)
+4. `desktop/` (DrawSplay Desktop, the separate Rust host and client)
+
+Paths under `docs/` and `desktop/docs/` are maintainer notes kept out of the public repository.
 
 ## Prerequisites
 
 ### Host (Windows or Linux)
 
-- Go **1.25+** (`host/go.mod` targets `go 1.25.0`)
+- Go **1.26+** (`host/go.mod` says `go 1.26.0` with `toolchain go1.26.11`; an older Go downloads that toolchain automatically unless `GOTOOLCHAIN=local` is set)
 - `ffmpeg` on your PATH (required at runtime for video streaming)
 - `adb` from Android Platform Tools is optional and only needed for the legacy ADB-reverse transport or app installation/debugging.
 
@@ -31,13 +35,13 @@ For production packaging, you can bundle:
 - `runtime\adb\adb.exe`
 - `runtime\ffmpeg\ffmpeg.exe` (and ffmpeg runtime DLLs)
 
-When the legacy ADB transport is enabled, the host prefers a bundled ADB copy. It does not resolve or start ADB when that transport is off (the default). For ffmpeg, the host prefers a bundled copy. On Windows the installer always downloads the newest ffmpeg release compatible with the OS and CPU architecture (GitHub release API: `GyanD/codexffmpeg` essentials for x64, `BtbN/FFmpeg-Builds` newest stable `nX.Y` for x64 fallback and ARM64), verifies the release's SHA-256 digest, and writes `runtime\ffmpeg\drawsplay-runtime.json` listing the SHA-256 of every installed `.exe`/`.dll`; the host verifies the bundled copy against that manifest before use. adb is never auto-downloaded ? supply `runtime\adb\adb.exe` or a PATH adb yourself if you enable the legacy ADB transport.
+When the legacy ADB transport is enabled, the host prefers a bundled ADB copy. It does not resolve or start ADB when that transport is off (the default). For ffmpeg, the host prefers a bundled copy. On Windows the installer always downloads the newest ffmpeg release compatible with the OS and CPU architecture (GitHub release API: `GyanD/codexffmpeg` essentials for x64, `BtbN/FFmpeg-Builds` newest stable `nX.Y` for x64 fallback and ARM64), verifies the release's SHA-256 digest, and writes `runtime\ffmpeg\drawsplay-runtime.json` listing the SHA-256 of every installed `.exe`/`.dll`; the host verifies the bundled copy against that manifest before use. adb is never auto-downloaded; supply `runtime\adb\adb.exe` or a PATH adb yourself if you enable the legacy ADB transport.
 
 ### Android app
 
-- Android Studio (recommended), or Gradle with Android SDK installed
+- Android Studio (recommended), or the checked-in Gradle wrapper with Android SDK installed
 - Java/JDK **17**
-- Android SDK Platform **34** and Build Tools for API 34
+- Android SDK Platform **36** (`compileSdk`/`targetSdk` 36, `minSdk` 26) and matching Build Tools
 - A USB-connected Android tablet/device; Developer Options and USB debugging are not required for AOA
 
 ## Build the host service
@@ -58,19 +62,27 @@ Output binary: `host\host.exe`. This is a console build (handy for development; 
 
 #### Bundled virtual display driver
 
-The Windows host embeds DrawSplay's own IddCx virtual display driver (`host/driver/idd/DrawSplayIdd.dll`/`.inf`/`.cat`) via `go:embed` as the preferred backend. Parsec VDD is an on-demand fallback, not bundled or downloaded when the preferred driver works. Prebuilt artifacts are committed, so a plain `go build` works. To rebuild them from source (`drivers/windows/idd`), generate and sign the catalog, and stage them into `host/driver/idd`, run:
+The Windows host embeds DrawSplay's own IddCx virtual display driver (`host/driver/idd/DrawSplayIdd.dll`/`.inf`/`.cat`) via `go:embed` as the preferred backend. Parsec VDD is an on-demand fallback, not bundled or downloaded when the preferred driver works. The DLL is an ignored build output: a plain checkout can build the host, but must rebuild the driver to bundle it. To rebuild it from source (`drivers/windows/idd`), generate and sign the catalog, and stage the package into `host/driver/idd`, run:
 
 ```powershell
 .\scripts\build-idd-driver.ps1        # add -WdkRoot <folder> to skip the WDK NuGet restore
 ```
 
+Use `-RequireBuild` to fail instead of retaining existing artifacts when the
+WDK is unavailable (CI does this). Stable release tags stamp a corresponding
+four-part driver version. Elevated install/repair compares the active package
+with the bundled one, updates existing devnodes without creating duplicates,
+and preserves packages with a newer DriverVer date/version. Ordinary host
+startup does not request elevation to upgrade drivers.
+
 It needs Visual Studio 2022 (C++ toolset) and the Windows SDK; the WDK comes from the `Microsoft.Windows.WDK.x64` NuGet package automatically. Optional build-time catalog signing uses the same `DRAWSPLAY_WINDOWS_SIGNING_PFX_PATH`/`_PASSWORD` as the host. `scripts/build-release.ps1` runs this step automatically before the host build. The elevated installer signs an unsigned embedded catalog locally using in-box Windows PowerShell, adds a per-PC certificate to LocalMachine Root/TrustedPublisher, and deletes its private key immediately. No SDK, certificate purchase, or Microsoft submission is needed on the user's PC for that path. An already trusted catalog is preserved; invalid signed catalogs are rejected rather than re-signed. Windows security policies can still reject a locally signed driver.
 
 Local PFX catalog signing is not the Microsoft driver-submission process and
 does not by itself prove the driver will install/load under the target PC's
-security policy. See the
-[step-by-step virtual-display driver signing guide](docs/windows-driver-signing.md)
-for Microsoft signing and the manual packaging path. Do not run the normal
+security policy. For Microsoft submission use the public
+[attestation signing](https://learn.microsoft.com/windows-hardware/drivers/dashboard/code-signing-attestation)
+and [Windows Hardware Lab Kit](https://learn.microsoft.com/windows-hardware/test/hlk/getstarted/windows-hardware-lab-kit)
+guides. Do not run the normal
 release script over a returned Microsoft-signed package: it can regenerate
 and replace the signed driver artifacts.
 
@@ -145,7 +157,7 @@ Needs libva, libva-drm, libX11, libXext, libXdamage, libXfixes and zlib developm
 scripts/build-native-media.sh                 # DRAWSPLAY_HELPER_DEST=host/ to copy next to the host binary
 ```
 
-Place `drawsplay-media` next to the host executable (or set `DRAWSPLAY_MEDIA_HELPER`). Without it the host uses ffmpeg exactly as before. See `native/drawsplay-media/README.md`.
+Place `drawsplay-media` next to the host executable (or set `DRAWSPLAY_MEDIA_HELPER`). Without it the host uses ffmpeg exactly as before. CI builds it with `make CC="cc -Werror"`, so keep it warning-free.
 
 ## Build the native media helper (Windows)
 
@@ -177,24 +189,22 @@ Debug APK output:
 
 ```powershell
 cd android
-gradle assembleDebug
+.\gradlew.bat assembleDebug
 ```
 
-If your environment has no global `gradle` command, run the build from Android Studio instead.
+On Linux/macOS, use `./gradlew assembleDebug` instead. Set `JAVA_HOME` to JDK 17;
+no global Gradle installation is needed.
 
 Debug APK output:
 `android/app/build/outputs/apk/debug/app-debug.apk`
 
 ## Quick post-build run
 
-1. Confirm device connection:
-   ```powershell
-   adb devices
-   ```
+1. Connect the tablet by USB (no USB debugging needed for the default AOA connection).
 2. Start host:
    - Windows: `.\host\host.exe`
    - Linux: `./host/host`
-3. Install/run Android debug app on the USB device from Android Studio, or:
+3. Install/run Android debug app on the USB device from Android Studio, or (this step needs USB debugging):
    ```powershell
    adb install -r android\app\build\outputs\apk\debug\app-debug.apk
    ```
@@ -203,9 +213,26 @@ With the default settings, the app and host connect over AOA; USB debugging is n
 
 ## Packaging and installer scripts
 
-From the repository root:
+### Where each packaging file is used
+
+| Path | What it is | Used by |
+|---|---|---|
+| `packaging/linux/70-drawsplay-aoa.rules` | udev: tablet USB access for the accessory (AOA) transport | `scripts/install-host-linux.sh`, release tarball |
+| `packaging/linux/70-drawsplay-drm-connector.rules` | udev: lets `plugdev` force a spare HDMI port on | `scripts/install-host-linux.sh`, release tarball |
+| `packaging/linux/99-drawsplay-uinput.rules` | udev: `/dev/uinput` for the logged-in session (pen, touch, keyboard) | both `scripts/install-host-linux.sh` and `desktop/packaging/install-linux.sh` |
+| `packaging/linux/drawsplay-display-helper`, `com.drawsplay.display-helper.policy` | root helper and polkit action for X11 virtual displays | `scripts/install-host-linux.sh` |
+| `packaging/windows/drawsplay-aoa.inf` | WinUSB binding template for the accessory identity (must match `host/aoa_inf.go`) | reference for the generated package |
+| `scripts/install-host-linux.sh`, `scripts/uninstall-host-linux.sh` | install / remove the Android-tablet host on Linux | users, release tarball |
+| `scripts/install-host-windows.ps1` | developer install of the host on Windows | developers (users run the installer exe) |
+| `scripts/build-release.ps1` | Windows release build (host, media helper, installer) | CI `release.yml` |
+| `scripts/build-idd-driver.ps1`, `drivers/windows/idd/build.ps1` | build the IddCx driver and copy it into `host/driver/idd/` | developers with the WDK |
+| `scripts/build-native-media.sh` | build the Linux native media helper | developers |
+| `desktop/packaging/package-linux.sh`, `package-windows.ps1` | DrawSplay Desktop release archives | CI `release.yml` |
+| `desktop/packaging/install-linux.sh` | install `dd-host` / `dd-client` for the current user | DrawSplay Desktop users |
 
 ### Windows release packaging
+
+From the repository root:
 
 ```powershell
 .\scripts\build-release.ps1
@@ -255,16 +282,23 @@ Gradle properties or environment variables:
 - `DRAWSPLAY_ANDROID_KEY_ALIAS`
 - `DRAWSPLAY_ANDROID_KEY_PASSWORD`
 
-In CI, release signing is enforced and missing values fail the build.
+The Release workflow always sets `DRAWSPLAY_REQUIRE_SIGNING=1`: Windows and
+Android production-signing secrets are mandatory. The ordinary CI workflow
+can build development APKs without those secrets. Published updates also
+require an Ed25519 checksum-signing key matching the clients' pinned public
+key. See [SIGNING.md](SIGNING.md).
 
-### USB accessory (AOA) packaging files
+### Linux and USB accessory (AOA) packaging files
 
-- `packaging/linux/70-drawsplay-aoa.rules`: udev rule granting the logged-in user access to Android devices for the ADB-free transport. Install to `/etc/udev/rules.d/`.
-- `packaging/windows/drawsplay-aoa.inf` and `README.md`: WinUSB binding for the accessory identity. The tablet's normal-mode identity also needs WinUSB for AOA switching; the installed host generates and signs a WinUSB package on the user's PC for both (per-PC self-signed certificate, private key deleted after signing), so no build-time driver signing is needed.
+- `packaging/linux/70-drawsplay-aoa.rules`: udev rule granting the logged-in user (`uaccess`) access to Android devices for the ADB-free transport. Install to `/etc/udev/rules.d/`. The per-vendor lines skip devices that expose HID, printer, mass-storage, hub or wireless interfaces, so a tablet maker's keyboards, drives or dongles are not opened up. Comments must stay on their own lines: udev ignores a rule line with a trailing comment.
+- `packaging/linux/70-drawsplay-drm-connector.rules`: makes each HDMI connector's `status` file writable by the `plugdev` group, so the host can force a spare port on for the X11 virtual display without a password prompt. The installer installs it on every session type (a Wayland user may log into X11 later), and the display helper writes the same rule itself the first time it runs as root for a connector, so the rule line in the helper must stay identical (a host test checks this).
+- `packaging/linux/99-drawsplay-uinput.rules`: grants the logged-in session (`uaccess`) access to `/dev/uinput` for pen, touch and keyboard injection. Both the host installer and DrawSplay Desktop's `install-linux.sh --udev` install this same file; the host uninstaller keeps it while `dd-host` is installed.
+- `packaging/linux/drawsplay-display-helper` and `com.drawsplay.display-helper.policy`: the fixed-purpose root helper (installed to `/usr/libexec/drawsplay/`) and its polkit action. The host runs root steps (forcing a connector, loading `vkms`) through it, so the password prompt names DrawSplay; without it the host falls back to a generic `pkexec` prompt.
+- `packaging/windows/drawsplay-aoa.inf`: WinUSB binding for the accessory identity. The tablet's normal-mode identity also needs WinUSB for AOA switching; the installed host generates and signs a WinUSB package on the user's PC for both (per-PC self-signed certificate, private key deleted after signing), so no build-time driver signing is needed.
 
 ## GitHub release automation
 
-- CI/build workflow: `.github/workflows/ci.yml`
+- CI/build workflow: `.github/workflows/ci.yml`. On every push it lints the workflows (actionlint), checks shell syntax and installer dependency detection, runs the browser calibration tests, runs `go vet`, `go test -race` and `govulncheck` on the host, builds the Windows driver and runs the host tests on Windows, runs `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test` on DrawSplay Desktop, exercises X11 input under Xvfb, builds both native media helpers, and builds and tests the Android app. Third-party actions are pinned to commit SHAs; update the SHA and its version comment together.
 - Tag-triggered release publishing workflow: `.github/workflows/release.yml`
 
 Publishing a new GitHub release with auto-built EXE/APK assets:
@@ -274,18 +308,26 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-You can also run the **Release** workflow manually (`workflow_dispatch`) and
-provide `version` (for example `0.2.0`); it will create/push `v0.2.0` if needed
-and publish the GitHub Release assets automatically.
+You can also run the **Release** workflow manually (`workflow_dispatch`). It
+takes no input: it picks the highest stable `vX.Y.Z` tag, increments the patch
+number (`v0.2.0` becomes `v0.2.1`), and creates that tag only after the builds
+succeed.
+
+The whole release workflow is serialized, including version selection and
+builds, so overlapping manual runs cannot choose the same next tag.
 
 The release workflow builds host + Android release artifacts and attaches:
 
 - `DrawSplay-windows-<tag>.zip`: a folder with `drawsplay_installer_<tag>.exe` and `DrawSplay.APK` (a `resolve-tag` job computes the tag first so the Windows build can name the installer)
-- `DrawSplay-linux-<tag>.tar.gz`: a folder with the Linux host, install/uninstall scripts, tray icon, udev rule and `DrawSplay.APK`
+- `DrawSplay-linux-<tag>.tar.gz`: a folder with the Linux host, install/uninstall scripts, tray icon, all three udev rules, the display helper with its polkit policy, and `DrawSplay.APK`
+- `DrawSplayDesktop-windows-x86_64-<tag>.zip` and `DrawSplayDesktop-linux-x86_64-<tag>.tar.gz`: the separate DrawSplay Desktop host and client (built by the `build-desktop-windows` and `build-desktop-linux` jobs, which run `cargo test --release` first and then `desktop/packaging/package-*`; the tag is passed to the scripts as the version)
 - `DrawSplay.APK`
 - `SHA256SUMS.txt`
+- `SHA256SUMS.sig` (raw 64-byte Ed25519 signature of the exact checksum-file bytes)
 
-Required GitHub secrets for signed CI releases:
+Platform bundles also include the license and third-party notices.
+
+GitHub secrets for signed CI releases:
 
 - `WINDOWS_SIGNING_PFX_BASE64`
 - `WINDOWS_SIGNING_PFX_PASSWORD`
@@ -294,6 +336,12 @@ Required GitHub secrets for signed CI releases:
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
+- `DRAWSPLAY_RELEASE_SIGNING_KEY` (raw Ed25519 private-key PEM, not Base64;
+  must match the pinned public key; see [SIGNING.md](SIGNING.md))
+
+The local Windows build script produces local archives and unsigned checksums;
+it does not produce the complete signed, multi-platform update release. The
+Release workflow generates and signs the final manifest after bundling.
 
 ### Windows host install helper
 
@@ -309,16 +357,14 @@ Runs the newest `release\drawsplay_installer_*.exe` (or `-SourceExe <path>`) wit
 ./scripts/install-host-linux.sh
 ```
 
-Installs the host binary to `~/.local/bin/drawsplay-host`, enables user-session autostart, and prints Linux dependency/permission remediation commands (ADB udev + uinput mapping prerequisites).
+Installs the host binary to `~/.local/bin/drawsplay-host`, adds a launcher and login autostart, installs missing runtime packages with `apt` (skip with `--no-install-deps`), and asks for your password to install the uinput rule, the USB udev rule and the display helper with its polkit action. `scripts/uninstall-host-linux.sh` removes them again.
 
 ### Optional Wi-Fi diagnostics
 
 Wi-Fi numeric pairing uses pinned `1Password/srp` and Bouncy Castle
-lightweight SRP implementations; see [`docs/wifi-pairing.md`](docs/wifi-pairing.md)
+lightweight SRP implementations; see `docs/wifi-pairing.md`
 for the exact suite and interoperability caveat. Only Wi-Fi enrollment code
 loads those classes; no global Android security provider is installed.
-The Go network dependency is pinned to a Go-1.25-compatible release because
-the older transitive version used unsupported socket linknames.
 
 The `:app:assembleWifiTest` Android variant builds a **separate**
 `com.drawsplay.tablet.wifitest` APK with both USB attachment activities
@@ -345,7 +391,7 @@ The tablet hardware probe requires API 33 for network-scoped NSD; the
 enrollment and session codecs still target API 26. The automation's matching
 option is `--verify-session`.
 
-The independent discovery command builds with the existing Go 1.25 module:
+The independent discovery command builds with the host module:
 
 ```bash
 cd host
@@ -354,7 +400,7 @@ go test -race ./internal/wifilan ./cmd/wifi-discover
 ```
 
 It is not bundled into or started by the normal host service. See
-[`docs/wifi-discovery.md`](docs/wifi-discovery.md) for required explicit LAN
+`docs/wifi-discovery.md` for required explicit LAN
 interface selection and current limitations.
 
 The separate Android advertisement probe is built without modifying the
@@ -365,3 +411,29 @@ temporary private signing key. Its network-scoped NSD experiment requires
 API 33+ at runtime; it reports a limitation and exits on older Android.
 See [`tools/android_wifi_probe/README.md`](tools/android_wifi_probe/README.md)
 for installation, testing and cleanup of the distinct test package.
+
+## Build DrawSplay Desktop (Rust)
+
+`desktop/` is a standalone Cargo workspace (`dd-proto`, `dd-host`, `dd-client`) that does not depend on the Go host or the Android app.
+
+Prerequisites: Rust 1.90.0 or newer (`rustup`; CI explicitly selects 1.90.0), and `ffmpeg` on the PATH at run time. On Linux also install the build libraries: `pkg-config libx11-dev libxkbcommon-dev libwayland-dev libxcursor-dev libxi-dev libxrandr-dev libxdo-dev libxtst-dev libudev-dev`. Install `zenity` for graphical pairing/setup dialogs.
+
+```
+cd desktop
+cargo build --release            # target/release/dd-host and dd-client
+cargo test                       # unit tests
+cargo fmt --check                # formatting (checked in CI)
+cargo clippy --all-targets -- -D warnings   # lint (CI fails on any warning)
+packaging/package-windows.ps1    # dist/DrawSplayDesktop-windows-x86_64-vX.zip
+packaging/package-linux.sh       # dist/DrawSplayDesktop-linux-x86_64-vX.tar.gz
+```
+
+Linux builds and tests can also be run in a container (for example `rust:1-bookworm` with the packages above); copy the sources in with `docker cp` or `tar` rather than a bind mount if the drive is not shared. Windows virtual-display support needs the DrawSplay IddCx driver from `drivers/windows/idd` to be installed; rebuild, re-sign and reinstall it to pick up the connector-slot fix and the rule that a caller may remove only the monitors it created (administrators may remove any).
+
+**Tests.** `cargo test --release` runs the unit tests and `desktop/host/tests/loopback.rs`, which starts an isolated `dd-host --source test` and drives it with a scripted client (needs `ffmpeg`; those tests skip without it). The synthetic source does not create/remove desktop outputs or initialize real input devices. The host honours `DD_IDLE_TIMEOUT_MS` and `DD_STEP_TIMEOUT_MS` to shorten timeouts for testing. The ignored X11 scroll test needs `Xvfb`, `xauth`, `xdotool` and `ffmpeg`: run `xvfb-run -a env DD_TEST_X11_SCROLL=1 cargo test -p dd-client --test x11_scroll -- --ignored`. Never point that opt-in test at a live desktop. From `desktop/`, `cargo run -p dd-client --example send_input -- HOST:PORT` replays real input and should only be used in a deliberately prepared session.
+
+Both packages include the public README/guides, license and third-party notices.
+
+### DrawSplay Desktop on ARM
+
+Both programs build for `aarch64-unknown-linux-gnu` (verified: cross-built from x86_64; `dd-proto` and `dd-client` unit tests pass under qemu-user). Cross-build recipe on Debian/Ubuntu: `rustup target add aarch64-unknown-linux-gnu`, install `gcc-aarch64-linux-gnu libc6-dev-arm64-cross`, make the arm64 `libxdo.so` visible to the linker (for example in a private sysroot passed with `-C link-arg=-L...`), then `TARGET=aarch64-unknown-linux-gnu packaging/package-linux.sh`. On a native ARM machine just use the normal build and `package-linux.sh`. Windows on ARM: `packaging/package-windows.ps1 -Target aarch64-pc-windows-msvc` (not built or run yet; the virtual display driver's `build.ps1 -Arch arm64` exists but has not been exercised).

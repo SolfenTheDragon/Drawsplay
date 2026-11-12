@@ -58,18 +58,8 @@ func platformNativeHelperPath() string {
 			embeddedHelperOnce.path = path
 			return
 		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			log.Printf("Native media helper: cannot create %s: %v", dir, err)
-			return
-		}
-		tmp := path + ".tmp"
-		if err := os.WriteFile(tmp, data, 0o755); err != nil {
-			log.Printf("Native media helper: cannot extract: %v", err)
-			return
-		}
-		if err := os.Rename(tmp, path); err != nil {
-			_ = os.Remove(tmp)
-			log.Printf("Native media helper: cannot extract: %v", err)
+		if err := writeFileAtomic(path, data, 0o755); err != nil {
+			log.Printf("Native media helper: cannot extract to %s: %v", dir, err)
 			return
 		}
 		embeddedHelperOnce.path = path
@@ -85,10 +75,10 @@ func windowsNativeHelperArgs(target captureTarget, opts videoOptions) []string {
 		"--bitrate-kbps", strconv.Itoa(parseBitrateKbps(opts.Bitrate)),
 		"--max-inflight", strconv.Itoa(nativeMaxInflight),
 	}
-	if clientRequestsKeyframes() {
+	if opts.Client.requestsKeyframes() {
 		args = append(args, "--keyframes", "on-demand")
 	}
-	if clientHasFeature(clientFeatureCursor) {
+	if opts.Client.hasFeature(clientFeatureCursor) {
 		// The tablet draws the cursor: take it out of the frames so cursor
 		// motion costs no encode and never waits behind a frame.
 		args = append(args, "--cursor", "overlay")

@@ -45,7 +45,7 @@ func platformDependencyWarnings() map[string]string {
 		}
 	}
 	if err := unix.Access("/dev/uinput", unix.W_OK); err != nil {
-		warnings["uinput"] = "/dev/uinput is not writable; pen/touch/keyboard injection is disabled. Run Linux setup for uinput and pen mapping (see README), then reconnect."
+		warnings["uinput"] = "/dev/uinput is not writable; pen/touch/keyboard injection is disabled. Run the DrawSplay install script again, log out and back in, then reconnect."
 	}
 	return warnings
 }

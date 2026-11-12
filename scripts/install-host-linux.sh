@@ -125,8 +125,8 @@ check_cmd() {
   fi
 }
 check_gst_element() {
-  command -v gst-inspect-1.0 >/dev/null 2>&1 || return 0
-  if ! gst-inspect-1.0 "$1" >/dev/null 2>&1; then
+  if ! command -v gst-inspect-1.0 >/dev/null 2>&1 ||
+    ! gst-inspect-1.0 "$1" >/dev/null 2>&1; then
     echo "Missing GStreamer element: $1 (needs: $2)"
     add_pkgs "$2"
   fi
@@ -140,16 +140,14 @@ fi
 if [[ "$WAYLAND_CAPTURE" -eq 1 ]]; then
   check_cmd gst-launch-1.0 "gstreamer1.0-tools"
   check_cmd gst-inspect-1.0 "gstreamer1.0-tools"
-  if command -v gst-inspect-1.0 >/dev/null 2>&1; then
-    check_gst_element pipewiresrc "gstreamer1.0-pipewire"
-    check_gst_element videoconvert "gstreamer1.0-plugins-base"
-    check_gst_element videoscale "gstreamer1.0-plugins-base"
-    check_gst_element videorate "gstreamer1.0-plugins-good"
-    check_gst_element h264parse "gstreamer1.0-plugins-bad"
-    check_gst_element vah264enc "gstreamer1.0-plugins-bad"
-    check_gst_element vaapih264enc "gstreamer1.0-vaapi"
-    check_gst_element x264enc "gstreamer1.0-plugins-ugly"
-  fi
+  check_gst_element pipewiresrc "gstreamer1.0-pipewire"
+  check_gst_element videoconvert "gstreamer1.0-plugins-base"
+  check_gst_element videoscale "gstreamer1.0-plugins-base"
+  check_gst_element videorate "gstreamer1.0-plugins-good"
+  check_gst_element h264parse "gstreamer1.0-plugins-bad"
+  check_gst_element vah264enc "gstreamer1.0-plugins-bad"
+  check_gst_element vaapih264enc "gstreamer1.0-vaapi"
+  check_gst_element x264enc "gstreamer1.0-plugins-ugly"
 else
   check_cmd xrandr "x11-xserver-utils"
 fi
@@ -216,17 +214,20 @@ if command -v vainfo >/dev/null 2>&1 && ! vainfo 2>/dev/null | grep -q "EncSlice
   echo
 fi
 
-# --- User groups (uinput + adb USB access) ----------------------------------
+# --- User groups (USB access, spare HDMI port) ------------------------------
+# plugdev lets the host force a spare HDMI port on (70-drawsplay-drm-connector.rules).
+# /dev/uinput needs no group: 99-drawsplay-uinput.rules grants it to the
+# logged-in session. The "input" group is not used: it can read every keyboard.
 user_groups="$(groups "$USER" 2>/dev/null || true)"
 needs_groups=()
-for g in input plugdev; do
+for g in plugdev; do
   if [[ ! "$user_groups" =~ (^|[[:space:]])$g($|[[:space:]]) ]]; then
     needs_groups+=("$g")
   fi
 done
 if [[ ${#needs_groups[@]} -gt 0 ]]; then
   group_list="$(IFS=,; echo "${needs_groups[*]}")"
-  echo "User '$USER' is missing group membership: ${needs_groups[*]} (needed for pen/uinput injection and USB access)."
+  echo "User '$USER' is missing group membership: ${needs_groups[*]} (needed for USB and display access)."
   if [[ "$SKIP_INSTALL" -eq 0 ]]; then
     if sudo usermod -aG "$group_list" "$USER"; then
       echo "Added $USER to: ${needs_groups[*]}. Log out and back in for this to take effect."
@@ -240,46 +241,38 @@ if [[ ${#needs_groups[@]} -gt 0 ]]; then
   echo
 fi
 
-# --- /dev/uinput permissions (pen/touch injection) --------------------------
-UDEV_RULE_FILE="/etc/udev/rules.d/99-drawsplay-uinput.rules"
-UDEV_RULE_LINE='KERNEL=="uinput", GROUP="input", MODE="0660"'
-uinput_needs_fix=0
-if [[ -e /dev/uinput ]]; then
-  uinput_group="$(stat -c '%G' /dev/uinput 2>/dev/null || echo "")"
-  uinput_mode="$(stat -c '%a' /dev/uinput 2>/dev/null || echo "")"
-  if [[ "$uinput_group" != "input" || "$uinput_mode" != "660" ]]; then
-    uinput_needs_fix=1
-  fi
+# --- /dev/uinput access (pen, touch and keyboard injection) -----------------
+# Shared with DrawSplay Desktop's installer, which installs the same file.
+UINPUT_RULE_SOURCE="$SCRIPT_DIR/99-drawsplay-uinput.rules"
+if [[ ! -f "$UINPUT_RULE_SOURCE" ]]; then
+  UINPUT_RULE_SOURCE="$ROOT_DIR/packaging/linux/99-drawsplay-uinput.rules"
 fi
-if [[ ! -f "$UDEV_RULE_FILE" ]] || [[ "$uinput_needs_fix" -eq 1 ]]; then
-  echo "/dev/uinput is not accessible to the 'input' group (needed for pen/touch injection)."
-  if [[ "$SKIP_INSTALL" -eq 0 ]]; then
-    if [[ ! -f "$UDEV_RULE_FILE" ]]; then
-      echo "Installing udev rule: $UDEV_RULE_FILE"
-      if echo "$UDEV_RULE_LINE" | sudo tee "$UDEV_RULE_FILE" >/dev/null; then
-        sudo udevadm control --reload-rules 2>/dev/null || true
-        sudo udevadm trigger --name-match=uinput 2>/dev/null || true
-      else
-        echo "Could not write udev rule. Run manually:"
-        echo "  echo '$UDEV_RULE_LINE' | sudo tee $UDEV_RULE_FILE"
-        echo "  sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput"
-      fi
-    fi
-    sudo chgrp input /dev/uinput 2>/dev/null || true
-    sudo chmod 0660 /dev/uinput 2>/dev/null || true
-    if [[ "$(stat -c '%G:%a' /dev/uinput 2>/dev/null)" == "input:660" ]]; then
-      echo "/dev/uinput permissions fixed."
-    else
-      echo "Could not verify /dev/uinput permissions; a reboot may be required."
-      NEEDS_RESTART=1
+UINPUT_RULE_TARGET="/etc/udev/rules.d/99-drawsplay-uinput.rules"
+UINPUT_MANUAL="  sudo install -m 0644 99-drawsplay-uinput.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger --name-match=uinput"
+if [[ ! -f "$UINPUT_RULE_SOURCE" ]]; then
+  echo "udev rule 99-drawsplay-uinput.rules not found; pen and touch input need it. Download it and run:"
+  echo "$UINPUT_MANUAL"
+elif cmp -s "$UINPUT_RULE_SOURCE" "$UINPUT_RULE_TARGET" 2>/dev/null; then
+  echo "uinput udev rule already installed: $UINPUT_RULE_TARGET"
+elif [[ "$SKIP_INSTALL" -eq 1 ]]; then
+  echo "Run manually:"
+  echo "$UINPUT_MANUAL"
+else
+  # Replaces the older rule, which gave /dev/uinput to the "input" group.
+  echo "Installing uinput udev rule for pen and touch input (asks for your password)..."
+  if sudo install -m 0644 "$UINPUT_RULE_SOURCE" "$UINPUT_RULE_TARGET" &&
+    sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput; then
+    echo "Installed $UINPUT_RULE_TARGET."
+    if [[ ! -w /dev/uinput ]]; then
+      echo "/dev/uinput is not writable yet; log out and back in."
+      NEEDS_RELOGIN=1
     fi
   else
-    echo "Run manually:"
-    echo "  echo '$UDEV_RULE_LINE' | sudo tee $UDEV_RULE_FILE"
-    echo "  sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput"
+    echo "Could not install the udev rule. Run manually:" >&2
+    echo "$UINPUT_MANUAL" >&2
   fi
-  echo
 fi
+echo
 
 # --- Android USB access (accessory mode) ------------------------------------
 UDEV_RULE_SOURCE="$SCRIPT_DIR/70-drawsplay-aoa.rules"
@@ -308,10 +301,47 @@ else
 fi
 echo
 
+# --- Display helper (X11 virtual display, run through pkexec) ---------------
+# The host switches spare HDMI ports and loads vkms through this small,
+# fixed-purpose helper, so the password prompt names a DrawSplay action
+# instead of asking to run a shell as root. Installed whatever the current
+# session type: the user may log into X11 later, and the X11 fallback must be
+# ready then without another install.
+{
+  HELPER_SOURCE="$SCRIPT_DIR/drawsplay-display-helper"
+  POLICY_SOURCE="$SCRIPT_DIR/com.drawsplay.display-helper.policy"
+  if [[ ! -f "$HELPER_SOURCE" ]]; then
+    HELPER_SOURCE="$ROOT_DIR/packaging/linux/drawsplay-display-helper"
+    POLICY_SOURCE="$ROOT_DIR/packaging/linux/com.drawsplay.display-helper.policy"
+  fi
+  HELPER_TARGET="/usr/libexec/drawsplay/drawsplay-display-helper"
+  POLICY_TARGET="/usr/share/polkit-1/actions/com.drawsplay.display-helper.policy"
+  if [[ ! -f "$HELPER_SOURCE" || ! -f "$POLICY_SOURCE" ]]; then
+    echo "Display helper files not found; the host will fall back to a generic administrator prompt."
+  elif cmp -s "$HELPER_SOURCE" "$HELPER_TARGET" 2>/dev/null && cmp -s "$POLICY_SOURCE" "$POLICY_TARGET" 2>/dev/null; then
+    echo "Display helper already installed: $HELPER_TARGET"
+  elif [[ "$SKIP_INSTALL" -eq 1 ]]; then
+    echo "Optional: install the display helper so the password prompt names DrawSplay:"
+    echo "  sudo install -D -o root -g root -m 0755 drawsplay-display-helper $HELPER_TARGET"
+    echo "  sudo install -D -o root -g root -m 0644 com.drawsplay.display-helper.policy $POLICY_TARGET"
+  else
+    echo "Installing the display helper (asks for your password)..."
+    if sudo install -D -o root -g root -m 0755 "$HELPER_SOURCE" "$HELPER_TARGET" &&
+      sudo install -D -o root -g root -m 0644 "$POLICY_SOURCE" "$POLICY_TARGET"; then
+      echo "Installed $HELPER_TARGET"
+    else
+      echo "Could not install the display helper; the host falls back to a generic administrator prompt." >&2
+    fi
+  fi
+}
+echo
+
 # --- Spare HDMI connector access (X11 virtual display fallback) --------------
 # Lets the plugdev group force an unplugged HDMI port on, so the X11 fallback
-# virtual display works without root or a password prompt on every boot.
-if [[ "$WAYLAND_CAPTURE" -eq 0 ]]; then
+# virtual display works without root or a password prompt on every boot. This
+# is what keeps the tablet extending the desktop on kernels where vkms is
+# unsafe, so it is installed on every session type (see the display helper).
+{
   DRM_RULE_SOURCE="$SCRIPT_DIR/70-drawsplay-drm-connector.rules"
   if [[ ! -f "$DRM_RULE_SOURCE" ]]; then
     DRM_RULE_SOURCE="$ROOT_DIR/packaging/linux/70-drawsplay-drm-connector.rules"
@@ -336,7 +366,7 @@ if [[ "$WAYLAND_CAPTURE" -eq 0 ]]; then
     fi
   fi
   echo
-fi
+}
 
 # --- X11 extended display ---------------------------------------------------
 # On X11 the host extends the desktop onto a vkms output, falling back to a

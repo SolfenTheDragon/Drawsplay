@@ -18,19 +18,24 @@
        configured. Required when DRAWSPLAY_REQUIRE_SIGNING=1.
     6. Copy DrawSplayIdd.dll/.inf/.cat into host/driver/idd.
 
-  When no WDK and no signing certificate are available (local dev), the script
-  warns and leaves the already-committed host/driver/idd artifacts in place so
-  local host builds still compile. The installer handles unsigned catalogs.
+  When the WDK is unavailable in local development, the script can retain an
+  existing complete host/driver/idd package. Missing artifacts are still an
+  error. Required-signing builds and -RequireBuild never use that fallback.
+  The installer handles unsigned catalogs.
 
 .PARAMETER DriverVersion
   DriverVer version stamped into the INF (e.g. 1.0.0.0). Defaults to 1.0.0.0.
+
+.PARAMETER RequireBuild
+  Fail when the WDK cannot be restored instead of retaining existing artifacts.
 #>
 [CmdletBinding()]
 param(
     [string] $WdkRoot,
     [ValidateSet('x64')] [string] $Arch = 'x64',
     [string] $DriverVersion = '1.0.0.0',
-    [string] $WdkNuGetVersion = ''
+    [string] $WdkNuGetVersion = '10.0.26100.1',
+    [switch] $RequireBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -68,8 +73,9 @@ function Resolve-WdkRoot {
     if (-not $nuget) {
         throw "WDK not found and nuget.exe is unavailable; pass -WdkRoot <folder containing Include/ and Lib/>."
     }
-    $pkgDir = Join-Path $env:RUNNER_TEMP 'wdk-nuget'
-    if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) { $pkgDir = Join-Path $env:TEMP 'ds-wdk-nuget' }
+    $tempRoot = $env:RUNNER_TEMP
+    if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = [IO.Path]::GetTempPath() }
+    $pkgDir = Join-Path $tempRoot 'ds-wdk-nuget'
     New-Item -ItemType Directory -Force -Path $pkgDir | Out-Null
     $nugetArgs = @('install', 'Microsoft.Windows.WDK.x64', '-OutputDirectory', $pkgDir, '-ExcludeVersion', '-NonInteractive')
     if (-not [string]::IsNullOrWhiteSpace($WdkNuGetVersion)) {
@@ -93,8 +99,8 @@ try {
     $resolvedWdk = Resolve-WdkRoot
 }
 catch {
-    if ($requireSigning) { throw }
-    Write-Warning "Cannot build the IddCx driver ($($_.Exception.Message)); keeping committed host/driver/idd artifacts."
+    if ($requireSigning -or $RequireBuild) { throw }
+    Write-Warning "Cannot build the IddCx driver ($($_.Exception.Message)); keeping existing host/driver/idd artifacts."
     $canBuildDriver = $false
 }
 
@@ -131,10 +137,18 @@ if ($canBuildDriver) {
             $timestampUrl = $env:DRAWSPLAY_WINDOWS_SIGNING_TIMESTAMP_URL
             if ([string]::IsNullOrWhiteSpace($timestampUrl)) { $timestampUrl = 'http://timestamp.digicert.com' }
             Write-Host "Signing driver catalog ..."
-            & $signtool sign /fd SHA256 /f $certPath /p $certPassword /tr $timestampUrl /td SHA256 $cat
-            if ($LASTEXITCODE -ne 0) { throw "signtool failed to sign the catalog" }
-            & $signtool verify /pa $cat
-            if ($LASTEXITCODE -ne 0) { throw "catalog signature verification failed" }
+            $password = ConvertTo-SecureString $certPassword -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            if (-not $cert) { throw "Could not import the Windows signing certificate." }
+            try {
+                & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint /s My /tr $timestampUrl /td SHA256 $cat
+                if ($LASTEXITCODE -ne 0) { throw "signtool failed to sign the catalog" }
+                & $signtool verify /pa $cat
+                if ($LASTEXITCODE -ne 0) { throw "catalog signature verification failed" }
+            }
+            finally {
+                Remove-Item -LiteralPath ("Cert:\CurrentUser\My\" + $cert.Thumbprint) -ErrorAction SilentlyContinue
+            }
         }
         elseif ($requireSigning) {
             throw "Driver signing is required but DRAWSPLAY_WINDOWS_SIGNING_PFX_PATH/PASSWORD are not set."

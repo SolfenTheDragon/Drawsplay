@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Mirrors the host web UI dark theme (host/webui/styles.css). -->
+<!-- Local UI follows DayNight; the video surface always remains black. -->
 <resources>
-    <color name="ds_bg">#0D1117</color>
-    <color name="ds_panel">#151B24</color>
-    <color name="ds_panel_raised">#1A222E</color>
-    <color name="ds_text">#EDF3FA</color>
-    <color name="ds_muted">#8B9AAB</color>
-    <color name="ds_accent">#56A6FF</color>
+    <color name="ds_bg">#F5F7FB</color>
+    <color name="ds_panel">#FFFFFF</color>
+    <color name="ds_panel_raised">#E8EEF7</color>
+    <color name="ds_text">#172435</color>
+    <color name="ds_muted">#4D5E73</color>
+    <color name="ds_accent">#165FBF</color>
     <color name="ds_accent_strong">#165FBF</color>
     <color name="ds_accent_pressed">#104B99</color>
-    <color name="ds_disabled">#273242</color>
-    <color name="ds_disabled_text">#AAB7C6</color>
-    <color name="ds_border">#273242</color>
+    <color name="ds_disabled">#E1E7EF</color>
+    <color name="ds_disabled_text">#4D5E73</color>
+    <color name="ds_border">#B7C5D6</color>
 </resources>

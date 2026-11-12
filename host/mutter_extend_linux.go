@@ -400,7 +400,7 @@ type mutterLayout struct {
 //
 // Unlike X, Mutter requires every display to touch another one, so the
 // monitor is slid along its side until it does.
-func planMutterLayout(st mutterState, connector string, w, h int, remembered *x11Placement, before *mutterState) (mutterLayout, error) {
+func planMutterLayout(st mutterState, connector string, w, h int, remembered *displayPlacement, before *mutterState) (mutterLayout, error) {
 	mon, ok := st.monitor(connector)
 	if !ok {
 		return mutterLayout{}, fmt.Errorf("%s is not listed by Mutter", connector)
@@ -444,13 +444,13 @@ func planMutterLayout(st mutterState, connector string, w, h int, remembered *x1
 		r, primary = displayRect{W: lw, H: lh}, true
 	} else {
 		b := boundsOf(rects)
-		side := x11Placement{Side: "right"}
+		side := displayPlacement{Side: "right"}
 		onSide := false
 		if before == nil && cur >= 0 && alone {
 			side, onSide = placementOf(st.rect(st.Logical[cur]), b)
 		}
 		if !onSide {
-			side = x11Placement{Side: "right"}
+			side = displayPlacement{Side: "right"}
 			if remembered != nil {
 				side = *remembered
 			}
@@ -972,7 +972,7 @@ func awaitNewMutterMonitor(c mutterCast, before mutterState, w, h int) (spec mon
 	w, h = w&^1, h&^1
 	stop, perr := primeMutterStream(c.Node(), w, h)
 	if perr != nil {
-		return monitorSpec{}, false, fmt.Errorf("%w, and asking for it with a PipeWire consumer failed: %v", err, perr)
+		return monitorSpec{}, false, fmt.Errorf("%w, and asking for it with a PipeWire consumer failed: %w", err, perr)
 	}
 	defer stop()
 	if spec, err = findNewMutterMonitor(c, before, w, h, mutterPrimeAttempts); err != nil {
@@ -1233,50 +1233,28 @@ func mutterCastClosed(c mutterCast) bool {
 // mutterExt holds the virtual monitor between sessions. mu also serializes
 // every layout change the host makes.
 var mutterExt struct {
-	mu sync.Mutex
-	// gen identifies the latest session to claim the monitor; claimed is
-	// whether that session still runs.
-	gen     uint64
-	claimed bool
-	timer   *time.Timer
-	held    mutterCast
+	heldOutput
+	held mutterCast
 	// others identifies the other monitors when the host put them back as
 	// they were before the virtual monitor appeared; they are put back
 	// again when it goes, unless they changed in the meantime.
 	others string
 	// seen is where the user last had the held monitor; placement is where
 	// it was when the last one went (process lifetime).
-	seen, placement *x11Placement
-	exiting         bool
-}
-
-func stopMutterReleaseTimerLocked() {
-	if mutterExt.timer != nil {
-		mutterExt.timer.Stop()
-		mutterExt.timer = nil
-	}
+	seen, placement *displayPlacement
 }
 
 // releaseMutterLocked ends session gen's claim and removes the monitor after
 // mutterReleaseGrace unless another session claims it first.
 func releaseMutterLocked(gen uint64) {
-	if gen != mutterExt.gen {
+	if !mutterExt.unclaimLocked(gen) {
 		return
 	}
-	mutterExt.claimed = false
-	stopMutterReleaseTimerLocked()
+	mutterExt.stopTimerLocked()
 	if mutterExt.exiting || mutterExt.held == nil {
 		return
 	}
-	mutterExt.timer = time.AfterFunc(mutterReleaseGrace, func() {
-		mutterExt.mu.Lock()
-		defer mutterExt.mu.Unlock()
-		if gen != mutterExt.gen || mutterExt.claimed || mutterExt.exiting {
-			return
-		}
-		mutterExt.timer = nil
-		stopHeldMutterLocked()
-	})
+	mutterExt.afterLocked(gen, mutterReleaseGrace, stopHeldMutterLocked)
 }
 
 // releaseMutterOnExit removes the virtual monitor and puts the other
@@ -1285,8 +1263,7 @@ func releaseMutterLocked(gen uint64) {
 func releaseMutterOnExit() {
 	mutterExt.mu.Lock()
 	defer mutterExt.mu.Unlock()
-	mutterExt.exiting = true
-	stopMutterReleaseTimerLocked()
+	mutterExt.exitLocked()
 	stopHeldMutterLocked()
 }
 
@@ -1371,7 +1348,7 @@ func restoreMutterLayout(c mutterCast, from mutterState, restore []mutterLogical
 // applyMutterLayout arranges the displays for a w x h virtual monitor (see
 // planMutterLayout), retrying when the monitors change underneath it. The
 // caller holds mutterExt.mu.
-func applyMutterLayout(c mutterCast, w, h int, remembered *x11Placement, before *mutterState) (mutterLayout, error) {
+func applyMutterLayout(c mutterCast, w, h int, remembered *displayPlacement, before *mutterState) (mutterLayout, error) {
 	connector := c.Monitor().Connector
 	var lastErr error
 	for attempt := 0; attempt < mutterApplyAttempts; attempt++ {
@@ -1466,7 +1443,7 @@ type mutterObserved struct {
 	Mirrored bool
 	// Placement is the monitor's place next to the other displays, when
 	// Placed.
-	Placement x11Placement
+	Placement displayPlacement
 	Placed    bool
 	// Outputs lists the monitors and their modes; Mutter lays the desktop
 	// out again when they change (a hotplug).
@@ -1538,21 +1515,9 @@ func mutterTarget(st mutterState, c mutterCast) (captureTarget, error) {
 
 // mutterDisplay is one session's use of the virtual monitor.
 type mutterDisplay struct {
-	gen              uint64
+	extendSession
 	nativeW, nativeH int
-
-	mu         sync.Mutex
-	cast       mutterCast
-	target     captureTarget
-	reqW, reqH int // configured resolution
-	// recovering: Recover is replacing the monitor, so its removal does not
-	// restart the session.
-	recovering bool
-
-	swapped   chan struct{} // Recover replaced cast
-	stopWatch chan struct{}
-	watchDone chan struct{}
-	closeOnce sync.Once
+	cast             mutterCast // guarded by mu
 }
 
 // newMutterDisplay creates (or keeps, after a quick reconnect) the virtual
@@ -1566,14 +1531,10 @@ func newMutterDisplay(opts videoOptions) (*mutterDisplay, error) {
 
 	mutterExt.mu.Lock()
 	defer mutterExt.mu.Unlock()
-	if mutterExt.exiting {
-		return nil, errors.New("host is shutting down")
+	gen, err := mutterExt.claimLocked()
+	if err != nil {
+		return nil, err
 	}
-	mutterExt.gen++
-	gen := mutterExt.gen
-	mutterExt.claimed = true
-	stopMutterReleaseTimerLocked()
-
 	if err := ensureMutterMonitorLocked(w, h, ident.NativeWidth, ident.NativeHeight); err != nil {
 		releaseMutterLocked(gen)
 		return nil, err
@@ -1590,26 +1551,10 @@ func newMutterDisplay(opts videoOptions) (*mutterDisplay, error) {
 		return nil, err
 	}
 	mapMutterTablet(c.Monitor())
-	d := &mutterDisplay{
-		gen:       gen,
-		nativeW:   ident.NativeWidth,
-		nativeH:   ident.NativeHeight,
-		cast:      c,
-		target:    t,
-		reqW:      w,
-		reqH:      h,
-		swapped:   make(chan struct{}, 1),
-		stopWatch: make(chan struct{}),
-		watchDone: make(chan struct{}),
-	}
+	d := &mutterDisplay{nativeW: ident.NativeWidth, nativeH: ident.NativeHeight, cast: c}
+	d.init(gen, "GNOME virtual monitor", w, h, t)
 	go d.watch(observeMutterMonitor(st, c.Monitor().Connector))
 	return d, nil
-}
-
-func (d *mutterDisplay) Target() captureTarget {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.target
 }
 
 func (d *mutterDisplay) Description() string {
@@ -1652,21 +1597,14 @@ func (d *mutterDisplay) Refresh() (captureTarget, error) {
 func (d *mutterDisplay) Recover() error {
 	mutterExt.mu.Lock()
 	defer mutterExt.mu.Unlock()
-	if mutterExt.exiting {
-		return errors.New("host is shutting down")
+	if err := mutterExt.recoverableLocked(d.gen, "GNOME virtual monitor"); err != nil {
+		return err
 	}
-	if d.gen != mutterExt.gen {
-		return errors.New("a newer session uses the GNOME virtual monitor")
-	}
+	w, h := d.beginRecover()
+	defer d.endRecover()
 	d.mu.Lock()
-	w, h, old := d.reqW, d.reqH, d.cast
-	d.recovering = true
+	old := d.cast
 	d.mu.Unlock()
-	defer func() {
-		d.mu.Lock()
-		d.recovering = false
-		d.mu.Unlock()
-	}()
 	if mutterExt.held == old {
 		stopHeldMutterLocked()
 	}
@@ -1686,17 +1624,12 @@ func (d *mutterDisplay) Recover() error {
 	d.mu.Lock()
 	d.cast, d.target = c, t
 	d.mu.Unlock()
-	select {
-	case d.swapped <- struct{}{}:
-	default:
-	}
+	d.notifySwapped()
 	return nil
 }
 
 func (d *mutterDisplay) Close() {
-	d.closeOnce.Do(func() {
-		close(d.stopWatch)
-		<-d.watchDone
+	d.close(func() {
 		mutterExt.mu.Lock()
 		releaseMutterLocked(d.gen)
 		mutterExt.mu.Unlock()
@@ -1769,7 +1702,7 @@ func (d *mutterDisplay) watch(base mutterObserved) {
 		hotplug := base.Outputs != obs.Outputs
 		// Settings -> Displays offers a consumer-sized monitor no other
 		// mode: its size is the host's.
-		d.saveUserResolution(obs, (obs.AutoMode && hotplug) || c.ConsumerSized())
+		d.saveUserResolution(obs.Enabled, obs.ModeW, obs.ModeH, (obs.AutoMode && hotplug) || c.ConsumerSized())
 		base = obs
 		if obs.Placed {
 			p := obs.Placement
@@ -1786,24 +1719,10 @@ func (d *mutterDisplay) watch(base mutterObserved) {
 			d.mu.Unlock()
 			continue
 		}
-		t := d.target
-		restart := !obs.Enabled || obs.ModeW&^1 != t.Width || obs.ModeH&^1 != t.Height || obs.Mirrored != t.Mirrored
-		moved := !restart && obs.Rect != t.Rect
-		if moved {
-			d.target.Rect = obs.Rect
-		}
+		restart := d.applyChangeLocked(connector, observedOutput{
+			Present: true, Active: obs.Enabled, Mirrored: obs.Mirrored, W: obs.ModeW, H: obs.ModeH, Rect: obs.Rect,
+		})
 		d.mu.Unlock()
-		switch {
-		case moved:
-			log.Printf("GNOME virtual monitor %s moved to +%d+%d", connector, obs.Rect.X, obs.Rect.Y)
-		case !restart:
-		case !obs.Enabled:
-			log.Printf("GNOME virtual monitor %s was switched off; restarting video session", connector)
-		case obs.Mirrored:
-			log.Printf("GNOME virtual monitor %s now mirrors another display at %dx%d; restarting video session", connector, obs.ModeW, obs.ModeH)
-		default:
-			log.Printf("GNOME virtual monitor %s is now %dx%d; restarting video session", connector, obs.ModeW, obs.ModeH)
-		}
 		if restart {
 			restartActiveVideoSession()
 			return
@@ -1818,28 +1737,4 @@ func (d *mutterDisplay) replacing(c mutterCast) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.recovering || d.cast != c
-}
-
-// saveUserResolution saves the monitor's mode as the configured resolution
-// when the user picked a different one, so the next session (and the
-// restart that follows the change) keeps it. auto: Mutter picked the mode by
-// itself, so it is not saved.
-func (d *mutterDisplay) saveUserResolution(obs mutterObserved, auto bool) {
-	w, h := obs.ModeW, obs.ModeH
-	d.mu.Lock()
-	reqW, reqH := d.reqW, d.reqH
-	if !obs.Enabled || w <= 0 || h <= 0 || (w == reqW && h == reqH) || auto {
-		d.mu.Unlock()
-		return
-	}
-	d.reqW, d.reqH = w, h
-	d.mu.Unlock()
-	if globalSettingsStore == nil {
-		return
-	}
-	if err := globalSettingsStore.updateResolution(w, h); err != nil {
-		log.Printf("Could not save the GNOME virtual monitor resolution %dx%d: %v", w, h, err)
-		return
-	}
-	log.Printf("GNOME virtual monitor resolution changed in Settings (%dx%d -> %dx%d); saved as the configured resolution", reqW, reqH, w, h)
 }

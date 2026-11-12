@@ -16,17 +16,22 @@ package main
 //	                      — asks connected client sessions to clear their
 //	                        stored preferred display resolution
 //	POST /api/stop        — gracefully shuts the host process down
+//	GET  /api/update      — update state (also starts a due automatic check)
+//	POST /api/update/check
+//	                      — checks GitHub for a newer release now
+//	POST /api/update/install
+//	                      — downloads, verifies and installs the newer
+//	                        release, then restarts the host (update.go)
 //
-// Security model: bound to 127.0.0.1 only. State changes additionally require
-// a per-process CSRF header token, and browser origins must match the loopback
-// UI authority to prevent hostile pages from driving the local API.
+// Security model: bound to 127.0.0.1 and accepts only connections whose
+// process owner can be verified as the current user. State changes additionally
+// require a per-process CSRF header token and a matching local browser origin.
 
 import (
 	"context"
 	"embed"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"time"
 )
@@ -36,10 +41,10 @@ var webuiFS embed.FS
 
 // runWebUI serves the settings UI until ctx is cancelled. Best-effort like
 // the video listener: a busy port disables the UI but the host keeps working.
-// stop triggers a graceful process shutdown (the /api/stop endpoint).
-func runWebUI(ctx context.Context, store *settingsStore, stop func()) {
+// stop and exit are as for newWebUIHandler.
+func runWebUI(ctx context.Context, store *settingsStore, stop, exit func()) {
 	addr := fmt.Sprintf("127.0.0.1:%d", webuiPort)
-	ln, err := net.Listen("tcp", addr)
+	ln, err := listenSameUser(addr)
 	if err != nil {
 		log.Printf("Web UI disabled: %v", err)
 		return
@@ -47,7 +52,7 @@ func runWebUI(ctx context.Context, store *settingsStore, stop func()) {
 	log.Printf("Web UI on http://%s", addr)
 
 	server := &http.Server{
-		Handler:           newWebUIHandler(store, stop),
+		Handler:           newWebUIHandler(store, stop, exit),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {

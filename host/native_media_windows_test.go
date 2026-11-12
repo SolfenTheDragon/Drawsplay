@@ -33,19 +33,19 @@ func TestWindowsNativeHelperCandidateNeedsDriverMonitor(t *testing.T) {
 }
 
 func TestWindowsNativeHelperArgs(t *testing.T) {
-	t.Cleanup(func() { publishClientVideoFeatures(nil) })
 	base := []string{"--monitor-id", "3", "--fps", "120", "--bitrate-kbps", "24000", "--max-inflight", "5"}
+	opts := func(features ...string) videoOptions {
+		return videoOptions{FPS: 120, Bitrate: "24M", Client: clientSession{Features: normalizeClientFeatures(features)}}
+	}
 
 	// An older tablet: periodic keyframes, cursor stays in the frames.
-	publishClientVideoFeatures([]string{"tile1", "meta1"})
-	if args := windowsNativeHelperArgs(captureTarget{IDDMonitorID: 3}, videoOptions{FPS: 120, Bitrate: "24M"}); !slices.Equal(args, base) {
+	if args := windowsNativeHelperArgs(captureTarget{IDDMonitorID: 3}, opts("tile1", "meta1")); !slices.Equal(args, base) {
 		t.Fatalf("args = %q, want %q", args, base)
 	}
 
 	// A tablet that acks frames (and so asks for keyframes) and draws the cursor.
-	publishClientVideoFeatures([]string{"tile1", "meta1", "ack1", "cursor1"})
 	want := append(slices.Clone(base), "--keyframes", "on-demand", "--cursor", "overlay")
-	if args := windowsNativeHelperArgs(captureTarget{IDDMonitorID: 3}, videoOptions{FPS: 120, Bitrate: "24M"}); !slices.Equal(args, want) {
+	if args := windowsNativeHelperArgs(captureTarget{IDDMonitorID: 3}, opts("tile1", "meta1", "ack1", "cursor1")); !slices.Equal(args, want) {
 		t.Fatalf("args = %q, want %q", args, want)
 	}
 }

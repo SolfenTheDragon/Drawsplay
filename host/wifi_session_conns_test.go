@@ -29,16 +29,21 @@ func TestWiFiSessionConnsSendConfigOnlyAfterTabletDecoderReady(t *testing.T) {
 			}
 		}
 	}()
-	stream := bridgePacket(0, []byte(`{"codec":"h264","fps":30}`))
-	for _, nal := range [][]byte{
-		{0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x28, 0xda, 0x02, 0x80, 0xbf, 0xe5, 0xc0, 0x44, 0, 0, 3, 0, 4, 0, 0, 3, 0, 0xf2, 0x3c, 0x60, 0xca, 0x80},
-		{0, 0, 0, 1, 0x68, 0xce, 0x0f, 0xc8},
-		{0, 0, 0, 1, 0x65, 0xb8, 0x60},
-	} {
-		stream = append(stream, bridgePacket(1, nal)...)
-	}
+	sink, _ := videoEndpointsFor(video)
 	written := make(chan error, 1)
-	go func() { _, err := video.Write(stream); written <- err }()
+	go func() {
+		err := sink.WritePacket(videoPacketConfig, []byte(`{"codec":"h264","fps":30}`))
+		for _, nal := range [][]byte{
+			{0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x28, 0xda, 0x02, 0x80, 0xbf, 0xe5, 0xc0, 0x44, 0, 0, 3, 0, 4, 0, 0, 3, 0, 0xf2, 0x3c, 0x60, 0xca, 0x80},
+			{0, 0, 0, 1, 0x68, 0xce, 0x0f, 0xc8},
+			{0, 0, 0, 1, 0x65, 0xb8, 0x60},
+		} {
+			if err == nil {
+				err = sink.WritePacket(videoPacketNAL, nal)
+			}
+		}
+		written <- err
+	}()
 
 	tabletVideo := wifilan.NewFrameReader(tabVid)
 	got := make(chan byte, 4)
@@ -85,15 +90,14 @@ func TestWiFiSessionConnsReadTabletStatsOnlyWhenNegotiated(t *testing.T) {
 	defer video.Close()
 	raw, _ := wifilan.EncodeVideoStats([]byte(`{"type":"stats"}`))
 	go wifilan.NewFrameWriter(tabVid).WriteFrame(wifilan.FrameHeader{Type: wifilan.FrameControl, Epoch: 5, Sequence: 2, PayloadLength: uint32(len(raw))}, raw)
-	buf := make([]byte, 64)
-	n, err := video.Read(buf)
-	if err != nil || string(buf[:n]) != "{\"type\":\"stats\"}\n" {
-		t.Fatalf("read %q %v", buf[:n], err)
+	_, feedback := videoEndpointsFor(video)
+	if msg, err := feedback.Next(); err != nil || msg.Type != "stats" {
+		t.Fatalf("feedback %+v %v", msg, err)
 	}
 }
 
 func TestPairedHostOffersVideoStats(t *testing.T) {
-	if wifiHostHello([32]byte{1}).Features&wifilan.FeatureVideoStats == 0 {
+	if wifilan.HostHello([32]byte{1}).Features&wifilan.FeatureVideoStats == 0 {
 		t.Fatal("host hello does not offer upstream video stats")
 	}
 }

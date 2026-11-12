@@ -14,7 +14,7 @@ func TestSessionMonitorCongestsOnFrameDrops(t *testing.T) {
 	mon := &sessionMonitor{}
 	done := make(chan struct{})
 	go func() {
-		mon.runStatsReader(hostConn)
+		mon.runFeedback(newLineFeedback(hostConn))
 		close(done)
 	}()
 
@@ -44,7 +44,7 @@ func feedStatsLines(t *testing.T, lines ...string) *sessionMonitor {
 	mon := &sessionMonitor{}
 	done := make(chan struct{})
 	go func() {
-		mon.runStatsReader(hostConn)
+		mon.runFeedback(newLineFeedback(hostConn))
 		close(done)
 	}()
 	for _, line := range lines {

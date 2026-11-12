@@ -2,18 +2,17 @@ package main
 
 import (
 	"strings"
-	"sync"
 )
 
 // Wire formats for both host channels.
 //
 // # Input channel (tablet <-> host, port 27183)
 //
-// Primary mode is mux-v1 binary framing (see usbmux.go) carrying UTF-8 JSON
-// payloads on stream ids; legacy newline-delimited JSON is still accepted for
-// backward compatibility. Every packet carries a "type" field; the packet
-// struct below is the union of all fields across packet types (unknown fields
-// decode as zero values, keeping additions backward compatible). See
+// mux-v1 binary framing (see usbmux.go) carrying one UTF-8 JSON packet per
+// frame. Control packets (hello, modePrefs) name their type in "type"; the
+// frequent input and key packets use compact keys, "t" for the type. The
+// packet struct below is the union of all fields across packet types (unknown
+// fields decode as zero values, keeping additions backward compatible). See
 // FUNCTIONALITY.md §3 for authoritative examples.
 //
 // Upstream (client -> host) types: "hello", "modePrefs", "input", and "key"
@@ -80,38 +79,24 @@ type packet struct {
 	Type        string  `json:"type"`
 	TypeShort   string  `json:"t"`
 	Device      string  `json:"device"`
-	Android     string  `json:"android"` // legacy Android OS field
-	App         string  `json:"app"`     // legacy app version field
+	Android     string  `json:"android"` // Android OS release, for logs
+	App         string  `json:"app"`     // app version
 	ClientOS    string  `json:"clientOS,omitempty"`
-	ClientOSS   string  `json:"os,omitempty"`
 	ClientType  string  `json:"clientType,omitempty"`
-	ClientTypeS string  `json:"ct,omitempty"`
 	ClientVer   string  `json:"clientVersion,omitempty"`
-	ClientVerS  string  `json:"cv,omitempty"`
-	Action      string  `json:"action"`
-	ActionShort string  `json:"a"`
+	Action      string  `json:"a"`
 	X           float32 `json:"x"`
 	Y           float32 `json:"y"`
-	Pressure    float32 `json:"pressure"`
-	PressureS   float32 `json:"p"`
-	Tilt        float32 `json:"tilt"`
-	TiltS       float32 `json:"ti"`
-	Orientation float32 `json:"orientation"`
-	OrientS     float32 `json:"o"`
-	Buttons     int     `json:"buttons"`
-	ButtonsS    int     `json:"b"`
-	ToolType    string  `json:"toolType"`
-	ToolTypeS   string  `json:"tt"`
-	PointerID   int     `json:"pointerId"`
-	PointerIDS  int     `json:"id"`
-	PointerCnt  int     `json:"pointerCount"`
-	PointerCntS int     `json:"pc"`
-	Width       int     `json:"width"`
-	WidthS      int     `json:"w"`
-	Height      int     `json:"height"`
-	HeightS     int     `json:"h"`
-	Timestamp   int64   `json:"timestamp"`
-	TimestampS  int64   `json:"ts"`
+	Pressure    float32 `json:"p"`
+	Tilt        float32 `json:"ti"`
+	Orientation float32 `json:"o"`
+	Buttons     int     `json:"b"`
+	ToolType    string  `json:"tt"`
+	PointerID   int     `json:"id"`
+	PointerCnt  int     `json:"pc"`
+	Width       int     `json:"w"`
+	Height      int     `json:"h"`
+	Timestamp   int64   `json:"ts"`
 
 	// "hello" packets: the tablet panel's native resolution and the user's
 	// preferred host-display mode (0 = no preference stored). The host sets
@@ -145,72 +130,18 @@ type packet struct {
 	// "key" packets (M5): Action is "down"/"up", Keycode is the Android
 	// KeyEvent keycode, Meta the Android meta-state bits, Chars the
 	// character(s) the key produces (Unicode fallback for unmapped keys).
-	Keycode   int    `json:"keycode"`
-	KeycodeS  int    `json:"k"`
-	Meta      int    `json:"meta"`
-	MetaS     int    `json:"m"`
-	Chars     string `json:"chars"`
-	CharsS    string `json:"c"`
-	AuthToken string `json:"authToken,omitempty"`
+	Keycode int    `json:"k"`
+	Meta    int    `json:"m"`
+	Chars   string `json:"c"`
 }
 
-// normalizeAliases folds compact packet keys into the canonical fields so
-// both wire formats decode the same way on the host.
-func (p *packet) normalizeAliases() {
-	if p.Type == "" {
-		p.Type = p.TypeShort
+// kind is the packet's type: "type" on control packets, "t" on input and
+// key packets.
+func (p *packet) kind() string {
+	if p.Type != "" {
+		return p.Type
 	}
-	if p.Action == "" {
-		p.Action = p.ActionShort
-	}
-	if p.Pressure == 0 {
-		p.Pressure = p.PressureS
-	}
-	if p.Tilt == 0 {
-		p.Tilt = p.TiltS
-	}
-	if p.Orientation == 0 {
-		p.Orientation = p.OrientS
-	}
-	if p.Buttons == 0 {
-		p.Buttons = p.ButtonsS
-	}
-	if p.ToolType == "" {
-		p.ToolType = p.ToolTypeS
-	}
-	if p.PointerID == 0 {
-		p.PointerID = p.PointerIDS
-	}
-	if p.PointerCnt == 0 {
-		p.PointerCnt = p.PointerCntS
-	}
-	if p.Width == 0 {
-		p.Width = p.WidthS
-	}
-	if p.Height == 0 {
-		p.Height = p.HeightS
-	}
-	if p.Timestamp == 0 {
-		p.Timestamp = p.TimestampS
-	}
-	if p.Keycode == 0 {
-		p.Keycode = p.KeycodeS
-	}
-	if p.Meta == 0 {
-		p.Meta = p.MetaS
-	}
-	if p.Chars == "" {
-		p.Chars = p.CharsS
-	}
-	if p.ClientOS == "" {
-		p.ClientOS = p.ClientOSS
-	}
-	if p.ClientType == "" {
-		p.ClientType = p.ClientTypeS
-	}
-	if p.ClientVer == "" {
-		p.ClientVer = p.ClientVerS
-	}
+	return p.TypeShort
 }
 
 // hostDisplayModeMsg is a downstream input-channel packet announcing that
@@ -247,10 +178,6 @@ type hostSessionPolicyMsg struct {
 	PenPrediction         bool   `json:"penPrediction"`
 	PenInkPreview         bool   `json:"penInkPreview"`
 	VideoScaling          string `json:"videoScaling,omitempty"`
-	WifiEnabled           bool   `json:"wifiEnabled"`
-	WifiAuthToken         string `json:"wifiAuthToken,omitempty"`
-	WifiTLSRequired       bool   `json:"wifiTlsRequired"`
-	WifiTLSFingerprint    string `json:"wifiTlsFingerprint,omitempty"`
 }
 
 // videoConfigMsg is the JSON payload of a config packet on the video channel.
@@ -266,44 +193,10 @@ type videoConfigMsg struct {
 	CaptureMode string `json:"captureMode,omitempty"`
 }
 
-var (
-	hostVideoCodecs = []string{"h264"}
-	clientCodecsMu  sync.RWMutex
-	clientCodecs    []string
-	hostCodecsMu    sync.RWMutex
-)
-
-func publishClientVideoCodecs(codecs []string) {
-	normalized := make([]string, 0, len(codecs))
-	for _, c := range codecs {
-		cc := strings.ToLower(strings.TrimSpace(c))
-		if cc == "h265" {
-			cc = "hevc"
-		}
-		if cc != "" {
-			normalized = append(normalized, cc)
-		}
-	}
-	clientCodecsMu.Lock()
-	clientCodecs = append([]string(nil), normalized...)
-	clientCodecsMu.Unlock()
-}
-
-func publishHostVideoCodecs(codecs []string) {
-	hostCodecsMu.Lock()
-	hostVideoCodecs = append([]string(nil), codecs...)
-	hostCodecsMu.Unlock()
-}
-
-// negotiateVideoCodec selects the first host-preferred codec that the client
-// also advertised. Legacy clients without a list remain on H.264.
-func negotiateVideoCodec() string {
-	clientCodecsMu.RLock()
-	offered := append([]string(nil), clientCodecs...)
-	clientCodecsMu.RUnlock()
-	hostCodecsMu.RLock()
-	supported := append([]string(nil), hostVideoCodecs...)
-	hostCodecsMu.RUnlock()
+// negotiateVideoCodec selects the first host-supported codec (in the host's
+// order of preference) that the client offered; H.264 when the client offered
+// none or none matches.
+func negotiateVideoCodec(supported, offered []string) string {
 	if len(offered) == 0 {
 		setOperationalWarning("codec", "")
 		return "h264"
@@ -325,7 +218,7 @@ func negotiateVideoCodec() string {
 // channel (client → host, newline-delimited JSON; see feedback.go). All
 // counters are per-interval deltas, not cumulative.
 type clientStatsMsg struct {
-	Type           string  `json:"type"` // "stats"; also "keyframe" and "ack" (see feedback.go)
+	Type string `json:"type"` // "stats"; also "keyframe" and "ack" (see feedback.go)
 	// Frames is the cumulative picture count of an "ack" message.
 	Frames         int64   `json:"frames,omitempty"`
 	IntervalMs     int64   `json:"intervalMs"`
@@ -353,10 +246,4 @@ type clientStatsMsg struct {
 	WiFiRssiDbm      int `json:"wifiRssiDbm,omitempty"`
 	WiFiLinkMbps     int `json:"wifiLinkMbps,omitempty"`
 	WiFiFrequencyMHz int `json:"wifiFrequencyMhz,omitempty"`
-}
-
-// videoAuthMsg is an optional first upstream line on Wi-Fi video sessions.
-type videoAuthMsg struct {
-	Type      string `json:"type"` // "auth"
-	AuthToken string `json:"authToken,omitempty"`
 }

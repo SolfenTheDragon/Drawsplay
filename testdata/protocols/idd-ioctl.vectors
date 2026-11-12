@@ -1,0 +1,11 @@
+# DrawSplay IddCx control device (Windows virtual display driver).
+# Device interface GUID and IOCTL codes: CTL_CODE(FILE_DEVICE_UNKNOWN=0x22, 0x800+n, METHOD_BUFFERED, FILE_ANY_ACCESS).
+# Add-monitor input: five little-endian uint32: width, height, refresh Hz, native width, native height.
+# Implementations: drivers/windows/idd/Public.h, host/idd_protocol.go, desktop/host/src/idd_protocol.rs.
+# Format of this file: one entry per line, name then key=value pairs; hex is lowercase.
+interface guid=4f73af95-3814-4206-a651-125dfbb5e8f5
+ioctl-add-monitor code=00222000
+ioctl-remove-monitor code=00222004
+ioctl-remove-all code=00222008
+add-monitor-request width=2560 height=1600 hz=120 nativeWidth=2960 nativeHeight=1848 wire=000a00004006000078000000900b000038070000
+add-monitor-request-no-native width=1920 height=1080 hz=60 nativeWidth=0 nativeHeight=0 wire=80070000380400003c0000000000000000000000

@@ -8,37 +8,91 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<a class="skip-link" href="#overview">Skip to host overview</a>
 <main>
   <div class="header">
     <div class="brand">
       <h1><img src="icon.png" alt="">DrawSplay</h1>
       <div class="header-caption">HOST CONTROL CENTER</div>
     </div>
-    <div class="theme-toggle">
-      <span id="theme-label">Dark mode</span>
-      <label class="switch">
-        <input id="theme-mode-toggle" type="checkbox">
-        <span class="slider"></span>
-      </label>
+    <div class="header-controls">
+      <div class="toggle-row header-startup">
+        <label for="header-autostart-toggle">Run at login</label>
+        <label class="switch">
+          <input id="header-autostart-toggle" data-autostart-toggle type="checkbox" role="switch" disabled>
+          <span class="slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <div class="theme-picker">
+        <button id="theme-mode-toggle" type="button" aria-label="Theme: System" title="System theme" aria-expanded="false" aria-controls="theme-options">
+          <svg data-theme-icon="light" viewBox="0 0 24 24" aria-hidden="true" focusable="false" hidden><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
+          <svg data-theme-icon="dark" viewBox="0 0 24 24" aria-hidden="true" focusable="false" hidden><path d="M20.5 13A9 9 0 0 1 11 3.5 9 9 0 1 0 20.5 13Z"/></svg>
+          <svg data-theme-icon="system" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 7a5 5 0 0 0 0 10M12 2v2M5 5l1.5 1.5M2 12h2m1 7 1.5-1.5M12 20v2"/><path d="M12 4a8 8 0 0 1 0 16q8-8 0-16Z" fill="currentColor"/></svg>
+        </button>
+        <div id="theme-options" class="theme-options" role="group" aria-label="Theme" hidden>
+          <button type="button" data-theme-option="light" aria-label="Light theme" title="Light theme" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
+          </button>
+          <button type="button" data-theme-option="dark" aria-label="Dark theme" title="Dark theme" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.5 13A9 9 0 0 1 11 3.5 9 9 0 1 0 20.5 13Z"/></svg>
+          </button>
+          <button type="button" data-theme-option="system" aria-label="System theme" title="System theme" aria-pressed="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 7a5 5 0 0 0 0 10M12 2v2M5 5l1.5 1.5M2 12h2m1 7 1.5-1.5M12 20v2"/><path d="M12 4a8 8 0 0 1 0 16q8-8 0-16Z" fill="currentColor"/></svg>
+          </button>
+        </div>
+      </div>
     </div>
   </div>
+  <nav class="section-nav" aria-label="Host controls">
+    <a href="#overview" aria-current="location">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>
+      <span>Overview</span>
+    </a>
+    <a href="#display-input">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>
+      <span>Display &amp; input</span>
+    </a>
+    <a href="#connections">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" focusable="false"><path d="M8 3v5m8-5v5M6 8h12v3a6 6 0 0 1-12 0V8Zm6 9v4"/></svg>
+      <span>Connections</span>
+    </a>
+    <a href="#troubleshooting">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 3v1"/></svg>
+      <span>Troubleshooting</span>
+    </a>
+    <a href="#update-panel">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true" focusable="false"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="var(--nav-item-bg, var(--panel))"/><circle cx="15" cy="17" r="3" fill="var(--nav-item-bg, var(--panel))"/></svg>
+      <span>Settings &amp; about</span>
+    </a>
+  </nav>
 
-  <div class="panel status-panel">
+  <section class="panel status-panel" id="overview" aria-label="Host overview" tabindex="-1">
     <div class="status-overview">
       <div>
         <div class="eyebrow">HOST OVERVIEW</div>
-        <div class="status-line"><span id="dot" class="dot"></span><span id="status">Checking status…</span></div>
+        <div class="status-line"><span id="dot" class="dot" aria-hidden="true"></span><span id="status" role="status">Checking status…</span></div>
       </div>
-      <div class="status-meta">USB / LAN stream monitor</div>
+      <div class="status-badges">
+        <span id="client-badge" class="client-badge" data-kind="none">No client</span>
+        <div id="status-meta" class="status-meta">USB / LAN stream monitor</div>
+      </div>
     </div>
-    <div id="connection-info" class="hint"></div>
-    <div id="target-info" class="hint" hidden></div>
-    <button id="switch-aoa-btn" type="button" hidden>Switch to USB accessory mode</button>
-    <div id="warnings" class="hint" hidden></div>
-    <div id="wifi-pairing-card" class="wifi-pairing-card" hidden>
+    <p id="connection-guidance" class="connection-guidance" data-android-only hidden></p>
+    <a class="text-action" href="#troubleshooting" data-android-only>Check connection setup</a>
+    <details class="connection-details" data-android-only>
+      <summary>Connection details</summary>
+      <div id="connection-info" class="hint" data-android-only></div>
+      <div id="metrics-summary" class="hint" data-android-only></div>
+      <div id="target-info" class="hint" data-android-only hidden></div>
+    </details>
+    <button id="switch-aoa-btn" type="button" data-android-only hidden>Switch to USB accessory mode</button>
+    <div id="warnings" class="hint" role="status" hidden></div>
+    <div id="msg" class="action-feedback" role="status" aria-atomic="true"></div>
+    <div id="wifi-pairing-card" class="wifi-pairing-card" data-android-only hidden>
       <div class="eyebrow">WI-FI PAIRING</div>
       <div id="wifi-pair-code" class="wifi-pair-code" hidden></div>
-      <div id="wifi-pair-text" class="hint"></div>
+      <div id="wifi-pair-text" class="hint" role="status"></div>
+      <div id="wifi-pair-expiry" class="hint" role="timer" aria-live="off" hidden></div>
       <div class="wifi-pair-actions">
         <button id="wifi-pair-approve" type="button" hidden>Approve</button>
         <button id="wifi-pair-deny" type="button" class="danger" hidden>Deny</button>
@@ -46,23 +100,23 @@
         <button id="wifi-pair-cancel" type="button" hidden>Cancel</button>
       </div>
     </div>
-    <div class="metrics-row">
-      <div id="metrics-summary" class="hint"></div>
-      <label class="autostart-check" title="Start the host automatically at login">
-        <input id="autostart-toggle" type="checkbox" disabled>
-        <span>Run at login</span>
-      </label>
-    </div>
-  </div>
+  </section>
 
-  <div class="column column-left">
+  <details class="panel setup-card" id="troubleshooting" data-android-only>
+    <summary>Connection checks &amp; troubleshooting</summary>
+    <div id="setup-checklist" class="hint">Checking setup…</div>
+    <button id="run-setup-remediation-btn" type="button" class="secondary">Re-check setup</button>
+  </details>
+
+  <div class="column column-left" id="display-input">
     <div class="panel settings-panel">
       <div class="panel-heading">
-        <div class="eyebrow">CONFIGURATION</div>
-        <h2>Host settings</h2>
-        <div class="hint">Tune display, input, and connection behavior.</div>
+        <h2>Display &amp; input</h2>
       </div>
-      <form id="form" class="configuration-grid">
+      <div id="pc-settings-note" class="hint pc-settings-note" data-pc-only hidden>Tablet settings only. Configure PC sessions with <code>dd-host --help</code>.</div>
+      <form id="form">
+      <fieldset id="settings-fields" class="configuration-grid" disabled>
+      <legend class="visually-hidden">Tablet preferences</legend>
       <section class="display-settings">
       <div id="resolution-controls">
         <label for="resolution-preset">Display resolution</label>
@@ -94,46 +148,45 @@
         <div id="recommended-resolution-value" class="recommended-value"></div>
         <div id="recommended-resolution-reason" class="hint"></div>
       </div>
-      <div id="resolution-policy-hint" class="hint" hidden>On Windows with an Android client, DrawSplay follows the resolution selected in Windows Display Settings.</div>
-      <div id="resolution-policy-hint-linux" class="hint" hidden>On Linux, change the resolution from the desktop's display settings instead of here: Settings &gt; Displays on GNOME (search for "MetaVendor" if it isn't the tablet display already selected), or the "Virtual-1-1" display on X11 desktops such as Cinnamon (System Settings &gt; Display).</div>
+      <div id="resolution-policy-hint" class="hint" hidden>Resolution and refresh rate are set in Windows Display Settings.</div>
+      <div id="resolution-policy-hint-linux" class="hint" hidden>Set resolution in your desktop's Displays settings: MetaVendor on GNOME, Virtual-1-1 on X11.</div>
       <label for="video-scaling">Tablet scaling</label>
-      <select id="video-scaling">
-        <option value="fill" selected>Fill (stretch to the whole screen)</option>
+      <select id="video-scaling" data-setting="videoScaling">
+        <option value="fill" selected>Fill (stretch)</option>
         <option value="fit">Fit (keep aspect ratio)</option>
-        <option value="original">Original (1:1 pixels, centered)</option>
+        <option value="original">Original (1:1)</option>
       </select>
-      <div class="hint">Higher resolutions improve sharpness but may reduce framerate and responsiveness.</div>
       </section>
-      <section class="input-options monitor-input-options">
-        <strong>Secondary monitor input</strong>
-        <div class="hint">Choose which pointer types the tablet may send to this computer.</div>
+      <section class="input-options monitor-input-options" data-android-only>
+        <strong>Input</strong>
         <div class="toggle-row">
-          <span>Touch input</span>
+          <label for="touch-enabled">Touch input</label>
           <label class="switch">
-            <input id="touch-enabled" type="checkbox">
+            <input id="touch-enabled" data-setting="touchEnabled" type="checkbox">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row" data-linux-only>
+          <label for="touch-gestures">Multitouch gestures</label>
+          <label class="switch">
+            <input id="touch-gestures" data-setting="touchGestures" type="checkbox">
             <span class="slider"></span>
           </label>
         </div>
         <div class="toggle-row">
-          <span>Multitouch Gestures (Linux)</span>
+          <label for="pen-enabled">Pen input</label>
           <label class="switch">
-            <input id="touch-gestures" type="checkbox">
-            <span class="slider"></span>
-          </label>
-        </div>
-        <div class="toggle-row">
-          <span>Pen input</span>
-          <label class="switch">
-            <input id="pen-enabled" type="checkbox">
+            <input id="pen-enabled" data-setting="penEnabled" type="checkbox">
             <span class="slider"></span>
           </label>
         </div>
       </section>
-      <section class="input-options wifi-options" data-feature-wifi hidden>
-        <strong>Wi-Fi connection</strong>
-        <div class="hint">Use the tablet wirelessly on the same network. USB always takes priority when the tablet is plugged in.</div>
+      <section id="connections" class="input-options wifi-options" data-android-only data-feature-wifi hidden>
+        <h3>Connections</h3>
+        <div data-feature-wifi hidden>
+        <div class="hint">USB takes priority over Wi-Fi.</div>
         <div class="toggle-row">
-          <span>Wi-Fi</span>
+          <label for="paired-wifi-enabled">Wi-Fi</label>
           <label class="switch">
             <input id="paired-wifi-enabled" type="checkbox">
             <span class="slider"></span>
@@ -141,193 +194,159 @@
         </div>
         <label for="paired-wifi-interface">Network interface</label>
         <select id="paired-wifi-interface"></select>
-        <div class="hint">Save settings to apply. The pairing code appears in Host overview.</div>
+        <div class="hint">Pairing codes appear in Overview.</div>
+        </div>
       </section>
-      <details class="advanced">
-        <summary>Advanced settings</summary>
+      <details id="advanced-settings" class="advanced">
+        <summary>Advanced preferences</summary>
         <div id="fps-control-row" class="row">
           <div>
             <label for="fps">Framerate</label>
             <select id="fps"></select>
           </div>
         </div>
-        <div class="hint">Primary stream bitrate is managed automatically by adaptive bitrate.</div>
-        <label for="idle-display-timeout">Remove virtual display when no tablet is connected (seconds, 0 = never)</label>
-        <input id="idle-display-timeout" type="number" min="0" max="86400" step="1">
+        <div class="hint">Bitrate adjusts automatically.</div>
+        <label for="idle-display-timeout">Idle display timeout (seconds; 0 = never)</label>
+        <input id="idle-display-timeout" data-setting="idleDisplayTimeoutSec" type="number" min="0" max="86400" step="1">
         <label for="ffmpeg">ffmpeg path</label>
-        <input id="ffmpeg" type="text" required>
-        <div class="input-options">
+        <input id="ffmpeg" data-setting="ffmpeg" type="text" required>
+        <div class="input-options" data-android-only>
           <strong>ADB tunnel (legacy)</strong>
-          <div class="hint">Connects through <code>adb reverse</code>. Requires Developer options and USB debugging on the tablet. Off by default; USB accessory transport below needs neither. At least one of the two must stay on, so turning this off turns USB accessory on.</div>
+          <div class="hint">Requires Android USB debugging.</div>
           <div class="toggle-row">
-            <span>Enable ADB tunnel</span>
+            <label for="adb-tunnel-enabled">Enable ADB tunnel</label>
             <label class="switch">
-              <input id="adb-tunnel-enabled" type="checkbox">
+              <input id="adb-tunnel-enabled" data-setting="adbTunnelEnabled" type="checkbox">
               <span class="slider"></span>
             </label>
           </div>
           <div id="adb-options" hidden>
             <label for="adb">adb path</label>
-            <input id="adb" type="text">
+            <input id="adb" data-setting="adb" type="text">
             <label for="adb-serial">Preferred ADB device serial (optional)</label>
-            <input id="adb-serial" type="text" placeholder="R58M…">
-            <div class="hint">When set, reverse tunnels are created only for this device.</div>
+            <input id="adb-serial" data-setting="preferredADBSerial" type="text" placeholder="R58M…">
+            <div class="hint">When set, only this device is tunneled.</div>
             <div class="toggle-row">
-              <span>Require preferred ADB serial</span>
+              <label for="require-adb-serial">Require preferred ADB serial</label>
               <label class="switch">
-                <input id="require-adb-serial" type="checkbox">
+                <input id="require-adb-serial" data-setting="requirePreferredADB" type="checkbox">
                 <span class="slider"></span>
               </label>
             </div>
           </div>
         </div>
-        <div class="input-options">
-          <strong>USB accessory transport (no ADB)</strong>
-          <div class="hint">Connects the tablet over USB using Android Open Accessory, so Developer options and USB debugging are not needed. On by default; turning it off turns the ADB tunnel on, since one must stay enabled. Changes apply on the next host launch. On Linux the user needs access to the tablet's USB node (see README); on Windows a WinUSB driver must be bound to the tablet.</div>
+        <div class="input-options" data-android-only>
+          <strong>USB accessory transport</strong>
+          <div class="hint">Transport changes require a host restart.</div>
           <div class="toggle-row">
-            <span>Switch the tablet to accessory mode automatically</span>
+            <label for="aoa-auto-switch">Automatically switch to accessory mode</label>
             <label class="switch">
-              <input id="aoa-auto-switch" type="checkbox">
+              <input id="aoa-auto-switch" data-setting="aoaAutoSwitch" type="checkbox">
               <span class="slider"></span>
             </label>
           </div>
-          <div class="hint">Turn off to keep the tablet in File transfer (MTP) or any other USB mode until you press "Switch to USB accessory mode" in the host overview.</div>
+          <div class="hint">Disable to keep USB file transfer available.</div>
           <div class="toggle-row">
-            <span>Enable USB accessory transport</span>
+            <label for="aoa-enabled">Enable USB accessory transport</label>
             <label class="switch">
-              <input id="aoa-enabled" type="checkbox">
+              <input id="aoa-enabled" data-setting="aoaEnabled" type="checkbox">
               <span class="slider"></span>
             </label>
           </div>
         </div>
-        <div class="input-options">
-          <strong>Connection & security controls</strong>
-          <div class="hint">Control trusted-device behavior, app launch, and whether sessions persist while the Android app is backgrounded.</div>
+        <div class="input-options" data-android-only>
+          <strong>Input &amp; performance</strong>
           <div class="toggle-row">
-            <span>Allow keyboard passthrough</span>
+            <label for="keyboard-enabled">Tablet keyboard input</label>
             <label class="switch">
-              <input id="keyboard-enabled" type="checkbox">
+              <input id="keyboard-enabled" data-setting="keyboardEnabled" type="checkbox">
               <span class="slider"></span>
             </label>
           </div>
           <div class="toggle-row">
-            <span>Keep session alive when Android app is running in the background</span>
+            <label for="keep-alive-on-background">Keep session alive in background</label>
             <label class="switch">
-              <input id="keep-alive-on-background" type="checkbox">
+              <input id="keep-alive-on-background" data-setting="keepAliveOnBackground" type="checkbox">
               <span class="slider"></span>
             </label>
           </div>
           <div class="toggle-row">
-            <span>Pen motion prediction (extrapolate hover movement a few ms ahead to reduce cursor lag)</span>
+            <label for="pen-prediction">Reduce pen cursor lag with motion prediction</label>
             <label class="switch">
-              <input id="pen-prediction" type="checkbox">
+              <input id="pen-prediction" data-setting="penPrediction" type="checkbox">
               <span class="slider"></span>
             </label>
           </div>
           <div class="toggle-row">
-            <span>Instant pen ink preview (the tablet draws a thin temporary stroke under the pen at once and removes it when the computer's own stroke arrives; turn off if you see stray lines when not drawing)</span>
+            <label for="pen-ink-preview">Show instant pen ink preview</label>
             <label class="switch">
-              <input id="pen-ink-preview" type="checkbox">
+              <input id="pen-ink-preview" data-setting="penInkPreview" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row" data-linux-only>
+              <label for="x11-high-rate-capture">Capture X11 at up to 120 fps (uses more CPU)</label>
+            <label class="switch">
+              <input id="x11-high-rate-capture" data-setting="x11HighRateCapture" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row" data-linux-only>
+            <label for="idle-capture-gate">Pause capture while the X11 screen is idle</label>
+            <label class="switch">
+              <input id="idle-capture-gate" data-setting="idleCaptureGate" type="checkbox">
               <span class="slider"></span>
             </label>
           </div>
           <div class="toggle-row">
-            <span>Capture X11 at up to 120 fps (samples the 60 Hz desktop twice; lower latency, about 2x encoder CPU)</span>
+            <label for="auto-launch-android-app">Open the tablet app when USB connects</label>
             <label class="switch">
-              <input id="x11-high-rate-capture" type="checkbox">
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="toggle-row">
-            <span>Pause capture while the screen is idle (Linux X11; saves CPU, bitrate and tablet decoding)</span>
-            <label class="switch">
-              <input id="idle-capture-gate" type="checkbox">
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="toggle-row">
-            <span>Auto-launch Android app on USB connect</span>
-            <label class="switch">
-              <input id="auto-launch-android-app" type="checkbox">
+              <input id="auto-launch-android-app" data-setting="autoLaunchAndroidApp" type="checkbox">
               <span class="slider"></span>
             </label>
           </div>
           <div class="toggle-row" data-windows-only>
-            <span>Prefer zero-copy NVENC capture (Windows)</span>
+            <label for="zero-copy-capture">Prefer zero-copy NVENC capture</label>
             <label class="switch">
-              <input id="zero-copy-capture" type="checkbox">
+              <input id="zero-copy-capture" data-setting="zeroCopyCapture" type="checkbox">
               <span class="slider"></span>
             </label>
           </div>
           <div class="toggle-row">
-            <span>Enable temporal layering adaptation (experimental)</span>
+            <label for="temporal-layering">Adapt video layers (experimental)</label>
             <label class="switch">
-              <input id="temporal-layering" type="checkbox">
+              <input id="temporal-layering" data-setting="temporalLayering" type="checkbox">
               <span class="slider"></span>
             </label>
           </div>
           <div class="toggle-row">
-            <span>Allow automatic tool download/install</span>
+            <label for="update-check">Check for updates automatically</label>
             <label class="switch">
-              <input id="allow-tool-auto-install" type="checkbox">
+              <input id="update-check" data-setting="updateCheck" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label for="allow-tool-auto-install">Download and install missing capture tools automatically</label>
+            <label class="switch">
+              <input id="allow-tool-auto-install" data-setting="allowToolAutoInstall" type="checkbox">
               <span class="slider"></span>
             </label>
           </div>
         </div>
         <div class="toggle-row" data-windows-only>
-          <span>Skip automatic virtual display driver install (Windows)</span>
+          <label for="no-driver-install">Skip automatic virtual display driver installation</label>
           <label class="switch">
-            <input id="no-driver-install" type="checkbox">
+            <input id="no-driver-install" data-setting="noDriverInstall" type="checkbox">
             <span class="slider"></span>
           </label>
         </div>
-        <div class="hint" data-windows-only>This is rarely changed. If modified during a run, it applies on next host start.</div>
-        <!-- Hidden with the Wi-Fi feature flag while legacy Wi-Fi is its only content. -->
-        <details class="advanced advanced-systems" data-feature-wifi hidden>
-          <summary>Advanced systems</summary>
-          <div class="hint">Older transports and low-level options most setups never need.</div>
-          <div class="input-options" data-feature-wifi hidden>
-            <strong>Legacy Wi-Fi transport</strong>
-            <div class="hint">The older shared-token LAN listener, separate from Wi-Fi pairing above. Adds LAN discovery/connectivity while keeping USB behavior unchanged when disabled.</div>
-            <div class="toggle-row">
-              <span>Enable Wi-Fi transport</span>
-              <label class="switch">
-                <input id="wifi-enabled" type="checkbox">
-                <span class="slider"></span>
-              </label>
-            </div>
-            <label for="wifi-service-name">Wi-Fi service name</label>
-            <input id="wifi-service-name" type="text" placeholder="DrawSplay">
-            <label for="wifi-bind-address">Wi-Fi bind address</label>
-            <input id="wifi-bind-address" type="text" placeholder="0.0.0.0">
-            <div class="row">
-              <div>
-                <label for="wifi-input-port">Wi-Fi input port</label>
-                <input id="wifi-input-port" type="number" min="1024" max="65535">
-              </div>
-              <div>
-                <label for="wifi-video-port">Wi-Fi video port</label>
-                <input id="wifi-video-port" type="number" min="1024" max="65535">
-              </div>
-            </div>
-            <label for="wifi-max-bitrate">Wi-Fi max bitrate cap</label>
-            <input id="wifi-max-bitrate" type="text" placeholder="12M">
-            <label for="wifi-auth-token">Wi-Fi auth token (optional)</label>
-            <input id="wifi-auth-token" type="text" placeholder="shared token">
-            <div class="hint">Saved tokens are not shown; enter a new token only when rotating it.</div>
-            <div class="toggle-row">
-              <span>Require TLS on Wi-Fi</span>
-              <label class="switch">
-                <input id="wifi-tls" type="checkbox">
-                <span class="slider"></span>
-              </label>
-            </div>
-          </div>
-        </details>
+        <div class="hint" data-windows-only>Requires a host restart.</div>
         <div class="input-options">
           <strong>Debug</strong>
+          <div class="hint">Local only; not saved.</div>
           <div class="toggle-row">
-            <span>Show debug console in UI</span>
+            <label for="show-debug-console">Show debug console</label>
             <label class="switch">
               <input id="show-debug-console" type="checkbox">
               <span class="slider"></span>
@@ -337,11 +356,10 @@
         </details>
         <div id="debug-panel" class="panel" hidden>
           <strong>Debug console</strong>
-          <div class="hint">Live host log output. Only visible while this toggle is enabled.</div>
           <pre id="debug-console" class="console"></pre>
         </div>
-        <button id="save" type="submit">Save &amp; apply</button>
-        <div id="msg"></div>
+        </fieldset>
+        <div id="settings-feedback" class="action-feedback" role="status"></div>
       </form>
     </div>
   </div>
@@ -353,75 +371,109 @@
     </div>
     <div class="action-grid">
     <div class="action-stack">
-    <div class="panel dashboard-card setup-card">
-      <div class="eyebrow">SYSTEM HEALTH</div>
-      <h2>Setup checklist</h2>
-      <div id="setup-checklist" class="hint">Checking setup…</div>
-      <button id="run-setup-remediation-btn" type="button">Run setup repair checks</button>
+    <div class="panel dashboard-card update-card" id="update-panel">
+      <h2>Settings &amp; about</h2>
+      <div class="toggle-row startup-preference">
+        <label for="autostart-toggle">Run at login</label>
+        <label class="switch">
+          <input id="autostart-toggle" data-autostart-toggle type="checkbox" role="switch" disabled>
+          <span class="slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <div id="update-summary" class="update-summary" role="status">Not checked yet.</div>
+      <progress id="update-progress" class="update-progress" max="100" aria-label="Update progress" hidden></progress>
+      <details id="update-notes-box" class="update-notes" hidden>
+        <summary>What's new in <span id="update-notes-version"></span></summary>
+        <pre id="update-notes"></pre>
+      </details>
+      <div id="update-note" class="hint"></div>
+      <div id="update-result" hidden></div>
+      <div id="update-error" class="update-error" role="alert" hidden></div>
+      <button id="update-install-btn" type="button" hidden>Install update</button>
+      <div class="update-links">
+        <button id="update-check-btn" type="button" class="link-button">Check now</button>
+        <a id="update-release-link" target="_blank" rel="noopener noreferrer" hidden>Release page</a>
+      </div>
     </div>
     </div>
 
     <div class="action-stack">
-    <div class="panel dashboard-card">
-      <div class="eyebrow">LIVE SESSION</div>
+    <div class="panel dashboard-card pc-panel" id="pc-panel" data-pc-only hidden>
+      <div class="eyebrow">PC CLIENT</div>
+      <h2>Desktop host</h2>
+      <div id="pc-summary" class="hint"></div>
+      <dl id="pc-session" class="pc-session" hidden></dl>
+      <button id="pc-disconnect-btn" type="button" class="danger" hidden>Disconnect PC clients</button>
+      <details class="pc-trusted">
+        <summary id="pc-trusted-summary">Trusted PC clients</summary>
+        <ul id="pc-trusted-list" class="pc-trusted-list"></ul>
+        <div class="hint">Manage devices with <code>dd-host --manage-trusted</code>.</div>
+      </details>
+    </div>
+
+    <div class="panel dashboard-card" data-android-only>
       <h2>Session controls</h2>
-      <div class="hint">Manage the active client session without stopping the host.</div>
       <div class="toggle-row">
-        <span>Lock client input</span>
+        <label for="input-lock-toggle">Lock client input</label>
         <label class="switch">
           <input id="input-lock-toggle" type="checkbox">
           <span class="slider"></span>
         </label>
       </div>
-      <button id="pause-video-btn" type="button">Reconnect video stream</button>
-      <button id="disconnect-session-btn" type="button">Disconnect client session</button>
+      <button id="pause-video-btn" type="button" class="secondary">Reconnect video</button>
+      <button id="disconnect-session-btn" type="button" class="secondary">Reset connection</button>
     </div>
 
-    <div class="panel dashboard-card tablet-panel">
+    <div class="panel dashboard-card tablet-panel" data-android-only>
       <div class="toggle-row">
         <div>
-          <h2>Client display preference</h2>
-          <div class="hint">Clears the connected client's saved resolution preference. The default resolution is used on the next reconnect.</div>
+          <h2>Saved resolution</h2>
+          <div class="hint">Reset uses the default resolution on next reconnect.</div>
         </div>
-        <button id="clear-mode-btn" type="button">Clear</button>
+        <button id="clear-mode-btn" type="button" class="secondary">Reset preference</button>
       </div>
     </div>
 
     <div class="panel dashboard-card">
-        <div class="eyebrow">SUPPORT</div>
         <h2>Diagnostics</h2>
-        <div class="hint">Download a JSON snapshot for troubleshooting and compatibility checks.</div>
-        <button id="download-diagnostics-btn" type="button">Download diagnostics</button>
+        <button id="download-diagnostics-btn" type="button" class="secondary">Download diagnostics</button>
     </div>
 
     </div>
 
     <div class="action-stack">
-    <div class="panel dashboard-card calibration-panel">
-      <div class="eyebrow">INPUT</div>
+    <div class="panel dashboard-card calibration-panel" data-android-only>
       <h2>Pen calibration</h2>
-      <div class="hint">Applies only to the currently connected client. Single-client mode is enforced on the host.</div>
+      <p class="hint">Saved per tablet.</p>
       <label for="calibration-device">Connected client</label>
       <input id="calibration-device" type="text" readonly>
+      <button id="start-calibration-btn" type="button" class="secondary" disabled>Calibrate with targets</button>
+      <details class="calibration-numeric">
+      <summary>Manual adjustments</summary>
       <div class="row">
         <div>
           <label for="calibration-scale-x">Scale X</label>
-          <input id="calibration-scale-x" type="number" min="0.5" max="1.5" step="0.01" value="1.00">
+          <input id="calibration-scale-x" type="number" min="0.5" max="1.5" step="0.0001" value="1.0000">
         </div>
         <div>
           <label for="calibration-scale-y">Scale Y</label>
-          <input id="calibration-scale-y" type="number" min="0.5" max="1.5" step="0.01" value="1.00">
+          <input id="calibration-scale-y" type="number" min="0.5" max="1.5" step="0.0001" value="1.0000">
         </div>
       </div>
       <div class="row">
         <div>
           <label for="calibration-offset-x">Offset X</label>
-          <input id="calibration-offset-x" type="number" min="-0.25" max="0.25" step="0.01" value="0.00">
+          <input id="calibration-offset-x" type="number" min="-0.25" max="0.25" step="0.0001" value="0.0000">
         </div>
         <div>
           <label for="calibration-offset-y">Offset Y</label>
-          <input id="calibration-offset-y" type="number" min="-0.25" max="0.25" step="0.01" value="0.00">
+          <input id="calibration-offset-y" type="number" min="-0.25" max="0.25" step="0.0001" value="0.0000">
         </div>
+      </div>
+      </details>
+      <div class="button-row">
+        <button id="reset-calibration-btn" type="button" class="secondary" disabled>Reset</button>
+        <button id="cancel-calibration-btn" type="button" class="secondary" disabled>Discard</button>
       </div>
       <button id="save-calibration-btn" type="button">Save calibration</button>
     </div>
@@ -430,7 +482,6 @@
       <div class="toggle-row">
         <div>
           <strong>Stop host</strong>
-          <div class="hint">Ends streaming and exits the host process.</div>
         </div>
         <button id="stop-btn" type="button" class="danger">Stop</button>
       </div>
@@ -439,7 +490,30 @@
     </div>
   </section>
 </main>
-<footer id="app-footer">DrawSplay <a id="host-version" target="_blank" rel="noopener noreferrer"></a></footer>
+<div id="pending-changes" class="save-bar" role="region" aria-label="Unsaved preferences" hidden>
+  <div class="save-bar-pending"><strong>Unsaved changes</strong><div id="change-impact" class="hint"></div></div>
+  <div id="saved-message" class="save-bar-saved" aria-hidden="true"></div>
+  <button id="discard-settings-btn" type="button" class="secondary">Discard</button>
+  <button id="save" type="submit" form="form" disabled>Save changes</button>
+</div>
+<dialog id="calibration-dialog" aria-labelledby="calibration-title">
+  <div id="calibration-workspace">
+  <h2 id="calibration-title">Calibrate your pen</h2>
+  <p id="calibration-instructions" role="status">Move this browser to the tablet's extended display. Enter fullscreen, then tap each target with your pen.</p>
+  <div class="button-row">
+    <button id="calibration-begin" type="button">Enter fullscreen &amp; start</button>
+    <button id="calibration-accept" type="button" hidden>Use these adjustments</button>
+    <button id="calibration-exit" type="button" class="secondary">Cancel</button>
+  </div>
+  <div id="calibration-area" hidden>
+    <span id="calibration-target" role="img" aria-label="Pen calibration target">+</span>
+    <span id="calibration-preview" aria-hidden="true" hidden></span>
+    <p id="calibration-step" role="status"></p>
+  </div>
+  </div>
+</dialog>
+<footer id="app-footer">DrawSplay <a id="host-version" target="_blank" rel="noopener noreferrer"></a><a id="footer-update" href="#update-panel" hidden></a></footer>
+<script src="calibration.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

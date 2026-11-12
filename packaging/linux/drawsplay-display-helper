@@ -1,0 +1,59 @@
+#!/bin/bash
+# DrawSplay display helper: the only commands the DrawSplay host runs as root on X11.
+# Installed root-owned at /usr/libexec/drawsplay/drawsplay-display-helper and run through
+# pkexec, so the password prompt names this action (com.drawsplay.display-helper) instead of
+# "run a shell as root". Every argument is checked; anything else is refused.
+#
+#   drawsplay-display-helper connector /sys/class/drm/cardN-HDMI-A-M/status on|detect
+#   drawsplay-display-helper vkms-load
+#
+# A connector call also installs the udev rule 70-drawsplay-drm-connector.rules
+# when it is missing and opens the HDMI status files to the plugdev group right
+# away, so the password is asked once: every later boot the host writes the
+# connector itself.
+set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+DRM_RULE_TARGET=/etc/udev/rules.d/70-drawsplay-drm-connector.rules
+# Kept identical to packaging/linux/70-drawsplay-drm-connector.rules (a host
+# test checks this).
+DRM_RULE='ACTION=="add|change", SUBSYSTEM=="drm", KERNEL=="card[0-9]*-HDMI-A-[0-9]*", RUN+="/bin/sh -c '"'"'chgrp plugdev /sys%p/status && chmod 0664 /sys%p/status'"'"'"'
+
+# open_connectors_to_plugdev makes the spare-connector fallback work without
+# root from now on. Failures here are not failures of the connector switch.
+open_connectors_to_plugdev() {
+  getent group plugdev >/dev/null 2>&1 || return 0
+  local f
+  for f in /sys/class/drm/card[0-9]*-HDMI-A-[0-9]*/status; do
+    [[ -e "$f" ]] || continue
+    chgrp plugdev "$f" 2>/dev/null && chmod 0664 "$f" 2>/dev/null || true
+  done
+  if [[ ! -e "$DRM_RULE_TARGET" ]] && [[ -d /etc/udev/rules.d ]]; then
+    {
+      echo "# DrawSplay: lets members of the plugdev group force a spare, unplugged HDMI"
+      echo "# connector on or off without root (written by drawsplay-display-helper;"
+      echo "# same as packaging/linux/70-drawsplay-drm-connector.rules)."
+      echo "$DRM_RULE"
+    } >"$DRM_RULE_TARGET".tmp && mv "$DRM_RULE_TARGET".tmp "$DRM_RULE_TARGET" || { rm -f "$DRM_RULE_TARGET".tmp; return 0; }
+    chmod 0644 "$DRM_RULE_TARGET" || true
+    command -v udevadm >/dev/null 2>&1 && udevadm control --reload-rules 2>/dev/null || true
+  fi
+}
+
+case "${1:-}" in
+  connector)
+    [[ $# -eq 3 ]] || { echo "usage: $0 connector PATH on|detect" >&2; exit 2; }
+    [[ "$2" =~ ^/sys/class/drm/card[0-9]+-HDMI-A-[0-9]+/status$ ]] || { echo "refusing path: $2" >&2; exit 2; }
+    [[ "$3" == on || "$3" == detect ]] || { echo "refusing value: $3" >&2; exit 2; }
+    printf '%s\n' "$3" >"$2"
+    open_connectors_to_plugdev
+    ;;
+  vkms-load)
+    [[ $# -eq 1 ]] || { echo "usage: $0 vkms-load" >&2; exit 2; }
+    modprobe vkms create_default_dev=1 || modprobe vkms
+    ;;
+  *)
+    echo "usage: $0 connector PATH on|detect | vkms-load" >&2
+    exit 2
+    ;;
+esac

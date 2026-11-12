@@ -1,4 +1,4 @@
-﻿package com.drawsplay.tablet.transport
+package com.drawsplay.tablet.transport
 
 import java.io.EOFException
 import java.io.InputStream
@@ -7,7 +7,8 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * Fixed-header mux codec for the planned single-session USB transport.
+ * Mux-v1 framing of the input channel, on every transport (AOA, ADB and paired Wi-Fi).
+ * Mirrors host/usbmux.go.
  *
  * Header layout (big-endian):
  *  magic(2) version(1) stream(1) flags(1) seq(4) len(4)
@@ -36,19 +37,7 @@ object UsbMuxFrameCodec {
     }
 
     fun writeFrame(out: OutputStream, frame: Frame) {
-        require(frame.payload.size <= MAX_PAYLOAD) { "payload too large: ${frame.payload.size}" }
-        val header = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.BIG_ENDIAN).apply {
-            putShort(MAGIC)
-            put(VERSION)
-            put(frame.streamId)
-            put(frame.flags)
-            putInt(frame.seq.toInt())
-            putInt(frame.payload.size)
-        }.array()
-        out.write(header)
-        if (frame.payload.isNotEmpty()) {
-            out.write(frame.payload)
-        }
+        out.write(encode(frame))
     }
 
     fun encode(frame: Frame): ByteArray {

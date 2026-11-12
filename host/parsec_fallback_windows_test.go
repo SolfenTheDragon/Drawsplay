@@ -15,19 +15,21 @@ import (
 func TestWindowsDriverSetupOnlyInstallsParsecWhenNeeded(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
+		iddStatus  string
 		iddReady   bool
 		parsecErr  error
 		wantCalls  []string
 		wantStatus string
 	}{
-		{"working IDD", true, nil, []string{"idd", "ready"}, "installed"},
-		{"failed IDD", false, nil, []string{"idd", "ready", "parsec"}, "Parsec fallback: installed"},
-		{"both failed", false, errors.New("download refused"), []string{"idd", "ready", "parsec"}, "mirror mode"},
+		{"working IDD", "installed", true, nil, []string{"idd", "ready"}, "installed"},
+		{"failed IDD", "installed", false, nil, []string{"idd", "ready", "parsec"}, "Parsec fallback: installed"},
+		{"both failed", "installed", false, errors.New("download refused"), []string{"idd", "ready", "parsec"}, "mirror mode"},
+		{"upgrade pending reboot", driverStatusPendingReboot, false, nil, []string{"idd", "ready"}, driverStatusPendingReboot},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls []string
 			result := setupWindowsDisplayDriver(
-				func() string { calls = append(calls, "idd"); return "installed" },
+				func() string { calls = append(calls, "idd"); return tc.iddStatus },
 				func() bool { calls = append(calls, "ready"); return tc.iddReady },
 				func() (bool, error) {
 					calls = append(calls, "parsec")
@@ -41,7 +43,8 @@ func TestWindowsDriverSetupOnlyInstallsParsecWhenNeeded(t *testing.T) {
 			if !strings.Contains(result.status, tc.wantStatus) {
 				t.Fatalf("setup status = %q, want %q", result.status, tc.wantStatus)
 			}
-			if result.parsecOwned != (!tc.iddReady && tc.parsecErr == nil) {
+			wantParsec := !tc.iddReady && tc.parsecErr == nil && tc.iddStatus != driverStatusPendingReboot
+			if result.parsecOwned != wantParsec {
 				t.Fatalf("incorrect Parsec ownership: %+v", result)
 			}
 		})

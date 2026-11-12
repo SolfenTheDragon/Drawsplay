@@ -3,9 +3,8 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 )
 
@@ -14,23 +13,16 @@ import (
 func verifyFileSHA256(path, expected string) error {
 	expected = strings.ToLower(strings.TrimSpace(expected))
 	if len(expected) != sha256.Size*2 {
-		return fmt.Errorf("invalid pinned SHA-256 digest")
+		return errors.New("invalid pinned SHA-256 digest")
 	}
 	if _, err := hex.DecodeString(expected); err != nil {
 		return fmt.Errorf("invalid pinned SHA-256 digest: %w", err)
 	}
 
-	f, err := os.Open(path)
+	actual, err := fileSHA256(path)
 	if err != nil {
-		return fmt.Errorf("open for integrity verification: %w", err)
+		return fmt.Errorf("hash artifact for integrity verification: %w", err)
 	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return fmt.Errorf("hash artifact: %w", err)
-	}
-	actual := hex.EncodeToString(h.Sum(nil))
 	if actual != expected {
 		return fmt.Errorf("SHA-256 mismatch: got %s, want %s", actual, expected)
 	}

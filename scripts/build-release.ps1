@@ -54,7 +54,7 @@ function Sign-WindowsExecutable {
     [Parameter(Mandatory = $true)][string]$ExePath
   )
 
-  $requireSigning = ($env:DRAWSPLAY_REQUIRE_SIGNING -eq "1" -or $env:DRAWSPLAY_REQUIRE_SIGNING -eq "true")
+  $requireSigning = ($env:DRAWSPLAY_REQUIRE_SIGNING -in @("1", "true", "yes"))
   $certPath = $env:DRAWSPLAY_WINDOWS_SIGNING_PFX_PATH
   $certPassword = $env:DRAWSPLAY_WINDOWS_SIGNING_PFX_PASSWORD
   $timestampUrl = $env:DRAWSPLAY_WINDOWS_SIGNING_TIMESTAMP_URL
@@ -79,13 +79,23 @@ function Sign-WindowsExecutable {
   }
 
   Write-Host "Signing host executable..."
-  & $signTool sign /fd SHA256 /f $certPath /p $certPassword /tr $timestampUrl /td SHA256 $ExePath
-  if (-not $?) {
-    throw "signtool failed to sign $ExePath"
+  $password = ConvertTo-SecureString $certPassword -AsPlainText -Force
+  $cert = Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+  if (-not $cert) {
+    throw "Could not import the Windows signing certificate."
   }
-  & $signTool verify /pa $ExePath
-  if (-not $?) {
-    throw "signtool verification failed for $ExePath"
+  try {
+    & $signTool sign /fd SHA256 /sha1 $cert.Thumbprint /s My /tr $timestampUrl /td SHA256 $ExePath
+    if (-not $?) {
+      throw "signtool failed to sign $ExePath"
+    }
+    & $signTool verify /pa $ExePath
+    if (-not $?) {
+      throw "signtool verification failed for $ExePath"
+    }
+  }
+  finally {
+    Remove-Item -LiteralPath ("Cert:\CurrentUser\My\" + $cert.Thumbprint) -ErrorAction SilentlyContinue
   }
 }
 
@@ -136,7 +146,11 @@ function Copy-FileWithRetry {
 }
 
 Write-Host "Staging IddCx virtual display driver..."
-& "$PSScriptRoot\build-idd-driver.ps1"
+$driverVersion = '1.0.0.0'
+if ($Version -match '^v(\d+)\.(\d+)\.(\d+)$') {
+  $driverVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).0"
+}
+& "$PSScriptRoot\build-idd-driver.ps1" -DriverVersion $driverVersion
 if (-not $?) {
   throw "IddCx driver staging failed"
 }
@@ -162,7 +176,9 @@ Sign-WindowsExecutable -ExePath "$repoRoot\host\host.exe"
 
 Write-Host "Building Android APK..."
 Set-Location "$repoRoot\android"
-.\gradlew.bat :app:assembleRelease :app:bundleRelease
+# The tag sets the APK's versionName/versionCode (app/build.gradle.kts), so
+# the in-app updater and Android see each release as an upgrade.
+.\gradlew.bat "-PDRAWSPLAY_VERSION=$Version" :app:assembleRelease :app:bundleRelease
 if (-not $?) {
   throw "Android release build failed"
 }

@@ -119,7 +119,7 @@ var connectorStatusPath = regexp.MustCompile(`^/sys/class/drm/card\d+-HDMI-A-\d+
 func ensureForcedConnectorDisplay(reason string, mayPrompt bool) error {
 	var pick *drmHDMIConnector
 	for _, c := range listHDMIConnectors() {
-		if c.Status == "disconnected" {
+		if c.Status == "disconnected" && !displayClaimedByOther(c.XName) {
 			c := c
 			pick = &c
 			break
@@ -132,6 +132,9 @@ func ensureForcedConnectorDisplay(reason string, mayPrompt bool) error {
 	if err := forceConnectorPrivileged(filepath.Join(pick.Dir, "status"), "on", mayPrompt); err != nil {
 		return err
 	}
+	// Held (forced) for the life of this host, between sessions too, so
+	// dd-host's cleanup leaves it alone.
+	claimDisplay(displayClaimConnector, pick.XName)
 	deadline := time.Now().Add(vkmsOutputWait)
 	for !x11VirtualDisplayReady() {
 		if time.Now().After(deadline) {
@@ -175,11 +178,14 @@ func writeConnectorStatusPrivileged(path, value string, mayPrompt bool) error {
 		}
 	}
 	if !mayPrompt {
-		return errVkmsNeedsRoot
+		return fmt.Errorf("forcing the spare connector on without a prompt: %w; install the udev rule 70-drawsplay-drm-connector.rules (scripts/install-host-linux.sh does this) or wait for the one-time prompt when a tablet connects", errNeedsRoot)
 	}
 	pkexec, err := exec.LookPath("pkexec")
 	if err != nil {
 		return errors.New("pkexec is not available; run: echo on | sudo tee " + path)
+	}
+	if helper, ok := displayHelper(); ok {
+		args = []string{helper, "connector", path, value}
 	}
 	err = run(append([]string{pkexec}, args...)...)
 	var ee *exec.ExitError
@@ -201,11 +207,16 @@ func releaseForcedConnectors() int {
 		if c.Status != "connected" || !c.NoEDID {
 			continue
 		}
+		// Forced by dd-host (DrawSplay Desktop), which is still using it.
+		if displayClaimedByOther(c.XName) {
+			continue
+		}
 		if err := forceConnectorPrivileged(filepath.Join(c.Dir, "status"), "detect", false); err != nil {
 			log.Printf("Could not release the forced connector %s: %v (run: echo detect | sudo tee %s)",
 				c.XName, err, filepath.Join(c.Dir, "status"))
 			continue
 		}
+		releaseDisplayClaim(displayClaimConnector, c.XName)
 		log.Printf("Released the forced connector %s", c.XName)
 		released++
 	}

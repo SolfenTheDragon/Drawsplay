@@ -49,7 +49,7 @@ class WiFiVideoDecoder(
     init {
         var selected: MediaCodec? = null
         var failure: Exception? = null
-        for (lowLatency in if (Build.VERSION.SDK_INT >= 30) booleanArrayOf(true, false) else booleanArrayOf(false)) {
+        for (lowLatency in if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) booleanArrayOf(true, false) else booleanArrayOf(false)) {
             val candidate = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
             try {
                 val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, config.width, config.height).apply {
@@ -57,7 +57,7 @@ class WiFiVideoDecoder(
                     setInteger(MediaFormat.KEY_FRAME_RATE, config.fps)
                     setByteBuffer("csd-0", ByteBuffer.wrap(config.sps))
                     setByteBuffer("csd-1", ByteBuffer.wrap(config.pps))
-                    if (lowLatency && Build.VERSION.SDK_INT >= 30) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                    if (lowLatency && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
                 }
                 candidate.configure(format, surface, null, 0)
                 candidate.start()
@@ -198,7 +198,7 @@ class WiFiVideoDecoder(
         get() = pendingSlot != null || csdIndex < 2
 
     companion object {
-        private const val TAG = "DS-WiFiDecoder"
+        private const val TAG = "WiFiVideoDecoder"
 
         fun drained(ended: Boolean, queueDepth: Int, pendingFrames: Int, holdingRecoverySlot: Boolean): Boolean =
             ended && queueDepth == 0 && pendingFrames == 0 && !holdingRecoverySlot

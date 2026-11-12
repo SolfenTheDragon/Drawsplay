@@ -2,15 +2,20 @@ name: CI
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: host/go.mod
 
@@ -18,14 +23,26 @@ jobs:
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
 
       - name: Check shell script syntax
+        # Every tracked script, found by its #! line and checked with the
+        # shell it names (sh is dash here, so POSIX scripts stay POSIX).
         run: |
-          shopt -s nullglob
-          for script in scripts/*.sh release/*.sh tools/android_wifi_probe/*.sh; do
-            bash -n "$script"
-          done
+          status=0
+          while IFS= read -r script; do
+            case "$(head -n1 "$script")" in
+              '#!/bin/sh'*) sh -n "$script" || status=1 ;;
+              '#!'*bash*) bash -n "$script" || status=1 ;;
+            esac
+          done < <(git grep -lI "^#!")
+          exit "$status"
 
       - name: Test external USB measurement tooling
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/usb_baseline -p 'test_*.py' -v
+
+      - name: Test Linux installer dependency detection
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Test browser calibration
+        run: node --test host/webui_calibration_test.cjs
 
   host:
     runs-on: ubuntu-latest
@@ -34,21 +51,75 @@ jobs:
         working-directory: host
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: host/go.mod
+
+      - name: Check Go formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Run gofmt -w on:"
+            echo "$unformatted"
+            exit 1
+          fi
 
       - name: Vet host
         run: go vet ./...
 
-      - name: Test host
-        run: go test ./...
+      - name: Vet host for Windows and an unsupported platform (missing fallbacks)
+        run: |
+          GOOS=windows go vet ./...
+          GOOS=darwin go vet ./...
+
+      - name: Test host (race detector)
+        run: go test -race ./...
+
+      - name: Check for known vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
       - name: Build host (linux)
         run: go build -o host .
+
+  desktop:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --component clippy
+          rustup override set 1.90.0
+
+      - name: Install build libraries and ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg pkg-config libx11-dev libxkbcommon-dev \
+            libwayland-dev libxcursor-dev libxi-dev libxrandr-dev libxdo-dev libxtst-dev libudev-dev \
+            libxkbcommon-x11-0 xvfb xauth xdotool
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --release --all-targets --locked -- -D warnings
+
+      - name: Test DrawSplay Desktop
+        run: cargo test --release --locked
+
+      - name: Test X11 scroll forwarding
+        run: xvfb-run -a env DD_TEST_X11_SCROLL=1 cargo test --release --locked -p dd-client --test x11_scroll -- --ignored
 
   host-windows:
     runs-on: windows-latest
@@ -57,15 +128,48 @@ jobs:
         working-directory: host
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: host/go.mod
 
+      - name: Setup NuGet
+        uses: nuget/setup-nuget@d105a947828025cd7a980103c35ba2bfae586d0f # v2.0.2
+
+      - name: Build the Windows virtual display driver
+        working-directory: .
+        run: .\scripts\build-idd-driver.ps1 -RequireBuild
+
       - name: Test host (windows)
         run: go test ./...
+
+      - name: Build the Windows native media helper
+        working-directory: native/drawsplay-media-win
+        run: .\build.ps1
+
+  native-linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native/drawsplay-media
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install build libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential libva-dev libx11-dev libxext-dev \
+            libxdamage-dev libxfixes-dev zlib1g-dev
+
+      - name: Build the Linux native media helper (warnings are errors)
+        run: make CC="cc -Werror"
 
   android:
     runs-on: ubuntu-latest
@@ -74,19 +178,21 @@ jobs:
         working-directory: android
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Setup Go for Wi-Fi pairing interoperability
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: host/go.mod
 
@@ -114,13 +220,13 @@ jobs:
         run: ./gradlew :app:bundleRelease
 
       - name: Upload Android artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: DrawSplay-APK
           path: android/app/build/outputs/apk/release/app-release.apk
 
       - name: Upload Android App Bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: DrawSplay-AAB
           path: android/app/build/outputs/bundle/release/app-release.aab

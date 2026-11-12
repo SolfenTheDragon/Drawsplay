@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -84,7 +83,7 @@ type wlExtConfig struct {
 	Transform    int
 	Scale        float64
 	// Moves keep the desktop's origin at 0,0 (see wlExtBackend.Anchored).
-	Moves []x11OutputPos
+	Moves []outputPos
 }
 
 // wlExtBackend is a compositor's way of making virtual outputs.
@@ -119,7 +118,7 @@ type wlExtHandle interface {
 	MapTablet() error
 	// Remove removes the output, moves the other displays, and switches the
 	// fallback display on when it is not empty.
-	Remove(moves []x11OutputPos, fallback string) error
+	Remove(moves []outputPos, fallback string) error
 }
 
 var errWlExtSize = errors.New("the output does not show the configured resolution")
@@ -133,17 +132,13 @@ type wlExtLook struct {
 // wlExt holds the virtual output between sessions. mu also serializes every
 // layout change the host makes.
 var wlExt struct {
-	mu      sync.Mutex
-	gen     uint64
-	claimed bool
-	timer   *time.Timer
+	heldOutput
 	held    wlExtHandle
 	backend wlExtBackend
 	// seen is where the user last had the held output; placement and look
 	// are where and how the last one was when it went (process lifetime).
-	seen, placement *x11Placement
+	seen, placement *displayPlacement
 	look            *wlExtLook
-	exiting         bool
 }
 
 func chanClosed(c <-chan struct{}) bool {
@@ -155,33 +150,17 @@ func chanClosed(c <-chan struct{}) bool {
 	}
 }
 
-func stopWlExtReleaseTimerLocked() {
-	if wlExt.timer != nil {
-		wlExt.timer.Stop()
-		wlExt.timer = nil
-	}
-}
-
 // releaseWlExtLocked ends session gen's claim and removes the output after
 // wlExtReleaseGrace unless another session claims it first.
 func releaseWlExtLocked(gen uint64) {
-	if gen != wlExt.gen {
+	if !wlExt.unclaimLocked(gen) {
 		return
 	}
-	wlExt.claimed = false
-	stopWlExtReleaseTimerLocked()
+	wlExt.stopTimerLocked()
 	if wlExt.exiting || wlExt.held == nil {
 		return
 	}
-	wlExt.timer = time.AfterFunc(wlExtReleaseGrace, func() {
-		wlExt.mu.Lock()
-		defer wlExt.mu.Unlock()
-		if gen != wlExt.gen || wlExt.claimed || wlExt.exiting {
-			return
-		}
-		wlExt.timer = nil
-		stopHeldWlExtLocked()
-	})
+	wlExt.afterLocked(gen, wlExtReleaseGrace, stopHeldWlExtLocked)
 }
 
 // releaseWlExtOnExit removes the virtual output, which would otherwise stay
@@ -189,15 +168,14 @@ func releaseWlExtLocked(gen uint64) {
 func releaseWlExtOnExit() {
 	wlExt.mu.Lock()
 	defer wlExt.mu.Unlock()
-	wlExt.exiting = true
-	stopWlExtReleaseTimerLocked()
+	wlExt.exitLocked()
 	stopHeldWlExtLocked()
 }
 
 // planExtendRelease plans putting the other displays back when the output
 // goes: back to the origin when anchored, or the fallback display switched
 // on when no other display is on.
-func planExtendRelease(st wlExtState, name string, anchored bool) (moves []x11OutputPos, fallback string) {
+func planExtendRelease(st wlExtState, name string, anchored bool) (moves []outputPos, fallback string) {
 	var rects []displayRect
 	var others []wlExtOutput
 	for _, o := range st.Outputs {
@@ -216,7 +194,7 @@ func planExtendRelease(st wlExtState, name string, anchored bool) (moves []x11Ou
 	}
 	if b := boundsOf(rects); anchored && (b.X != 0 || b.Y != 0) {
 		for _, o := range others {
-			moves = append(moves, x11OutputPos{Name: o.Name, X: o.Rect.X - b.X, Y: o.Rect.Y - b.Y})
+			moves = append(moves, outputPos{Name: o.Name, X: o.Rect.X - b.X, Y: o.Rect.Y - b.Y})
 		}
 	}
 	return moves, ""
@@ -230,7 +208,7 @@ func stopHeldWlExtLocked() {
 		return
 	}
 	wlExt.held = nil
-	var moves []x11OutputPos
+	var moves []outputPos
 	fallback := ""
 	if !chanClosed(hd.Closed()) {
 		if st, err := hd.State(); err == nil {
@@ -255,6 +233,7 @@ func stopHeldWlExtLocked() {
 		log.Printf("%s extended display %s: could not remove it: %v", b.Label(), hd.Name(), err)
 		return
 	}
+	releaseDisplayClaim(displayClaimOutput, hd.Name())
 	log.Printf("%s extended display %s removed", b.Label(), hd.Name())
 }
 
@@ -340,6 +319,7 @@ func ensureWlExtLocked(b wlExtBackend, w, h int) error {
 			return err
 		}
 		wlExt.held, wlExt.backend, wlExt.seen = hd, b, nil
+		claimDisplay(displayClaimOutput, hd.Name())
 		log.Printf("%s extended display %s created", b.Label(), hd.Name())
 		err = arrangeWlExtLocked(b, hd, w, h, true)
 		if err == nil {
@@ -375,7 +355,7 @@ type wlExtObserved struct {
 	Transform       int
 	Scale           float64
 	Mirrored        bool
-	Placement       x11Placement
+	Placement       displayPlacement
 	Placed          bool
 	// Outputs names the other outputs; a change is a hotplug.
 	Outputs string
@@ -440,21 +420,9 @@ func mapWlExtTablet(label string, hd wlExtHandle) bool {
 
 // wlExtDisplay is one session's use of the virtual output.
 type wlExtDisplay struct {
-	gen     uint64
+	extendSession
 	backend wlExtBackend
-
-	mu         sync.Mutex
-	held       wlExtHandle
-	target     captureTarget
-	reqW, reqH int // configured resolution
-	// recovering: Recover is replacing the output, so its removal does not
-	// restart the session.
-	recovering bool
-
-	swapped   chan struct{} // Recover replaced held
-	stopWatch chan struct{}
-	watchDone chan struct{}
-	closeOnce sync.Once
+	held    wlExtHandle // guarded by mu
 }
 
 // newWlExtDisplay creates (or keeps, after a quick reconnect) the virtual
@@ -466,14 +434,10 @@ func newWlExtDisplay(b wlExtBackend, opts videoOptions) (*wlExtDisplay, error) {
 	}
 	wlExt.mu.Lock()
 	defer wlExt.mu.Unlock()
-	if wlExt.exiting {
-		return nil, errors.New("host is shutting down")
+	gen, err := wlExt.claimLocked()
+	if err != nil {
+		return nil, err
 	}
-	wlExt.gen++
-	gen := wlExt.gen
-	wlExt.claimed = true
-	stopWlExtReleaseTimerLocked()
-
 	if err := ensureWlExtLocked(b, w, h); err != nil {
 		releaseWlExtLocked(gen)
 		return nil, err
@@ -490,25 +454,10 @@ func newWlExtDisplay(b wlExtBackend, opts videoOptions) (*wlExtDisplay, error) {
 		releaseWlExtLocked(gen)
 		return nil, err
 	}
-	d := &wlExtDisplay{
-		gen:       gen,
-		backend:   b,
-		held:      hd,
-		target:    t,
-		reqW:      w,
-		reqH:      h,
-		swapped:   make(chan struct{}, 1),
-		stopWatch: make(chan struct{}),
-		watchDone: make(chan struct{}),
-	}
+	d := &wlExtDisplay{backend: b, held: hd}
+	d.init(gen, b.Label()+" extended display", w, h, t)
 	go d.watch(obs)
 	return d, nil
-}
-
-func (d *wlExtDisplay) Target() captureTarget {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.target
 }
 
 func (d *wlExtDisplay) Description() string {
@@ -547,21 +496,14 @@ func (d *wlExtDisplay) Refresh() (captureTarget, error) {
 func (d *wlExtDisplay) Recover() error {
 	wlExt.mu.Lock()
 	defer wlExt.mu.Unlock()
-	if wlExt.exiting {
-		return errors.New("host is shutting down")
+	if err := wlExt.recoverableLocked(d.gen, "extended display"); err != nil {
+		return err
 	}
-	if d.gen != wlExt.gen {
-		return errors.New("a newer session uses the extended display")
-	}
+	w, h := d.beginRecover()
+	defer d.endRecover()
 	d.mu.Lock()
-	w, h, old := d.reqW, d.reqH, d.held
-	d.recovering = true
+	old := d.held
 	d.mu.Unlock()
-	defer func() {
-		d.mu.Lock()
-		d.recovering = false
-		d.mu.Unlock()
-	}()
 	if wlExt.held == old {
 		stopHeldWlExtLocked()
 	}
@@ -580,17 +522,12 @@ func (d *wlExtDisplay) Recover() error {
 	d.mu.Lock()
 	d.held, d.target = hd, t
 	d.mu.Unlock()
-	select {
-	case d.swapped <- struct{}{}:
-	default:
-	}
+	d.notifySwapped()
 	return nil
 }
 
 func (d *wlExtDisplay) Close() {
-	d.closeOnce.Do(func() {
-		close(d.stopWatch)
-		<-d.watchDone
+	d.close(func() {
 		wlExt.mu.Lock()
 		releaseWlExtLocked(d.gen)
 		wlExt.mu.Unlock()
@@ -675,7 +612,7 @@ func (d *wlExtDisplay) watch(base wlExtObserved) {
 		reloaded := obs.Reloads != base.Reloads
 		// A hotplug or a configuration reload sets the output up by the
 		// compositor's rules; only other changes are the user's.
-		d.saveUserResolution(obs, reloaded || base.Outputs != obs.Outputs)
+		d.saveUserResolution(obs.Active, obs.W, obs.H, reloaded || base.Outputs != obs.Outputs)
 		base = obs
 		if obs.Placed {
 			p := obs.Placement
@@ -696,52 +633,13 @@ func (d *wlExtDisplay) watch(base wlExtObserved) {
 			d.mu.Unlock()
 			continue
 		}
-		t := d.target
-		restart := !obs.Active || obs.W&^1 != t.Width || obs.H&^1 != t.Height || obs.Mirrored != t.Mirrored
-		moved := !restart && obs.Rect != t.Rect
-		if moved {
-			d.target.Rect = obs.Rect
-		}
+		restart := d.applyChangeLocked(hd.Name(), observedOutput{
+			Present: obs.Present, Active: obs.Active, Mirrored: obs.Mirrored, W: obs.W, H: obs.H, Rect: obs.Rect,
+		})
 		d.mu.Unlock()
-		switch {
-		case moved:
-			log.Printf("%s extended display %s moved to %dx%d+%d+%d", label, hd.Name(), obs.Rect.W, obs.Rect.H, obs.Rect.X, obs.Rect.Y)
-		case !restart:
-		case !obs.Present:
-			log.Printf("%s extended display %s was removed; restarting video session", label, hd.Name())
-		case !obs.Active:
-			log.Printf("%s extended display %s was switched off; restarting video session", label, hd.Name())
-		case obs.Mirrored != t.Mirrored:
-			log.Printf("%s extended display %s mirroring changed; restarting video session", label, hd.Name())
-		default:
-			log.Printf("%s extended display %s is now %dx%d; restarting video session", label, hd.Name(), obs.W, obs.H)
-		}
 		if restart {
 			restartActiveVideoSession()
 			return
 		}
 	}
-}
-
-// saveUserResolution saves the output's upright size as the configured
-// resolution when the user picked another, so the next session keeps it.
-// auto: the compositor set the size by itself.
-func (d *wlExtDisplay) saveUserResolution(obs wlExtObserved, auto bool) {
-	w, h := obs.W, obs.H
-	d.mu.Lock()
-	reqW, reqH := d.reqW, d.reqH
-	if !obs.Active || w <= 0 || h <= 0 || (w == reqW && h == reqH) || auto {
-		d.mu.Unlock()
-		return
-	}
-	d.reqW, d.reqH = w, h
-	d.mu.Unlock()
-	if globalSettingsStore == nil {
-		return
-	}
-	if err := globalSettingsStore.updateResolution(w, h); err != nil {
-		log.Printf("Could not save the %s extended display resolution %dx%d: %v", d.backend.Label(), w, h, err)
-		return
-	}
-	log.Printf("%s extended display resolution changed in the display settings (%dx%d -> %dx%d); saved as the configured resolution", d.backend.Label(), reqW, reqH, w, h)
 }

@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"drawsplay/host/internal/h264"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -44,7 +45,7 @@ func auPipelineTestStream() auTestStream {
 
 // auStampOffset locates the write-time stamp in a slice NAL unit.
 func auStampOffset(unit []byte) int {
-	return annexBNALHeaderOffset(unit) + 2
+	return h264.HeaderOffset(unit) + 2
 }
 
 // TestAccessUnitWriterProcess is not a real test: it is the stand-in encoder
@@ -121,14 +122,8 @@ func TestRunEncodePipelineSendsFramesWithTheirLastWrite(t *testing.T) {
 	prevDisabled := auEarlyFlushDisabled.Load()
 	auEarlyFlushDisabled.Store(false)
 	t.Cleanup(func() { auEarlyFlushDisabled.Store(prevDisabled) })
-	videoStatusMu.Lock()
-	prevStatus := videoStatus
-	videoStatusMu.Unlock()
-	t.Cleanup(func() {
-		videoStatusMu.Lock()
-		videoStatus = prevStatus
-		videoStatusMu.Unlock()
-	})
+	prevStatus := videoStatus.Get()
+	t.Cleanup(func() { videoStatus.Set(prevStatus) })
 
 	spec := pipelineSpec{
 		Name:         "au-writer",
@@ -142,7 +137,7 @@ func TestRunEncodePipelineSendsFramesWithTheirLastWrite(t *testing.T) {
 	out := &packetRecorder{}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	produced, err := runEncodePipeline(ctx, out, opts, spec, &sessionMonitor{}, newRateController(opts.Bitrate),
+	produced, err := runEncodePipeline(ctx, streamVideoSink{out}, opts, spec, &sessionMonitor{}, newRateController(opts.Bitrate),
 		newTemporalController(), false, newSessionCongestionGate(target))
 	if !produced || !errors.Is(err, io.EOF) {
 		t.Fatalf("runEncodePipeline = %v, %v; want output, then EOF", produced, err)

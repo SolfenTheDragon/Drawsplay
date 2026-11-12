@@ -3,13 +3,11 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,17 +16,13 @@ import (
 const (
 	maxPacketBytes                      = 64 * 1024
 	maxConcurrentConnectionsPerListener = 1
-	initialHelloTimeout                 = 5 * time.Second
 )
+
+// initialHelloTimeout is how long a new input connection may take to send its
+// hello (a variable so tests can shorten it).
+var initialHelloTimeout = 5 * time.Second
 
 var globalInputConnID atomic.Uint64
-
-type inputWireMode int
-
-const (
-	inputWireLegacyJSON inputWireMode = iota
-	inputWireMuxV1
-)
 
 func runInputListener(ctx context.Context, ln net.Listener, store *settingsStore, transport string) {
 	events := newEventLogger(eventLogBuffer)
@@ -80,8 +74,7 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 	defer conn.Close()
 	registerInputConnection(id, conn)
 	defer unregisterInputConnection(id)
-	defer unbindSessionDevice(id)
-	defer unbindSessionClientIdentity(id)
+	defer unbindClientSession(id)
 	inputOwned := false
 	defer func() {
 		if inputOwned {
@@ -103,11 +96,19 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 		log.Printf("Read deadline error (session=%d): %v", id, err)
 		return
 	}
-	mode, err := detectInputWireMode(reader)
+	muxFramed, err := startsWithMuxFrame(reader)
 	if err != nil {
 		log.Printf("Connection probe failed (session=%d): %v", id, err)
 		return
 	}
+	if !muxFramed {
+		// Every DrawSplay tablet app frames its input; a stream that does not
+		// is an app from before mux framing or not a DrawSplay app at all.
+		log.Printf("Input connection without mux framing refused (session=%d): the tablet app is too old or not DrawSplay", id)
+		setOperationalWarning("tablet-app", "A tablet tried to connect with an app too old for this host. Update DrawSplay on the tablet.")
+		return
+	}
+	setOperationalWarning("tablet-app", "")
 	if err := conn.SetReadDeadline(time.Time{}); err != nil {
 		log.Printf("Read deadline reset error (session=%d): %v", id, err)
 		return
@@ -123,18 +124,8 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 		writeMu.Lock()
 		defer writeMu.Unlock()
 		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		switch mode {
-		case inputWireMuxV1:
-			err = writeMuxFrame(conn, muxFrame{
-				StreamID: muxStreamControl,
-				Flags:    0,
-				Seq:      txSeq,
-				Payload:  payload,
-			})
-			txSeq++
-		default:
-			_, err = conn.Write(append(payload, '\n'))
-		}
+		err = writeMuxFrame(conn, muxFrame{StreamID: muxStreamControl, Seq: txSeq, Payload: payload})
+		txSeq++
 		return err == nil
 	}
 
@@ -148,23 +139,13 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			log.Printf("Display-preference clear push failed (session=%d)", id)
 		}
 	}
-	sendSessionPolicy := func(keepAlive bool, penPrediction bool, penInkPreview bool, videoScaling string, wifiEnabled bool, wifiAuthToken string) {
-		tlsRequired, tlsFP := currentWiFiPolicyTLS()
-		clientWiFiEnabled := wifiEnabled && tlsRequired && strings.TrimSpace(tlsFP) != ""
-		clientWiFiToken := ""
-		if clientWiFiEnabled {
-			clientWiFiToken = wifiAuthToken
-		}
+	sendSessionPolicy := func(keepAlive bool, penPrediction bool, penInkPreview bool, videoScaling string) {
 		if !writeControl(hostSessionPolicyMsg{
 			Type:                  "sessionPolicy",
 			KeepAliveOnBackground: keepAlive,
 			PenPrediction:         penPrediction,
 			PenInkPreview:         penInkPreview,
 			VideoScaling:          videoScaling,
-			WifiEnabled:           clientWiFiEnabled,
-			WifiAuthToken:         clientWiFiToken,
-			WifiTLSRequired:       tlsRequired,
-			WifiTLSFingerprint:    tlsFP,
 		}) {
 			log.Printf("Session-policy push failed (session=%d)", id)
 		}
@@ -174,23 +155,11 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 
 	helloSeen := false
 	onMsg := func(msg packet) bool {
-		msg.normalizeAliases()
-		switch msg.Type {
+		switch msg.kind() {
 		case "hello":
 			if helloSeen {
 				log.Printf("Duplicate hello ignored (session=%d)", id)
 				return true
-			}
-			if want, protected := transportAuthToken(store.get(), transport); protected {
-				got := strings.TrimSpace(msg.AuthToken)
-				if want == "" {
-					log.Printf("%s hello rejected (session=%d): auth token unavailable", transportDisplayName(transport), id)
-					return false
-				}
-				if len(got) != len(want) || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-					log.Printf("%s hello rejected (session=%d): auth token mismatch", transportDisplayName(transport), id)
-					return false
-				}
 			}
 			if !hostSessionOwnership.acquireInput(transport) {
 				log.Printf(
@@ -201,6 +170,10 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			}
 			inputOwned = true
 			helloSeen = true
+			// Only a valid hello lifts the initial deadline: a peer that sends
+			// anything else and then goes quiet must not keep the single input
+			// slot (see initialHelloTimeout).
+			_ = conn.SetReadDeadline(time.Time{})
 			handleHello(msg, id)
 			if msg.HostPrefs {
 				if !writeControl(hostInfoMsg{Type: "hostInfo", HostID: hostID(), HostName: hostDisplayName()}) {
@@ -210,11 +183,7 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			subscribeModeChanges(id, sendDisplayMode)
 			subscribeModePreferenceClears(id, sendClearDisplayMode)
 			cfg := store.get()
-			if transport == "usb" || transport == "wifi" {
-				sendSessionPolicy(cfg.KeepAliveOnBackground, cfg.PenPrediction, cfg.PenInkPreview, cfg.VideoScaling, cfg.WifiEnabled, cfg.WifiAuthToken)
-			} else {
-				sendSessionPolicy(cfg.KeepAliveOnBackground, cfg.PenPrediction, cfg.PenInkPreview, cfg.VideoScaling, false, "")
-			}
+			sendSessionPolicy(cfg.KeepAliveOnBackground, cfg.PenPrediction, cfg.PenInkPreview, cfg.VideoScaling)
 			return true
 		case "modePrefs":
 			log.Printf("Tablet remembered mode (session=%d): %dx%d@%d", id, msg.PrefWidth, msg.PrefHeight, msg.PrefFPS)
@@ -250,81 +219,43 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			}
 			return true
 		default:
-			log.Printf("Unknown packet type (session=%d): %s", id, msg.Type)
+			log.Printf("Unknown packet type (session=%d): %s", id, msg.kind())
 			return true
 		}
 	}
 
-	switch mode {
-	case inputWireMuxV1:
-		if err := conn.SetReadDeadline(time.Now().Add(initialHelloTimeout)); err != nil {
-			log.Printf("Read deadline error (session=%d): %v", id, err)
-			return
-		}
-		for {
-			frame, err := readMuxFrame(reader)
-			if err != nil {
-				if ne, ok := err.(net.Error); ok && ne.Timeout() && !helloSeen {
-					log.Printf("Initial hello timeout, closing connection (session=%d)", id)
-					return
-				}
-				if errors.Is(err, net.ErrClosed) {
-					break
-				}
-				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-					return
-				}
-				if err.Error() == "EOF" {
-					break
-				}
-				log.Printf("Read error (session=%d): %v", id, err)
-				return
-			}
-			if !helloSeen {
-				_ = conn.SetReadDeadline(time.Time{})
-			}
-			if frame.StreamID != muxStreamInput && frame.StreamID != muxStreamControl {
-				continue
-			}
-			var msg packet
-			if err := json.Unmarshal(frame.Payload, &msg); err != nil {
-				log.Printf("Decode error (session=%d): %v", id, err)
-				return
-			}
-			if !onMsg(msg) {
-				return
-			}
-		}
-	default:
-		if err := conn.SetReadDeadline(time.Now().Add(initialHelloTimeout)); err != nil {
-			log.Printf("Read deadline error (session=%d): %v", id, err)
-			return
-		}
-		scanner := bufio.NewScanner(reader)
-		scanner.Buffer(make([]byte, 0, 8*1024), maxPacketBytes)
-		for scanner.Scan() {
-			if !helloSeen {
-				_ = conn.SetReadDeadline(time.Time{})
-			}
-			var msg packet
-			if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
-				log.Printf("Decode error (session=%d): %v", id, err)
-				return
-			}
-			if !onMsg(msg) {
-				return
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			if errors.Is(err, bufio.ErrTooLong) {
-				log.Printf("Packet exceeded %d bytes, closing connection (session=%d)", maxPacketBytes, id)
-				return
-			}
+	if err := conn.SetReadDeadline(time.Now().Add(initialHelloTimeout)); err != nil {
+		log.Printf("Read deadline error (session=%d): %v", id, err)
+		return
+	}
+	for {
+		frame, err := readMuxFrame(reader)
+		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() && !helloSeen {
 				log.Printf("Initial hello timeout, closing connection (session=%d)", id)
 				return
 			}
+			if errors.Is(err, net.ErrClosed) {
+				break
+			}
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				return
+			}
+			if err.Error() == "EOF" {
+				break
+			}
 			log.Printf("Read error (session=%d): %v", id, err)
+			return
+		}
+		if frame.StreamID != muxStreamInput && frame.StreamID != muxStreamControl {
+			continue
+		}
+		var msg packet
+		if err := json.Unmarshal(frame.Payload, &msg); err != nil {
+			log.Printf("Decode error (session=%d): %v", id, err)
+			return
+		}
+		if !onMsg(msg) {
 			return
 		}
 	}
@@ -343,87 +274,25 @@ func underlyingTCPConn(conn net.Conn) *net.TCPConn {
 	return nil
 }
 
-func detectInputWireMode(reader *bufio.Reader) (inputWireMode, error) {
+// startsWithMuxFrame reports whether the stream opens with the mux magic.
+func startsWithMuxFrame(reader *bufio.Reader) (bool, error) {
 	hdr, err := reader.Peek(2)
 	if err != nil {
-		return inputWireLegacyJSON, err
+		return false, err
 	}
-	if len(hdr) == 2 && hdr[0] == byte(usbMuxMagic>>8) && hdr[1] == byte(usbMuxMagic&0xFF) {
-		return inputWireMuxV1, nil
-	}
-	return inputWireLegacyJSON, nil
+	return hdr[0] == byte(usbMuxMagic>>8) && hdr[1] == byte(usbMuxMagic&0xFF), nil
 }
 
 func handleHello(msg packet, id uint64) {
-	platform, clientType, clientVersion := normalizeClientIdentity(msg)
-	device := strings.TrimSpace(msg.Device)
-	if device == "" {
-		device = "unknown-client"
-	}
-	bindSessionDevice(id, device)
-	bindSessionClientIdentity(id, clientIdentity{
-		Platform:     platform,
-		Type:         clientType,
-		Version:      clientVersion,
-		NativeWidth:  msg.ScreenWidth,
-		NativeHeight: msg.ScreenHeight,
-		RefreshRates: msg.ScreenRefreshRates,
-
-		RecommendedWidth:  msg.RecommendedWidth,
-		RecommendedHeight: msg.RecommendedHeight,
-		RecommendedReason: msg.RecommendedReason,
-		PrefWidth:         msg.PrefWidth,
-		PrefHeight:        msg.PrefHeight,
-		PrefFPS:           msg.PrefFPS,
-		PrefsPending:      msg.HostPrefs,
-	})
+	bindClientSession(id, newClientSession(msg))
+	c, _ := clientSessionByID(id)
 	log.Printf(
 		"HELLO session=%d device=%s platform=%s type=%s clientVersion=%s android=%s app=%s screen=%dx%d refreshRates=%v recommendedMax=%dx%d (%s) pref=%dx%d@%d codecs=%v ts=%d",
-		id,
-		device,
-		platform,
-		clientType,
-		clientVersion,
-		msg.Android,
-		msg.App,
-		msg.ScreenWidth,
-		msg.ScreenHeight,
-		msg.ScreenRefreshRates,
-		msg.RecommendedWidth,
-		msg.RecommendedHeight,
-		msg.RecommendedReason,
-		msg.PrefWidth,
-		msg.PrefHeight,
-		msg.PrefFPS,
-		msg.VideoCodecs,
-		msg.Timestamp,
+		id, c.Device, c.Identity.Platform, c.Identity.Type, c.Identity.Version, msg.Android, msg.App,
+		msg.ScreenWidth, msg.ScreenHeight, msg.ScreenRefreshRates,
+		msg.RecommendedWidth, msg.RecommendedHeight, msg.RecommendedReason,
+		msg.PrefWidth, msg.PrefHeight, msg.PrefFPS, c.Codecs, msg.Timestamp,
 	)
-	publishClientVideoCodecs(msg.VideoCodecs)
-	publishClientVideoFeatures(msg.VideoFeatures)
-}
-
-func normalizeClientIdentity(msg packet) (string, string, string) {
-	platform := strings.ToLower(strings.TrimSpace(msg.ClientOS))
-	if platform == "" {
-		if strings.TrimSpace(msg.Android) != "" {
-			platform = "android"
-		} else {
-			platform = "unknown"
-		}
-	}
-	clientType := strings.ToLower(strings.TrimSpace(msg.ClientType))
-	if clientType == "" {
-		if platform == "android" {
-			clientType = "tablet"
-		} else {
-			clientType = "client"
-		}
-	}
-	version := strings.TrimSpace(msg.ClientVer)
-	if version == "" {
-		version = strings.TrimSpace(msg.App)
-	}
-	return platform, clientType, version
 }
 
 func handleInput(msg *packet, id uint64, events *eventLogger, inj injector, store *settingsStore) {
@@ -432,8 +301,8 @@ func handleInput(msg *packet, id uint64, events *eventLogger, inj injector, stor
 		return
 	}
 	if msg.Width > 0 && msg.Height > 0 {
-		device := sessionDevice(id)
-		cal := calibrationForDevice(device)
+		c, _ := clientSessionByID(id)
+		cal := calibrationForDevice(c.Device)
 		x := msg.X / float32(msg.Width)
 		y := msg.Y / float32(msg.Height)
 		x, y = cal.apply(x, y)

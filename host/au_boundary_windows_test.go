@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"drawsplay/host/internal/h264"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -43,7 +44,7 @@ func auPipelineTestStream() auTestStream {
 }
 
 func auStampOffset(unit []byte) int {
-	return annexBNALHeaderOffset(unit) + 2
+	return h264.HeaderOffset(unit) + 2
 }
 
 // TestAccessUnitWriterProcess is not a real test: it is the stand-in encoder
@@ -110,20 +111,14 @@ func runAUTestPipeline(t *testing.T, spec pipelineSpec, timeout time.Duration) (
 	prevDisabled := auEarlyFlushDisabled.Load()
 	auEarlyFlushDisabled.Store(false)
 	t.Cleanup(func() { auEarlyFlushDisabled.Store(prevDisabled) })
-	videoStatusMu.Lock()
-	prevStatus := videoStatus
-	videoStatusMu.Unlock()
-	t.Cleanup(func() {
-		videoStatusMu.Lock()
-		videoStatus = prevStatus
-		videoStatusMu.Unlock()
-	})
+	prevStatus := videoStatus.Get()
+	t.Cleanup(func() { videoStatus.Set(prevStatus) })
 	target := captureTarget{Kind: captureDDAGrab, Width: 1920, Height: 1080}
 	opts := videoOptions{Codec: "h264", FPS: 60, Bitrate: "24M"}
 	out := &packetRecorder{}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	produced, err := runEncodePipeline(ctx, out, opts, spec, &sessionMonitor{}, newRateController(opts.Bitrate),
+	produced, err := runEncodePipeline(ctx, streamVideoSink{out}, opts, spec, &sessionMonitor{}, newRateController(opts.Bitrate),
 		newTemporalController(), false, newSessionCongestionGate(target))
 	return out, produced, err
 }
@@ -264,7 +259,7 @@ func TestRunEncodePipelineEarlyEmissionWithRealFFmpeg(t *testing.T) {
 	var audAt time.Time
 	var slices, early, big int
 	for _, n := range out.nals() {
-		h := annexBNALHeaderOffset(n.payload)
+		h := h264.HeaderOffset(n.payload)
 		if h < 0 {
 			continue
 		}

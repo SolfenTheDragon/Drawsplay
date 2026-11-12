@@ -9,16 +9,15 @@ package main
 // Data flow per session:
 //
 //	ffmpeg stdout (Annex-B byte stream)
-//	  -> splitAnnexB (reassemble into complete NAL units; accessUnitTracker
+//	  -> h264.Split (reassemble into complete NAL units; accessUnitTracker
 //	     sends a frame's last unit as soon as the frame's last write is read)
-//	  -> writeVideoPacket (type+length framing, see protocol.go)
-//	  -> TCP -> adb reverse -> tablet MediaCodec
+//	  -> videoSink.WritePacket (video_sink.go: type+length framing on USB,
+//	     Wi-Fi frames on paired Wi-Fi)
+//	  -> transport -> tablet MediaCodec
 
 import (
-	"bufio"
 	"context"
-	"crypto/subtle"
-	"encoding/binary"
+	"drawsplay/host/internal/h264"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,8 +61,6 @@ const (
 	// Only allow reconnect-triggered handoff when the active session has
 	// been idle (no encoded output) for at least this long.
 	videoReconnectHandoffMinSilence = 3 * time.Second
-	transportVideoAuthTimeout       = 5 * time.Second
-	transportVideoAuthMaxBytes      = 4 * 1024
 )
 
 // videoOptions carries the user-tunable video settings from main.
@@ -91,16 +88,11 @@ type videoOptions struct {
 	// baseline, one slice per picture. False (the default) leaves every
 	// encoder setting exactly as before.
 	WiFiBaseline bool
-}
-
-// runVideoListener accepts video sessions until ctx is cancelled. If the
-// port is unavailable the video feature is disabled but input keeps working.
-// Each session takes a fresh settings snapshot from the store, so web UI
-// changes apply to the next connection (and the UI restarts the active
-// session on save via restartActiveVideoSession).
-func runVideoListener(ctx context.Context, store *settingsStore) {
-	addr := fmt.Sprintf("127.0.0.1:%d", videoPort)
-	runVideoListenerAt(ctx, store, addr, "usb", nil)
+	// Client is the tablet's session as it was when this video session
+	// started; the stream reads its codecs and features only from here.
+	Client clientSession
+	// HostCodecs are the codecs this host's ffmpeg can encode, preferred first.
+	HostCodecs []string
 }
 
 func runVideoListenerAt(ctx context.Context, store *settingsStore, addr string, transport string, listenerFactory func(string) (net.Listener, error)) {
@@ -141,13 +133,6 @@ func runVideoListenerAt(ctx context.Context, store *settingsStore, addr string, 
 }
 
 func handleAcceptedVideoConnection(ctx context.Context, conn net.Conn, store *settingsStore, transport string) {
-	if token, protected := transportAuthToken(store.get(), transport); protected {
-		if !authorizeTransportVideo(conn, token) {
-			log.Printf("%s video authentication failed for %s", transportDisplayName(transport), conn.RemoteAddr())
-			_ = conn.Close()
-			return
-		}
-	}
 	if !acquireVideoSession(transport) {
 		_ = conn.Close()
 		return
@@ -239,8 +224,9 @@ func serveVideoSession(ctx context.Context, conn net.Conn, store *settingsStore,
 	// its video socket connects; the display must be created from it.
 	waitForClientIdentity(sessionCtx, clientHelloWait)
 	opts := store.get().videoOptions()
-	applyClientDisplayDefaults(&opts, activeClientIdentity())
-	if ident := activeClientIdentity(); strings.EqualFold(ident.Platform, "android") && opts.TemporalLayering {
+	opts.Client = activeClientSession()
+	applyClientDisplayDefaults(&opts, opts.Client.Identity)
+	if strings.EqualFold(opts.Client.Identity.Platform, "android") && opts.TemporalLayering {
 		// Temporal enhancement-layer dropping can make text look unstable on
 		// Android tablet decode paths; prefer cleaner glyph edges there.
 		opts.TemporalLayering = false
@@ -250,9 +236,6 @@ func serveVideoSession(ctx context.Context, conn net.Conn, store *settingsStore,
 		opts.WiFiBaseline = true
 		opts.NativeMedia = "off"
 		opts.TemporalLayering = false
-	}
-	if cap := transportMaxBitrate(store.get(), transport); cap != "" {
-		opts.Bitrate = cappedBitrate(opts.Bitrate, cap)
 	}
 	if err := streamVideo(sessionCtx, conn, opts); err != nil && sessionCtx.Err() == nil {
 		log.Printf("Video session ended: %v", err)
@@ -412,35 +395,22 @@ type videoStatusInfo struct {
 	ResolutionControl string `json:"resolutionControl,omitempty"`
 }
 
-var (
-	videoStatusMu sync.Mutex
-	videoStatus   videoStatusInfo
-)
+var videoStatus latest[videoStatusInfo]
 
 func publishVideoStatus(streaming bool, encoder, bitrate string) {
-	videoStatusMu.Lock()
-	if !streaming {
-		videoStatus = videoStatusInfo{Streaming: false}
-		videoStatusMu.Unlock()
-		return
-	}
-	status := videoStatus
-	status.Streaming = true
-	status.Encoder = encoder
-	status.Bitrate = bitrate
-	videoStatus = status
-	videoStatusMu.Unlock()
+	videoStatus.Update(func(st *videoStatusInfo) {
+		if !streaming {
+			*st = videoStatusInfo{}
+			return
+		}
+		st.Streaming, st.Encoder, st.Bitrate = true, encoder, bitrate
+	})
 }
 
 func publishVideoDisplay(mode, captureKind, description, resolutionControl string) {
-	videoStatusMu.Lock()
-	status := videoStatus
-	status.DisplayMode = mode
-	status.CaptureKind = captureKind
-	status.Display = description
-	status.ResolutionControl = resolutionControl
-	videoStatus = status
-	videoStatusMu.Unlock()
+	videoStatus.Update(func(st *videoStatusInfo) {
+		st.DisplayMode, st.CaptureKind, st.Display, st.ResolutionControl = mode, captureKind, description, resolutionControl
+	})
 }
 
 func displayModeFromTarget(target captureTarget) (mode, captureKind string) {
@@ -478,11 +448,7 @@ func resolutionControlOf(target captureTarget) string {
 	return ""
 }
 
-func currentVideoStatus() videoStatusInfo {
-	videoStatusMu.Lock()
-	defer videoStatusMu.Unlock()
-	return videoStatus
-}
+func currentVideoStatus() videoStatusInfo { return videoStatus.Get() }
 
 const (
 	// Capture recovery stays inside the current client/display session so a
@@ -655,8 +621,8 @@ func isTransientCaptureError(err error) bool {
 // retried with backoff instead of ending the session, so a monitor move
 // only blanks the stream for a moment.
 func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
-	publishHostVideoCodecs(detectedHostVideoCodecs(opts.FFmpeg))
-	opts.Codec = negotiateVideoCodec()
+	opts.HostCodecs = detectedHostVideoCodecs(opts.FFmpeg)
+	opts.Codec = negotiateVideoCodec(opts.HostCodecs, opts.Client.Codecs)
 
 	// Display enumeration can fail transiently while the display topology
 	// is settling (the previous session's virtual display tearing down, a
@@ -699,14 +665,15 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 	if opts.WiFiBaseline {
 		monitor = newWiFiSessionMonitor()
 	}
-	go monitor.runStatsReader(conn)
+	sink, feedback := videoEndpointsFor(conn)
+	go monitor.runFeedback(feedback)
 
 	rc := newRateController(opts.Bitrate)
 	var temporal *temporalController
 	if opts.TemporalLayering {
 		temporal = newTemporalController()
 	}
-	writer := &monitoredWriter{conn: conn, mon: monitor}
+	writer := monitoredSink{sink: sink, conn: conn, mon: monitor}
 	goodSpecs := map[string]bool{}
 	var recovery captureRecoveryState
 	displayRecoveryAttempts := 0
@@ -1004,9 +971,9 @@ func newPipelineTelemetry(specName string) pipelineTelemetry {
 // producing output is reported as an error so the caller can fall back to
 // the next candidate; errRateChanged means the rate controller requested a
 // restart at a new bitrate.
-func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec pipelineSpec, monitor *sessionMonitor, rc *rateController, temporal *temporalController, expectBlackout bool, gate *congestionGate) (bool, error) {
+func runEncodePipeline(ctx context.Context, sink videoSink, opts videoOptions, spec pipelineSpec, monitor *sessionMonitor, rc *rateController, temporal *temporalController, expectBlackout bool, gate *congestionGate) (bool, error) {
 	if spec.Framed {
-		return runFramedPipeline(ctx, w, opts, spec, monitor, rc, temporal, expectBlackout, gate)
+		return runFramedPipeline(ctx, sink, opts, spec, monitor, rc, temporal, expectBlackout, gate)
 	}
 	pipeline, err := startCapturePipeline(ctx, spec)
 	if err != nil {
@@ -1069,35 +1036,35 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 		}
 		cfg, _ := json.Marshal(videoConfigMsg{
 			Codec:      opts.Codec,
-			HostCodecs: hostVideoCodecs,
+			HostCodecs: opts.HostCodecs,
 			Encoder:    encoderName,
 			FPS:        opts.FPS,
 			Bitrate:    opts.Bitrate,
 			Pacing:     "latency",
 		})
-		if err := writeVideoPacket(w, videoPacketConfig, cfg); err != nil {
+		if err := sink.WritePacket(videoPacketConfig, cfg); err != nil {
 			return fmt.Errorf("client write: %w", err)
 		}
 		publishVideoStatus(true, spec.Name, opts.Bitrate)
 		configSent = true
 		return nil
 	}
-	var taggedSPS spsVUICache
+	var taggedSPS h264.VUICache
 	emitUnit := func(unit []byte) error {
 		if err := sendConfig(); err != nil {
 			return err
 		}
 		if sentNALs < 5 {
-			log.Printf("Video NAL[%d] %s: len=%d type=%d", sentNALs, spec.Name, len(unit), h264NALType(unit))
+			log.Printf("Video NAL[%d] %s: len=%d type=%d", sentNALs, spec.Name, len(unit), h264.NALType(unit))
 		}
-		if spec.SignalBT709Limited && h264NALType(unit) == 7 {
-			unit = taggedSPS.rewrite(unit)
+		if spec.SignalBT709Limited && h264.NALType(unit) == 7 {
+			unit = taggedSPS.Rewrite(unit)
 		}
-		if temporal.droppingNonRef() && spec.SupportsTemporalDrop && isDroppableNonRefNAL(unit) {
+		if temporal.droppingNonRef() && spec.SupportsTemporalDrop && h264.IsDroppableNonRef(unit) {
 			telemetry.addDropped(1)
 			return nil
 		}
-		if err := writeVideoPacket(w, videoPacketNAL, unit); err != nil {
+		if err := sink.WritePacket(videoPacketNAL, unit); err != nil {
 			return fmt.Errorf("client write: %w", err)
 		}
 		sentNALs++
@@ -1161,7 +1128,7 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 			}
 			updateCapturePriority()
 			if len(buf) > 0 && !lastChunkAt.IsZero() && time.Since(lastChunkAt) >= nalTailFlushInterval {
-				tail, ok := flushAnnexBTail(buf)
+				tail, ok := h264.FlushTail(buf)
 				if ok {
 					telemetry.addUnits(1)
 					if err := emitUnit(tail); err != nil {
@@ -1216,7 +1183,7 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 						return produced.Load(), splitErr
 					}
 				} else {
-					units, rest = splitAnnexB(buf)
+					units, rest = h264.Split(buf)
 				}
 				telemetry.addUnits(len(units))
 				for _, unit := range units {
@@ -1253,7 +1220,7 @@ func runEncodePipeline(ctx context.Context, w io.Writer, opts videoOptions, spec
 				}
 			}
 			if chunk.err != nil {
-				tail, ok := flushAnnexBTail(buf)
+				tail, ok := h264.FlushTail(buf)
 				if ok {
 					telemetry.addUnits(1)
 					if err := emitUnit(tail); err != nil {
@@ -1302,109 +1269,4 @@ func refreshClass(refreshHz float64) string {
 		return "mid"
 	}
 	return "high"
-}
-
-func h264NALType(nal []byte) int {
-	offset := 0
-	switch {
-	case len(nal) >= 4 && nal[0] == 0 && nal[1] == 0 && nal[2] == 0 && nal[3] == 1:
-		offset = 4
-	case len(nal) >= 3 && nal[0] == 0 && nal[1] == 0 && nal[2] == 1:
-		offset = 3
-	default:
-		return -1
-	}
-	if len(nal) <= offset {
-		return -1
-	}
-	return int(nal[offset] & 0x1F)
-}
-
-// writeVideoPacket frames one payload per the video channel wire format.
-func writeVideoPacket(w io.Writer, pktType byte, payload []byte) error {
-	var header [5]byte
-	header[0] = pktType
-	binary.BigEndian.PutUint32(header[1:], uint32(len(payload)))
-	if len(payload) == 0 {
-		_, err := w.Write(header[:])
-		return err
-	}
-	parts := net.Buffers{header[:], payload}
-	_, err := parts.WriteTo(w)
-	return err
-}
-
-// splitAnnexB extracts complete NAL units from buf. Units keep their leading
-// start code (3- or 4-byte) so the decoder receives standard Annex-B input.
-// The final, possibly incomplete unit is returned as rest — a unit is only
-// "complete" once the next start code (or EOF) is seen.
-func splitAnnexB(buf []byte) (units [][]byte, rest []byte) {
-	starts := make([]int, 0, 8)
-	i := 0
-	for i+2 < len(buf) {
-		if buf[i] == 0 && buf[i+1] == 0 && buf[i+2] == 1 {
-			start := i
-			// Fold a preceding zero into a 4-byte start code, but never
-			// steal the tail byte of the previous unit's start code.
-			if i > 0 && buf[i-1] == 0 && (len(starts) == 0 || starts[len(starts)-1] < i-1) {
-				start = i - 1
-			}
-			starts = append(starts, start)
-			i += 3
-			continue
-		}
-		i++
-	}
-	if len(starts) == 0 {
-		return nil, buf
-	}
-	for j := 0; j+1 < len(starts); j++ {
-		unit := buf[starts[j]:starts[j+1]]
-		units = append(units, unit)
-	}
-	return units, buf[starts[len(starts)-1]:]
-}
-
-// flushAnnexBTail emits a trailing unit when no new bytes have arrived for
-// a short interval, avoiding an extra frame interval of host-side hold-back.
-func flushAnnexBTail(buf []byte) ([]byte, bool) {
-	if len(buf) < 5 {
-		return nil, false
-	}
-	offset := annexBNALHeaderOffset(buf)
-	if offset < 0 {
-		return nil, false
-	}
-	unit := make([]byte, len(buf))
-	copy(unit, buf)
-	return unit, true
-}
-
-func authorizeTransportVideo(conn net.Conn, requiredToken string) bool {
-	want := strings.TrimSpace(requiredToken)
-	if want == "" {
-		return false
-	}
-	_ = conn.SetReadDeadline(time.Now().Add(transportVideoAuthTimeout))
-	reader := bufio.NewReaderSize(conn, transportVideoAuthMaxBytes)
-	line, err := reader.ReadSlice('\n')
-	_ = conn.SetReadDeadline(time.Time{})
-	if err != nil {
-		return false
-	}
-	if len(line) > transportVideoAuthMaxBytes {
-		return false
-	}
-	var msg videoAuthMsg
-	if err := json.Unmarshal(line, &msg); err != nil {
-		return false
-	}
-	if msg.Type != "auth" {
-		return false
-	}
-	got := strings.TrimSpace(msg.AuthToken)
-	if len(got) != len(want) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }

@@ -7,7 +7,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: drawsplay-release-publication
+  cancel-in-progress: false
 
 jobs:
   resolve-tag:
@@ -16,9 +20,10 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
       - name: Checkout release commit and tags
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve release tag
         id: tag
@@ -53,7 +58,7 @@ jobs:
     needs: resolve-tag
     runs-on: windows-latest
     env:
-      DRAWSPLAY_REQUIRE_SIGNING: ${{ vars.DRAWSPLAY_REQUIRE_SIGNING || '0' }}
+      DRAWSPLAY_REQUIRE_SIGNING: "1"
       DRAWSPLAY_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
       DRAWSPLAY_WINDOWS_SIGNING_TIMESTAMP_URL: ${{ secrets.WINDOWS_SIGNING_TIMESTAMP_URL }}
       DRAWSPLAY_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -61,21 +66,23 @@ jobs:
       DRAWSPLAY_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: host/go.mod
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Setup NuGet
-        uses: nuget/setup-nuget@v2
+        uses: nuget/setup-nuget@d105a947828025cd7a980103c35ba2bfae586d0f # v2.0.2
 
       - name: Prepare signing materials
         shell: pwsh
@@ -136,7 +143,7 @@ jobs:
         run: .\scripts\build-release.ps1 -Version $env:RELEASE_TAG
 
       - name: Upload Windows and Android artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows-android-release
           if-no-files-found: error
@@ -151,10 +158,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: host/go.mod
 
@@ -171,10 +180,13 @@ jobs:
           cp drawsplay-tray.png ../release/drawsplay-tray.png
           cp ../packaging/linux/70-drawsplay-aoa.rules ../release/70-drawsplay-aoa.rules
           cp ../packaging/linux/70-drawsplay-drm-connector.rules ../release/70-drawsplay-drm-connector.rules
+          cp ../packaging/linux/99-drawsplay-uinput.rules ../release/99-drawsplay-uinput.rules
+          cp ../packaging/linux/drawsplay-display-helper ../release/drawsplay-display-helper
+          cp ../packaging/linux/com.drawsplay.display-helper.policy ../release/com.drawsplay.display-helper.policy
           chmod +x ../release/install-drawsplay-host-linux.sh ../release/uninstall-drawsplay-host-linux.sh
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux-release
           if-no-files-found: error
@@ -185,32 +197,120 @@ jobs:
             release/drawsplay-tray.png
             release/70-drawsplay-aoa.rules
             release/70-drawsplay-drm-connector.rules
+            release/99-drawsplay-uinput.rules
+            release/drawsplay-display-helper
+            release/com.drawsplay.display-helper.policy
+
+  build-desktop-windows:
+    needs: resolve-tag
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal
+          rustup override set 1.90.0
+
+      - name: Test DrawSplay Desktop
+        run: cargo test --release --locked
+
+      - name: Package DrawSplay Desktop (Windows)
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: .\packaging\package-windows.ps1 -Version $env:RELEASE_TAG
+
+      - name: Upload DrawSplay Desktop (Windows)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-windows
+          if-no-files-found: error
+          path: desktop/dist/DrawSplayDesktop-windows-x86_64-*.zip
+
+  build-desktop-linux:
+    needs: resolve-tag
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal
+          rustup override set 1.90.0
+
+      - name: Install build libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg pkg-config libx11-dev libxkbcommon-dev \
+            libwayland-dev libxcursor-dev libxi-dev libxrandr-dev libxdo-dev libxtst-dev libudev-dev
+
+      - name: Test DrawSplay Desktop
+        run: cargo test --release --locked
+
+      - name: Package DrawSplay Desktop (Linux)
+        env:
+          RELEASE_TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: sh packaging/package-linux.sh "$RELEASE_TAG"
+
+      - name: Upload DrawSplay Desktop (Linux)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-linux
+          if-no-files-found: error
+          path: desktop/dist/DrawSplayDesktop-linux-x86_64-*.tar.gz
 
   publish-release:
     runs-on: ubuntu-latest
-    concurrency:
-      group: drawsplay-release-publication
-      cancel-in-progress: false
+    permissions:
+      contents: write
     needs:
       - resolve-tag
       - build-windows-android
       - build-linux
+      - build-desktop-windows
+      - build-desktop-linux
     steps:
       - name: Checkout release commit and tags
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Download Windows and Android artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: windows-android-release
           path: release
 
       - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: linux-release
+          path: release
+
+      - name: Download DrawSplay Desktop (Windows)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-windows
+          path: release
+
+      - name: Download DrawSplay Desktop (Linux)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-linux
           path: release
 
       - name: Bundle per-platform folders
@@ -221,13 +321,20 @@ jobs:
           win="DrawSplay-windows-${RELEASE_TAG}"
           mkdir "$win"
           cp "drawsplay_installer_${RELEASE_TAG}.exe" DrawSplay.APK "$win/"
+          cp ../LICENSE ../THIRD-PARTY-NOTICES.md "$win/"
+          mkdir -p "$win/drivers/windows/idd"
+          cp ../drivers/windows/idd/LICENSE "$win/drivers/windows/idd/"
           zip -r "${win}.zip" "$win"
 
           lin="DrawSplay-linux-${RELEASE_TAG}"
           mkdir "$lin"
           cp drawsplay-host-linux-amd64 install-drawsplay-host-linux.sh \
             uninstall-drawsplay-host-linux.sh drawsplay-tray.png \
-            70-drawsplay-aoa.rules 70-drawsplay-drm-connector.rules DrawSplay.APK "$lin/"
+            70-drawsplay-aoa.rules 70-drawsplay-drm-connector.rules 99-drawsplay-uinput.rules \
+            drawsplay-display-helper com.drawsplay.display-helper.policy DrawSplay.APK "$lin/"
+          cp ../LICENSE ../THIRD-PARTY-NOTICES.md "$lin/"
+          mkdir -p "$lin/drivers/windows/idd"
+          cp ../drivers/windows/idd/LICENSE "$lin/drivers/windows/idd/"
           chmod +x "$lin/drawsplay-host-linux-amd64" "$lin"/*.sh
           tar -czf "${lin}.tar.gz" "$lin"
 
@@ -239,7 +346,24 @@ jobs:
           sha256sum \
             "DrawSplay-windows-${RELEASE_TAG}.zip" \
             "DrawSplay-linux-${RELEASE_TAG}.tar.gz" \
+            "DrawSplayDesktop-windows-x86_64-${RELEASE_TAG}.zip" \
+            "DrawSplayDesktop-linux-x86_64-${RELEASE_TAG}.tar.gz" \
             DrawSplay.APK > SHA256SUMS.txt
+
+      - name: Sign release checksums
+        working-directory: release
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.DRAWSPLAY_RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "DRAWSPLAY_RELEASE_SIGNING_KEY is required to publish verifiable updates." >&2
+            exit 1
+          fi
+          umask 077
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          printf '%s' "$RELEASE_SIGNING_KEY" > "$key"
+          openssl pkeyutl -sign -inkey "$key" -rawin -in SHA256SUMS.txt -out SHA256SUMS.sig
 
       - name: Generate release patch notes
         env:
@@ -284,13 +408,14 @@ jobs:
               f"- **Windows:** `DrawSplay-windows-{tag}.zip` (extract the folder and run `drawsplay_installer_{tag}.exe`; it adds an uninstaller and Apps & Features entry)\n"
               f"- **Linux (amd64):** `DrawSplay-linux-{tag}.tar.gz` (extract the folder and run `./install-drawsplay-host-linux.sh`; run `./uninstall-drawsplay-host-linux.sh` to remove it)\n"
               "- **Android:** `DrawSplay.APK` (also included in both folders)\n"
+              f"- **DrawSplay Desktop (use a PC as a second screen):** `DrawSplayDesktop-windows-x86_64-{tag}.zip` and `DrawSplayDesktop-linux-x86_64-{tag}.tar.gz` (separate from the tablet app; needs ffmpeg, see the README inside)\n"
               "\nUse `SHA256SUMS.txt` to verify your downloads.\n"
           )
           Path("release/PATCH_NOTES.md").write_text(notes, encoding="utf-8")
           PY
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ needs.resolve-tag.outputs.tag }}
           target_commitish: ${{ github.sha }}
@@ -298,5 +423,8 @@ jobs:
           files: |
             release/DrawSplay-windows-${{ needs.resolve-tag.outputs.tag }}.zip
             release/DrawSplay-linux-${{ needs.resolve-tag.outputs.tag }}.tar.gz
+            release/DrawSplayDesktop-windows-x86_64-${{ needs.resolve-tag.outputs.tag }}.zip
+            release/DrawSplayDesktop-linux-x86_64-${{ needs.resolve-tag.outputs.tag }}.tar.gz
             release/DrawSplay.APK
             release/SHA256SUMS.txt
+            release/SHA256SUMS.sig

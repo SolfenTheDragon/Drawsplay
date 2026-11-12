@@ -18,6 +18,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,19 +74,11 @@ type settings struct {
 	// (videoScalingFill, videoScalingFit or videoScalingOriginal).
 	VideoScaling    string `json:"videoScaling"`
 	NoDriverInstall bool   `json:"noDriverInstall"`
-	WifiEnabled     bool   `json:"wifiEnabled"`
-	WifiBindAddress string `json:"wifiBindAddress"`
-	WifiInputPort   int    `json:"wifiInputPort"`
-	WifiVideoPort   int    `json:"wifiVideoPort"`
-	WifiServiceName string `json:"wifiServiceName"`
-	WifiTLS         bool   `json:"wifiTLS"`
-	WifiAuthToken   string `json:"wifiAuthToken,omitempty"`
-	WifiMaxBitrate  string `json:"wifiMaxBitrate"`
-	// PairedWifiEnabled turns on the paired mutual-TLS Wi-Fi transport (needs
-	// DRAWSPLAY_FEATURE_WIFI). It is separate from the legacy token transport.
-	PairedWifiEnabled bool `json:"pairedWifiEnabled"`
-	// PairedWifiInterface is the explicit LAN interface for paired Wi-Fi.
-	PairedWifiInterface string `json:"pairedWifiInterface,omitempty"`
+	// PairedWiFiEnabled turns on the paired mutual-TLS Wi-Fi transport (needs
+	// DRAWSPLAY_FEATURE_WIFI).
+	PairedWiFiEnabled bool `json:"pairedWifiEnabled"`
+	// PairedWiFiInterface is the explicit LAN interface for paired Wi-Fi.
+	PairedWiFiInterface string `json:"pairedWifiInterface,omitempty"`
 	AOAEnabled          bool   `json:"aoaEnabled"`
 	// AOAAutoSwitch makes the host switch an attached tablet into accessory mode on its own; when off, only the web UI button does.
 	AOAAutoSwitch bool `json:"aoaAutoSwitch"`
@@ -95,9 +88,14 @@ type settings struct {
 	// IdleDisplayTimeoutSec removes the virtual display once no tablet has
 	// been connected for this many seconds (0 disables the check).
 	IdleDisplayTimeoutSec int `json:"idleDisplayTimeoutSec"`
+	// UpdateCheck lets the settings page ask GitHub for a newer release
+	// while it is open (at most every few hours). Installing always needs a
+	// click.
+	UpdateCheck bool `json:"updateCheck"`
 }
 
-// defaultSettings mirrors the flag defaults in main.go.
+// defaultSettings is the built-in configuration; the command-line flags
+// (settings_flags.go) show these values as their defaults.
 func defaultSettings() settings {
 	return settings{
 		ADB:                   "adb",
@@ -120,18 +118,11 @@ func defaultSettings() settings {
 		X11HighRateCapture:    true,
 		VideoScaling:          videoScalingFill,
 		NoDriverInstall:       false,
-		WifiEnabled:           false,
-		WifiBindAddress:       "0.0.0.0",
-		WifiInputPort:         37183,
-		WifiVideoPort:         37184,
-		WifiServiceName:       "DrawSplay",
-		WifiTLS:               true,
-		WifiAuthToken:         "",
-		WifiMaxBitrate:        "12M",
 		AOAEnabled:            true,
 		AOAAutoSwitch:         true,
 		ADBTunnelEnabled:      false,
 		IdleDisplayTimeoutSec: defaultIdleDisplayTimeoutSec,
+		UpdateCheck:           true,
 	}
 }
 
@@ -162,13 +153,13 @@ func validVideoScaling(mode string) bool {
 // virtual display. Returned errors are user-facing (web UI form feedback).
 func (s settings) validate() error {
 	if s.FPS < 10 || s.FPS > 240 {
-		return fmt.Errorf("fps must be between 10 and 240")
+		return errors.New("fps must be between 10 and 240")
 	}
 	if kbps := parseBitrateKbps(s.Bitrate); kbps < minLadderKbps {
 		return fmt.Errorf("bitrate must be at least %dk (ffmpeg syntax, e.g. 24M)", minLadderKbps)
 	}
 	if s.Width < 640 || s.Width > 7680 || s.Height < 480 || s.Height > 4320 {
-		return fmt.Errorf("resolution must be between 640x480 and 7680x4320")
+		return errors.New("resolution must be between 640x480 and 7680x4320")
 	}
 	if s.IdleDisplayTimeoutSec < 0 || s.IdleDisplayTimeoutSec > maxIdleDisplayTimeoutSec {
 		return fmt.Errorf("idle display timeout must be between 0 (disabled) and %d seconds", maxIdleDisplayTimeoutSec)
@@ -184,39 +175,10 @@ func (s settings) validate() error {
 	}
 	if strings.IndexFunc(s.PreferredADBSerial, unicode.IsControl) >= 0 ||
 		strings.ContainsAny(s.PreferredADBSerial, " \t\r\n") {
-		return fmt.Errorf("preferred ADB serial must not contain whitespace or control characters")
+		return errors.New("preferred ADB serial must not contain whitespace or control characters")
 	}
 	if s.RequirePreferredADB && strings.TrimSpace(s.PreferredADBSerial) == "" {
-		return fmt.Errorf("preferred ADB serial is required when strict device trust is enabled")
-	}
-	if wifiFeatureEnabled() {
-		if strings.TrimSpace(s.WifiBindAddress) == "" {
-			return fmt.Errorf("wifi bind address must not be empty")
-		}
-		if s.WifiInputPort < 1024 || s.WifiInputPort > 65535 {
-			return fmt.Errorf("wifi input port must be between 1024 and 65535")
-		}
-		if s.WifiVideoPort < 1024 || s.WifiVideoPort > 65535 {
-			return fmt.Errorf("wifi video port must be between 1024 and 65535")
-		}
-		if s.WifiInputPort == s.WifiVideoPort {
-			return fmt.Errorf("wifi input and video ports must differ")
-		}
-		if strings.TrimSpace(s.WifiServiceName) == "" {
-			return fmt.Errorf("wifi service name must not be empty")
-		}
-		if kbps := parseBitrateKbps(s.WifiMaxBitrate); kbps < minLadderKbps {
-			return fmt.Errorf("wifi max bitrate must be at least %dk", minLadderKbps)
-		}
-		if strings.IndexFunc(s.WifiAuthToken, unicode.IsControl) >= 0 {
-			return fmt.Errorf("wifi auth token must not contain control characters")
-		}
-		if s.WifiEnabled && strings.TrimSpace(s.WifiAuthToken) == "" {
-			return fmt.Errorf("wifi auth token is required when Wi-Fi transport is enabled")
-		}
-		if s.WifiEnabled && !s.WifiTLS {
-			return fmt.Errorf("wifi TLS is required when Wi-Fi transport is enabled")
-		}
+		return errors.New("preferred ADB serial is required when strict device trust is enabled")
 	}
 	return nil
 }
@@ -224,34 +186,34 @@ func (s settings) validate() error {
 func validateConfiguredExecutable(value, tool string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return fmt.Errorf("must not be empty")
+		return errors.New("must not be empty")
 	}
 	if strings.ContainsRune(value, '\x00') {
-		return fmt.Errorf("contains an invalid NUL character")
+		return errors.New("contains an invalid NUL character")
 	}
 	if strings.EqualFold(value, tool) || strings.EqualFold(value, tool+".exe") {
 		return nil
 	}
 	lower := strings.ToLower(value)
 	if strings.Contains(lower, "://") || strings.HasPrefix(lower, "file:") {
-		return fmt.Errorf("URLs are not allowed")
+		return errors.New("URLs are not allowed")
 	}
 	if strings.HasPrefix(value, `\\`) || strings.HasPrefix(value, `//`) {
-		return fmt.Errorf("UNC/network paths are not allowed")
+		return errors.New("UNC/network paths are not allowed")
 	}
 	if !filepath.IsAbs(value) {
 		return fmt.Errorf("use the default bare name %q or an absolute local executable path", tool)
 	}
 	clean := filepath.Clean(value)
 	if isNetworkExecutablePath(clean) {
-		return fmt.Errorf("network-backed paths are not allowed")
+		return errors.New("network-backed paths are not allowed")
 	}
 	info, err := os.Stat(clean)
 	if err != nil {
 		return fmt.Errorf("executable is not accessible: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("must name a regular executable file")
+		return errors.New("must name a regular executable file")
 	}
 	if err := validateLocalExecutable(clean, info); err != nil {
 		return err
@@ -262,11 +224,10 @@ func validateConfiguredExecutable(value, tool string) error {
 // configDir returns the DrawSplay per-user config directory, creating it if
 // needed.
 func configDir() (string, error) {
-	base, err := os.UserConfigDir()
+	dir, err := userStateDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(base, "DrawSplay")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
@@ -300,21 +261,13 @@ func loadSettings() settings {
 	return applyFeatureFlags(s)
 }
 
-// saveSettings writes the config file atomically (write temp + rename).
+// saveSettings writes the config file atomically.
 func saveSettings(s settings) error {
 	path, err := configPath()
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return writeJSONAtomic(path, s)
 }
 
 // settingsStore is the mutable, thread-safe runtime view of the settings.
@@ -343,21 +296,15 @@ var globalSettingsStore *settingsStore
 // back to the old configured resolution instead of keeping the user's
 // choice.
 func (st *settingsStore) updateResolution(width, height int) error {
-	// Push to the tablet too: it is the durable store of the preferred mode.
-	publishModeChange(width, height, 0)
-	s := st.get()
-	s.Width = width
-	s.Height = height
-	if err := s.validate(); err != nil {
-		return err
+	_, _, err := st.modify(func(s *settings) error {
+		s.Width = width
+		s.Height = height
+		return nil
+	})
+	if err == nil {
+		publishModeChange(width, height, 0)
 	}
-	if err := saveSettings(s); err != nil {
-		return fmt.Errorf("saving config: %w", err)
-	}
-	st.mu.Lock()
-	st.s = s
-	st.mu.Unlock()
-	return nil
+	return err
 }
 
 func newSettingsStore(s settings) *settingsStore {
@@ -373,17 +320,31 @@ func (st *settingsStore) get() settings {
 
 // update validates, persists, and applies new settings.
 func (st *settingsStore) update(s settings) error {
-	s = applyFeatureFlags(s)
-	if err := s.validate(); err != nil {
-		return err
-	}
-	if err := saveSettings(s); err != nil {
-		return fmt.Errorf("saving config: %w", err)
-	}
+	_, _, err := st.modify(func(next *settings) error {
+		*next = s
+		return nil
+	})
+	return err
+}
+
+// modify serializes merging and persistence so patches cannot restore stale fields.
+func (st *settingsStore) modify(change func(*settings) error) (settings, settings, error) {
 	st.mu.Lock()
-	st.s = s
-	st.mu.Unlock()
-	return nil
+	defer st.mu.Unlock()
+	old := st.s
+	next := old
+	if err := change(&next); err != nil {
+		return old, old, err
+	}
+	next = applyFeatureFlags(next)
+	if err := next.validate(); err != nil {
+		return old, old, err
+	}
+	if err := saveSettings(next); err != nil {
+		return old, old, fmt.Errorf("saving config: %w", err)
+	}
+	st.s = next
+	return old, next, nil
 }
 
 // videoOptions converts a settings snapshot into the video pipeline's

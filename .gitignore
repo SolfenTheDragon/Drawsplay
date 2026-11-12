@@ -24,6 +24,7 @@ coverage.*
 *.coverprofile
 profile.cov
 tools/usb_baseline/__pycache__/
+scripts/__pycache__/
 go.work
 go.work.sum
 
@@ -50,7 +51,7 @@ android/**/externalNativeBuild/
 .vscode/
 
 # Private documentation and AI-agent context.
-# README.md is the only documentation file intended for the public repository.
+# Public guides are listed below; other maintainer documentation stays local.
 *.md
 *.mdx
 *.rst
@@ -73,6 +74,9 @@ research/
 !/THIRD-PARTY-NOTICES.md
 !/SECURITY.md
 !/CONTRIBUTING.md
+!/BUILD.md
+!/SIGNING.md
+!/FUNCTIONALITY.md
 .github/copilot-instructions.md
 
 # Google Play signing/publishing secrets and docs
@@ -87,3 +91,6 @@ drivers/windows/idd/out/
 # Windows native media helper build outputs (embedded into the host by build-release.ps1)
 native/drawsplay-media-win/out/
 host/mediahelper/obj/
+
+# DrawSplay Desktop documentation (kept local; the packaging scripts include these files only when present)
+desktop/docs/

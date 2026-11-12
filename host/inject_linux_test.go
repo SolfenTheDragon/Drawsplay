@@ -27,7 +27,7 @@ func TestTabletAbsCoordsSpanTheDeviceByDefault(t *testing.T) {
 	} {
 		for _, n := range []float64{-0.5, 0, 0.3, 0.5, 0.999, 1, 1.5} {
 			x, y := tabletAbsCoords(n, 1-n, target)
-			wantX, wantY := int32(clampF(n)*absRange), int32(clampF(1-n)*absRange)
+			wantX, wantY := int32(clamp01(n)*absRange), int32(clamp01(1-n)*absRange)
 			if x != wantX || y != wantY {
 				t.Errorf("tabletAbsCoords(%v, %v, %+v) = %d, %d; want %d, %d", n, 1-n, target, x, y, wantX, wantY)
 			}

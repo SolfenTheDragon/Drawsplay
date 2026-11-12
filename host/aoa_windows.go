@@ -20,7 +20,8 @@ import (
 // WinUSB backend. Windows cannot open a USB device without a bound driver, so
 // both the tablet's original device (to send the AOA switch requests) and the
 // accessory device (18d1:2d00-2d05) must have WinUSB bound, for example with
-// libwdi or a driver package from the installer (see packaging/windows/README.md).
+// the WinUSB package the installed host generates and signs on this PC
+// (winusb_sign_windows.go; the INF text is in aoa_inf.go).
 // Devices without WinUSB are reported with an actionable error and skipped.
 
 var (
@@ -309,7 +310,7 @@ func aoaScanDevices() ([]aoaCandidate, error) {
 				// Rebinding is asynchronous; the next scan picks the device up.
 				log.Printf("AOA: WinUSB installed for %04x:%04x; waiting for the device to rebind", vid, pid)
 			} else {
-				missingDriver = fmt.Sprintf("WinUSB is not bound to USB device %04x:%04x; reconnect the tablet so DrawSplay can install its signed WinUSB driver, or rerun the DrawSplay installer (see packaging/windows/README.md)", vid, pid)
+				missingDriver = fmt.Sprintf("WinUSB is not bound to USB device %04x:%04x; reconnect the tablet so DrawSplay can install its signed WinUSB driver, or rerun the DrawSplay installer", vid, pid)
 				throttledLog("aoa-nowinusb-"+instance, "AOA: %s", missingDriver)
 			}
 			continue

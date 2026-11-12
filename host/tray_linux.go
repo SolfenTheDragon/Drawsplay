@@ -22,7 +22,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
@@ -107,32 +106,6 @@ type trayEntry struct {
 	label     string
 	separator bool
 	enabled   bool
-}
-
-// trayStatusText builds the menu's connection and detail lines.
-func trayStatusText(device string, vs videoStatusInfo) (status, detail string) {
-	device = strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ", "\t", " ").Replace(device))
-	if device == "unknown-tablet" || device == "unknown-client" {
-		device = ""
-	}
-	if device == "" {
-		return "🔴 Disconnected", "Waiting for tablet"
-	}
-	status = "🟢 Connected: " + device
-	if !vs.Streaming {
-		return status, "Not streaming"
-	}
-	mode := "Streaming"
-	switch vs.DisplayMode {
-	case "extend":
-		mode = "Extended display"
-	case "mirror":
-		mode = "Mirroring desktop"
-	}
-	if vs.Encoder != "" {
-		mode += " · " + vs.Encoder
-	}
-	return status, mode
 }
 
 func trayMenuEntries(status, detail string) []trayEntry {
@@ -318,7 +291,7 @@ func runStatusTray(ctx context.Context, quit context.CancelFunc) error {
 	defer conn.Close()
 
 	menu := &trayMenu{rev: 1}
-	menu.status, menu.detail = trayStatusText(activeInputDevice(), currentVideoStatus())
+	menu.status, menu.detail = trayStatusText(true, activeInputDevice(), currentVideoStatus())
 	menu.onClick = func(id int32) {
 		switch id {
 		case trayIDSettings:
@@ -365,7 +338,7 @@ func runStatusTray(ctx context.Context, quit context.CancelFunc) error {
 
 	name := fmt.Sprintf("org.kde.StatusNotifierItem-%d-1", os.Getpid())
 	if reply, err := conn.RequestName(name, dbus.NameFlagDoNotQueue); err != nil || reply != dbus.RequestNameReplyPrimaryOwner {
-		return fmt.Errorf("could not own %s: %v", name, err)
+		return fmt.Errorf("could not own %s: %w", name, err)
 	}
 
 	registered := false
@@ -397,7 +370,7 @@ func runStatusTray(ctx context.Context, quit context.CancelFunc) error {
 			return nil
 		case <-ticker.C:
 			register()
-			status, detail := trayStatusText(activeInputDevice(), currentVideoStatus())
+			status, detail := trayStatusText(true, activeInputDevice(), currentVideoStatus())
 			menu.mu.Lock()
 			changed := status != menu.status || detail != menu.detail
 			if changed {

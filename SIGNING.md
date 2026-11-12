@@ -5,15 +5,17 @@ This document explains how to set up production signing for:
 1. **Windows host executable / installer** (`drawsplay_installer_<version>.exe`, installed as `DrawSplay.exe`)
 2. **Android release APK** (`DrawSplay.APK`)
 3. **GitHub Actions release workflow** (`.github/workflows/release.yml`)
+4. **Update checksum manifests** (`SHA256SUMS.txt` + `SHA256SUMS.sig`)
 
 It also covers where to obtain each key/certificate and how to store them safely.
 
 ## Virtual-display driver signing is a separate process
 
-For beginner-friendly instructions, see
-[Signing the Windows virtual-display driver](docs/windows-driver-signing.md).
-That guide covers certificate/account setup, Microsoft submission, installation,
-and the prerequisites for automation.
+The public [build guide](BUILD.md#bundled-virtual-display-driver) covers local
+driver compilation and per-PC installation. For Microsoft submission, follow
+[attestation signing](https://learn.microsoft.com/windows-hardware/drivers/dashboard/code-signing-attestation)
+or the [Windows Hardware Lab Kit](https://learn.microsoft.com/windows-hardware/test/hlk/getstarted/windows-hardware-lab-kit)
+documentation. Private maintainer notes are not required for the local path.
 
 The PFX signing described below signs the host executable and can sign a driver
 catalog locally; it does not obtain Microsoft's driver signature. The current
@@ -30,7 +32,7 @@ deletes its private key, and preserves already trusted catalogs. Uninstall
 removes the local certificates after package removal succeeds. Interactive setup
 discloses this trust change; `-install -quiet` authorizes it without that dialog
 (`-no-driver-install` opts out). Secure Boot/signature enforcement are unchanged.
-See the walkthrough's local-signing discussion before choosing a submission route.
+Choose a submission route appropriate to your distribution and target policy.
 
 If the preferred driver cannot become available, setup reuses an existing Parsec
 VDD or downloads its pinned, publisher-verified 0.41 installer only if missing.
@@ -59,6 +61,7 @@ mirroring remains the final option. `-no-driver-install` skips both installs.
 - Base64-encoded Windows PFX.
 - Base64-encoded Android keystore.
 - The corresponding passwords/alias values.
+- A raw PEM Ed25519 private key matching the clients' pinned update public key.
 
 ---
 
@@ -108,6 +111,12 @@ This command prompts for:
 - certificate DN fields
 
 Keep this keystore backed up securely. Losing it can prevent future in-place Android updates.
+
+The app's in-app updater installs a release only when it is signed with the
+same key as the installed app. Releases built without these secrets are
+development builds signed with a temporary debug key, which changes between runners,
+so their in-app updates fail and users must reinstall by hand. Configure the
+keystore secrets before relying on in-app updates.
 
 ---
 
@@ -170,23 +179,23 @@ Then build:
 .\scripts\build-release.ps1
 ```
 
+This builds Windows/Android archives and local unsigned checksums. It does not
+produce the final multi-platform update manifest or its detached signature;
+the Release workflow does that after assembling all platform bundles.
+
 ---
 
 ## 4. GitHub Actions signing setup
 
 Release workflow: `.github/workflows/release.yml`
 
-Signing is optional by default. With no signing secrets configured, the workflow
-warns and builds an unsigned Windows EXE and a debug-signed Android APK.
-Debug keys on fresh CI runners are not stable: installing a later APK may require
-uninstalling the previous app (which deletes its local data). Configure a permanent
-Android release keystore for reliable updates.
+The Release workflow always sets `DRAWSPLAY_REQUIRE_SIGNING=1`. Both Windows
+and Android production signing are mandatory; a repository Actions variable
+does not override this. Missing or partial signing configuration fails the
+release. The ordinary CI workflow and local development builds can still use
+development signing.
 
-Set the repository **Actions variable** `DRAWSPLAY_REQUIRE_SIGNING` to `1` to require
-both Windows and Android production signing. Partially configured signing secrets
-always fail explicitly rather than silently falling back.
-
-To enable signing, configure these repository secrets:
+Configure these repository secrets before publishing:
 
 ### 4.1 Windows secrets
 
@@ -215,6 +224,52 @@ PowerShell examples:
 
 Paste each value into the matching GitHub secret.
 
+### 4.4 Signed update checksums
+
+Set `DRAWSPLAY_RELEASE_SIGNING_KEY` to the **raw, unencrypted Ed25519 private-key
+PEM**, including the `BEGIN PRIVATE KEY` / `END PRIVATE KEY` lines and newlines.
+This is not the Windows PFX, Android keystore or a Base64-encoded PEM.
+
+The workflow signs the exact bytes of the final `SHA256SUMS.txt` using:
+
+```bash
+openssl pkeyutl -sign -inkey release-signing-key.pem -rawin \
+  -in SHA256SUMS.txt -out SHA256SUMS.sig
+```
+
+`SHA256SUMS.sig` must be a raw 64-byte signature, not Base64 or hex. Publish both
+files with the assets they describe. The host and tablet verify the signature
+against their pinned public key before trusting the checksums.
+
+For the existing distribution, recover the matching key from secure storage;
+do not generate a replacement. Its public key is pinned in `host/update.go`
+and the Android release verifier:
+
+```text
+247960eda0e2c352ac115ac991abcc45fccca85fb429bc0e5a54426ed4aec8f1
+```
+
+To check an existing private key without printing it:
+
+```bash
+openssl pkey -in release-signing-key.pem -pubout -outform DER \
+  -out release-signing-public.der
+python3 -c "from pathlib import Path; print(Path('release-signing-public.der').read_bytes()[-32:].hex())"
+```
+
+For a **new distribution only**, generate a key in secure storage:
+
+```bash
+umask 077
+openssl genpkey -algorithm ED25519 -out release-signing-key.pem
+```
+
+Pin its derived public key in both clients before distributing them, and store
+the private PEM only in the secret/vault. Changing the secret alone breaks
+updates for installed clients. Rotation requires a planned trust transition
+while the old key is available, or a separately verified manual installation;
+existing single-key clients cannot accept an arbitrary replacement key.
+
 ---
 
 ## 5. Run signed releases
@@ -238,14 +293,16 @@ Paste each value into the matching GitHub secret.
    Prerelease and unrelated tags are ignored.
 2. Workflow will:
    - decode signing materials from secrets
-   - enforce signing when `DRAWSPLAY_REQUIRE_SIGNING=1` is configured
-   - build release artifacts, signing them when keys are configured
+   - require production Windows and Android signing
+   - build and sign release artifacts
+   - generate final checksums and their Ed25519 detached signature
    - generate patch notes from commits since the previous reachable stable tag,
      including a full-changelog link and download instructions
    - publish release assets and create the selected tag at the built commit
 
-Publication runs are serialized to prevent concurrent manual runs from selecting
-the same next tag. The new tag is created only after both builds succeed.
+The entire workflow, from tag selection through builds and publication, is
+serialized to prevent concurrent manual runs from selecting the same next tag.
+The new tag is created only after all platform builds succeed.
 
 ---
 
@@ -256,6 +313,7 @@ the same next tag. The new tag is created only after both builds succeed.
   - Android keystores
   - passwords
   - base64 secret blobs
+  - Ed25519 private-key PEM files
 - Rotate credentials immediately if exposed.
 - Restrict repo secret access to maintainers.
 - Prefer short-lived local environment variables over persistent user/system variables on shared machines.
