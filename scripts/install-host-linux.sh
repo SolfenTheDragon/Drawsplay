@@ -125,8 +125,8 @@ check_cmd() {
   fi
 }
 check_gst_element() {
-  command -v gst-inspect-1.0 >/dev/null 2>&1 || return 0
-  if ! gst-inspect-1.0 "$1" >/dev/null 2>&1; then
+  if ! command -v gst-inspect-1.0 >/dev/null 2>&1 ||
+    ! gst-inspect-1.0 "$1" >/dev/null 2>&1; then
     echo "Missing GStreamer element: $1 (needs: $2)"
     add_pkgs "$2"
   fi
@@ -140,16 +140,14 @@ fi
 if [[ "$WAYLAND_CAPTURE" -eq 1 ]]; then
   check_cmd gst-launch-1.0 "gstreamer1.0-tools"
   check_cmd gst-inspect-1.0 "gstreamer1.0-tools"
-  if command -v gst-inspect-1.0 >/dev/null 2>&1; then
-    check_gst_element pipewiresrc "gstreamer1.0-pipewire"
-    check_gst_element videoconvert "gstreamer1.0-plugins-base"
-    check_gst_element videoscale "gstreamer1.0-plugins-base"
-    check_gst_element videorate "gstreamer1.0-plugins-good"
-    check_gst_element h264parse "gstreamer1.0-plugins-bad"
-    check_gst_element vah264enc "gstreamer1.0-plugins-bad"
-    check_gst_element vaapih264enc "gstreamer1.0-vaapi"
-    check_gst_element x264enc "gstreamer1.0-plugins-ugly"
-  fi
+  check_gst_element pipewiresrc "gstreamer1.0-pipewire"
+  check_gst_element videoconvert "gstreamer1.0-plugins-base"
+  check_gst_element videoscale "gstreamer1.0-plugins-base"
+  check_gst_element videorate "gstreamer1.0-plugins-good"
+  check_gst_element h264parse "gstreamer1.0-plugins-bad"
+  check_gst_element vah264enc "gstreamer1.0-plugins-bad"
+  check_gst_element vaapih264enc "gstreamer1.0-vaapi"
+  check_gst_element x264enc "gstreamer1.0-plugins-ugly"
 else
   check_cmd xrandr "x11-xserver-utils"
 fi
@@ -306,8 +304,10 @@ echo
 # --- Display helper (X11 virtual display, run through pkexec) ---------------
 # The host switches spare HDMI ports and loads vkms through this small,
 # fixed-purpose helper, so the password prompt names a DrawSplay action
-# instead of asking to run a shell as root.
-if [[ "$WAYLAND_CAPTURE" -eq 0 ]]; then
+# instead of asking to run a shell as root. Installed whatever the current
+# session type: the user may log into X11 later, and the X11 fallback must be
+# ready then without another install.
+{
   HELPER_SOURCE="$SCRIPT_DIR/drawsplay-display-helper"
   POLICY_SOURCE="$SCRIPT_DIR/com.drawsplay.display-helper.policy"
   if [[ ! -f "$HELPER_SOURCE" ]]; then
@@ -333,13 +333,15 @@ if [[ "$WAYLAND_CAPTURE" -eq 0 ]]; then
       echo "Could not install the display helper; the host falls back to a generic administrator prompt." >&2
     fi
   fi
-fi
+}
 echo
 
 # --- Spare HDMI connector access (X11 virtual display fallback) --------------
 # Lets the plugdev group force an unplugged HDMI port on, so the X11 fallback
-# virtual display works without root or a password prompt on every boot.
-if [[ "$WAYLAND_CAPTURE" -eq 0 ]]; then
+# virtual display works without root or a password prompt on every boot. This
+# is what keeps the tablet extending the desktop on kernels where vkms is
+# unsafe, so it is installed on every session type (see the display helper).
+{
   DRM_RULE_SOURCE="$SCRIPT_DIR/70-drawsplay-drm-connector.rules"
   if [[ ! -f "$DRM_RULE_SOURCE" ]]; then
     DRM_RULE_SOURCE="$ROOT_DIR/packaging/linux/70-drawsplay-drm-connector.rules"
@@ -364,7 +366,7 @@ if [[ "$WAYLAND_CAPTURE" -eq 0 ]]; then
     fi
   fi
   echo
-fi
+}
 
 # --- X11 extended display ---------------------------------------------------
 # On X11 the host extends the desktop onto a vkms output, falling back to a
