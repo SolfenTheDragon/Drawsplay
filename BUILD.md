@@ -282,11 +282,12 @@ Gradle properties or environment variables:
 - `DRAWSPLAY_ANDROID_KEY_ALIAS`
 - `DRAWSPLAY_ANDROID_KEY_PASSWORD`
 
-The Release workflow always sets `DRAWSPLAY_REQUIRE_SIGNING=1`: Windows and
-Android production-signing secrets are mandatory. The ordinary CI workflow
-can build development APKs without those secrets. Published updates also
-require an Ed25519 checksum-signing key matching the clients' pinned public
-key. See [SIGNING.md](SIGNING.md).
+The Release workflow signs Windows and Android builds when their secrets are
+configured and otherwise publishes unsigned (Windows) and debug-signed
+(Android) artifacts with a warning; set the repository Actions variable
+`DRAWSPLAY_REQUIRE_SIGNING=1` to fail the release instead. Published updates
+always require an Ed25519 checksum-signing key matching the clients' pinned
+public key. See [SIGNING.md](SIGNING.md).
 
 ### Linux and USB accessory (AOA) packaging files
 

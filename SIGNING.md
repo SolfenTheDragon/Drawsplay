@@ -189,13 +189,15 @@ the Release workflow does that after assembling all platform bundles.
 
 Release workflow: `.github/workflows/release.yml`
 
-The Release workflow always sets `DRAWSPLAY_REQUIRE_SIGNING=1`. Both Windows
-and Android production signing are mandatory; a repository Actions variable
-does not override this. Missing or partial signing configuration fails the
-release. The ordinary CI workflow and local development builds can still use
-development signing.
+Production signing is optional by default. When a platform's signing secrets
+are entirely absent the release still publishes, with a workflow warning: the
+Windows EXE ships unsigned and the Android APK is debug-signed (updates across
+runs may then require reinstalling the app). A partially configured platform
+(some secrets set, others missing) always fails the release rather than
+silently shipping unsigned. To make signing mandatory, set the repository
+Actions variable `DRAWSPLAY_REQUIRE_SIGNING` to `1`.
 
-Configure these repository secrets before publishing:
+Configure these repository secrets to sign published builds:
 
 ### 4.1 Windows secrets
 
