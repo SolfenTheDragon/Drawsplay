@@ -178,7 +178,7 @@ func writeConnectorStatusPrivileged(path, value string, mayPrompt bool) error {
 		}
 	}
 	if !mayPrompt {
-		return errVkmsNeedsRoot
+		return fmt.Errorf("forcing the spare connector on without a prompt: %w; install the udev rule 70-drawsplay-drm-connector.rules (scripts/install-host-linux.sh does this) or wait for the one-time prompt when a tablet connects", errNeedsRoot)
 	}
 	pkexec, err := exec.LookPath("pkexec")
 	if err != nil {

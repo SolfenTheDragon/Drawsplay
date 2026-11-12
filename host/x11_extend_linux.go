@@ -751,6 +751,14 @@ func configureX11Extended(display, name string, w, h, nativeW, nativeH int) (x11
 				continue
 			}
 			log.Printf("X11 extended display: switched %s on at %dx%d+%d+%d", out.Name, w, h, layout.Rect.X, layout.Rect.Y)
+			if guarded == guardMethodVkms && vkmsPostLoadCheck() {
+				// The first mode set on a vkms output is where the kernel
+				// fails; the display may be frozen now, so switch the output
+				// off to give the server a chance, and never use it again
+				// on this kernel series.
+				_, _ = xrandrRun(display, "--output", out.Name, "--off")
+				return res, fmt.Errorf("the kernel failed in vkms_prepare_fb while %s was switched on; vkms is disabled on this kernel", out.Name)
+			}
 		}
 		settled, ok, err := awaitX11Size(display, out.Name, w, h, rounds)
 		if err != nil {

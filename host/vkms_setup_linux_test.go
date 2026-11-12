@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,8 +26,9 @@ func withVkmsSetupTest(t *testing.T, loaded, available bool, load func(f *fakeXr
 	forceConnectorPrivileged = func(string, string, bool) error { return errors.New("forcing connectors is disabled in tests") }
 	t.Cleanup(func() { sysfsDRMDir, forceConnectorPrivileged = prevSysfs, prevForce })
 	var calls atomic.Int32
-	prevLoad, prevLoaded, prevAvail, prevPoll := vkmsLoadPrivileged, vkmsIsLoaded, vkmsIsAvailable, vkmsOutputPoll
+	prevLoad, prevLoaded, prevAvail, prevPoll, prevCheck := vkmsLoadPrivileged, vkmsIsLoaded, vkmsIsAvailable, vkmsOutputPoll, vkmsPostLoadCheck
 	vkmsOutputPoll = time.Millisecond
+	vkmsPostLoadCheck = func() bool { return false }
 	vkmsIsLoaded = func() bool { return loaded }
 	vkmsIsAvailable = func() bool { return available }
 	vkmsLoadPrivileged = func(bool) error {
@@ -41,7 +43,7 @@ func withVkmsSetupTest(t *testing.T, loaded, available bool, load func(f *fakeXr
 	vkmsSetup.running, vkmsSetup.lastFail = false, time.Time{}
 	vkmsSetup.mu.Unlock()
 	t.Cleanup(func() {
-		vkmsLoadPrivileged, vkmsIsLoaded, vkmsIsAvailable, vkmsOutputPoll = prevLoad, prevLoaded, prevAvail, prevPoll
+		vkmsLoadPrivileged, vkmsIsLoaded, vkmsIsAvailable, vkmsOutputPoll, vkmsPostLoadCheck = prevLoad, prevLoaded, prevAvail, prevPoll, prevCheck
 		vkmsSetup.mu.Lock()
 		vkmsSetup.lastFail = time.Time{}
 		vkmsSetup.mu.Unlock()
@@ -148,5 +150,41 @@ func TestEnsureX11VirtualDisplaySkipsBlockedVkms(t *testing.T) {
 	ensureX11VirtualDisplay("test", true)
 	if calls.Load() != 0 {
 		t.Fatalf("a blocked vkms was loaded (%d calls)", calls.Load())
+	}
+}
+
+// The kernel fails on vkms right after the load, while the X server stays
+// up: the host must record the denial and move on to the spare connector in
+// the same pass, and never load vkms again on this kernel series.
+func TestEnsureX11VirtualDisplayFallsBackWhenVkmsFailsInTheKernel(t *testing.T) {
+	_, calls := withVkmsSetupTest(t, false, true, func(*fakeXrandr) error { return nil })
+	withGuardTest(t)
+	t.Setenv(vkmsAutoloadEnv, "")
+	vkmsPostLoadCheck = func() bool {
+		displayGuardDenyUntil(guardMethodVkms, "the kernel log shows a vkms failure (vkms_prepare_fb)", true)
+		return true
+	}
+	fakeSysfsDRM(t, "disconnected", nil)
+	forced := 0
+	forceConnectorPrivileged = func(path, value string, _ bool) error {
+		forced++
+		return os.WriteFile(path, []byte("connected\n"), 0o644)
+	}
+	ensureX11VirtualDisplay("test", true)
+	if calls.Load() != 1 {
+		t.Fatalf("load calls = %d, want 1", calls.Load())
+	}
+	if forced == 0 {
+		t.Fatal("the spare connector must be tried once vkms failed in the kernel")
+	}
+	if _, denied := displayGuardDenied(guardMethodVkms); !denied {
+		t.Fatal("vkms must be denied after the kernel failure")
+	}
+	vkmsSetup.mu.Lock()
+	vkmsSetup.lastFail = time.Time{}
+	vkmsSetup.mu.Unlock()
+	ensureX11VirtualDisplay("again", true)
+	if calls.Load() != 1 {
+		t.Fatalf("vkms was loaded again after the kernel failure (%d calls)", calls.Load())
 	}
 }

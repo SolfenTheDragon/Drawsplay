@@ -24,7 +24,9 @@ package main
 //
 // DRAWSPLAY_X11_VKMS_AUTOLOAD=1 overrides every vkms check: it is the
 // documented way for a user who has verified vkms on their kernel. A denial
-// ends by itself when the kernel release changes.
+// ends by itself when the kernel moves to a new series (major.minor): a
+// point update (7.0.0-1017 to 7.0.0-1018) carries the same drivers and must
+// not re-arm a method that already took the display down.
 
 import (
 	"context"
@@ -54,7 +56,8 @@ type displayGuardDenial struct {
 	Reason string    `json:"reason"`
 	At     time.Time `json:"at"`
 	// Kernel is the running kernel release when the denial was recorded; a
-	// different kernel (an update may fix the bug) ends the denial.
+	// kernel of a different series (an upgrade may fix the bug) ends the
+	// denial. See kernelSeries.
 	Kernel string `json:"kernel,omitempty"`
 	// UntilKernelChange keeps the denial for as long as the kernel stays the
 	// same, however long that is: used when the kernel log itself proved the
@@ -168,6 +171,27 @@ func kernelRelease() string {
 	return strings.TrimSpace(string(data))
 }
 
+// kernelSeries reduces a kernel release to its major.minor series:
+// "7.0.0-1018-oem" is "7.0". Point releases and distribution rebuilds within
+// a series share the DRM code that fails, so a denial is kept across them.
+func kernelSeries(release string) string {
+	parts := strings.SplitN(release, ".", 3)
+	if len(parts) < 2 {
+		return release
+	}
+	minor := parts[1]
+	if i := strings.IndexAny(minor, "-+_ "); i >= 0 {
+		minor = minor[:i]
+	}
+	return parts[0] + "." + minor
+}
+
+// kernelChangedSince reports whether the running kernel is of a different
+// series than the one a denial was recorded on.
+func kernelChangedSince(recorded string) bool {
+	return recorded != "" && kernelSeries(recorded) != kernelSeries(kernelReleaseFn())
+}
+
 func displayGuardDeny(method, reason string) { displayGuardDenyUntil(method, reason, false) }
 
 func displayGuardDenyUntil(method, reason string, untilKernelChange bool) {
@@ -193,7 +217,7 @@ func displayGuardDenied(method string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if d.Kernel != "" && d.Kernel != kernelReleaseFn() {
+	if kernelChangedSince(d.Kernel) {
 		return "", false
 	}
 	if !d.UntilKernelChange && displayGuardNow().Sub(d.At) > displayGuardDenialTTL {
@@ -266,12 +290,17 @@ func vkmsBlocked() bool {
 }
 
 // The kernel log is read at most once a minute once it came back clean; a
-// failure sticks for the rest of the boot.
+// failure sticks for the rest of the boot. The previous boot's log is read
+// as well: the failure freezes the display and the user usually reboots
+// before the host could record it, so the fresh boot's log is clean.
 var vkmsLogCache struct {
 	mu      sync.Mutex
 	checked time.Time
 	failed  bool
 }
+
+// readKernelLogFn is a seam for tests.
+var readKernelLogFn = readKernelLog
 
 func vkmsKernelLogShowsFailure() bool {
 	vkmsLogCache.mu.Lock()
@@ -282,17 +311,36 @@ func vkmsKernelLogShowsFailure() bool {
 	if !vkmsLogCache.checked.IsZero() && time.Since(vkmsLogCache.checked) < time.Minute {
 		return false
 	}
-	vkmsLogCache.checked = time.Now()
-	if !vkmsModuleLoaded() {
+	return vkmsKernelLogCheckLocked()
+}
+
+// vkmsKernelLogRecheck reads the kernel log again regardless of the cache.
+// It runs right after vkms has been loaded or one of its outputs was set:
+// the failure, when it comes, comes within that second, and the X server
+// may stay up while the display is frozen, so the host must record it
+// before the user resorts to the power button.
+func vkmsKernelLogRecheck() bool {
+	vkmsLogCache.mu.Lock()
+	defer vkmsLogCache.mu.Unlock()
+	if vkmsLogCache.failed {
+		return true
+	}
+	return vkmsKernelLogCheckLocked()
+}
+
+func vkmsKernelLogCheckLocked() bool {
+	text, ok := readKernelLogFn()
+	if !ok {
+		// Nothing learned; try again on the next call.
 		return false
 	}
-	text, ok := readKernelLog()
-	if ok && kernelLogShowsVkmsFailure(text) {
+	vkmsLogCache.checked = time.Now()
+	if kernelLogShowsVkmsFailure(text) {
 		vkmsLogCache.failed = true
-		// Remembered across reboots for this kernel: the next boot's log is
-		// clean until vkms is tried again, and trying again crashes X.
+		// Remembered across reboots for this kernel series: the next boot's
+		// log is clean until vkms is tried again, and trying again crashes X.
 		displayGuardDenyUntil(guardMethodVkms, "the kernel log shows a vkms failure (vkms_prepare_fb)", true)
-		log.Printf("X11 virtual display: the kernel log shows a vkms failure (vkms_prepare_fb); not using vkms outputs. Set %s=1 to override", vkmsAutoloadEnv)
+		log.Printf("X11 virtual display: the kernel log shows a vkms failure (vkms_prepare_fb); not using vkms outputs on this kernel series. Set %s=1 to override", vkmsAutoloadEnv)
 		return true
 	}
 	return false
@@ -309,19 +357,28 @@ func kernelLogShowsVkmsFailure(text string) bool {
 	return false
 }
 
+// readKernelLog returns this boot's kernel log, with the previous boot's
+// appended when the journal keeps one. dmesg is the fallback and only knows
+// the current boot.
 func readKernelLog() (string, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	for _, argv := range [][]string{
-		{"journalctl", "-k", "-b", "--no-pager", "-q"},
-		{"dmesg"},
-	} {
-		path, err := exec.LookPath(argv[0])
-		if err != nil {
-			continue
-		}
-		out, err := exec.CommandContext(ctx, path, argv[1:]...).Output()
+	if path, err := exec.LookPath("journalctl"); err == nil {
+		out, err := exec.CommandContext(ctx, path, "-k", "-b", "--no-pager", "-q").Output()
 		if err == nil {
+			var text strings.Builder
+			text.Write(out)
+			// Absent on the first boot or without a persistent journal; then
+			// the current boot is all there is.
+			if prev, err := exec.CommandContext(ctx, path, "-k", "-b", "-1", "--no-pager", "-q").Output(); err == nil {
+				text.WriteByte('\n')
+				text.Write(prev)
+			}
+			return text.String(), true
+		}
+	}
+	if path, err := exec.LookPath("dmesg"); err == nil {
+		if out, err := exec.CommandContext(ctx, path).Output(); err == nil {
 			return string(out), true
 		}
 	}
