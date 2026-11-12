@@ -9,8 +9,8 @@ package main
 // compares its vMAJOR.MINOR.PATCH tag with this build's version.
 //
 // POST /api/update/install downloads this platform's release bundle, verifies
-// it against the SHA256SUMS.txt published with the release, and hands it to
-// the platform's applyUpdate (update_linux.go, update_windows.go), which
+// the detached signature on SHA256SUMS.txt and the bundle hash, and hands it
+// to the platform's applyUpdate (update_linux.go, update_windows.go), which
 // replaces the installed host and restarts it. Development builds and copies
 // that were not installed by the installer only link to the release page.
 //
@@ -20,7 +20,10 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,10 +45,14 @@ const (
 	// result (GitHub allows 60 unauthenticated API requests an hour).
 	updateManualMinInterval = 30 * time.Second
 	updateChecksumsName     = "SHA256SUMS.txt"
+	updateChecksumsSigName  = "SHA256SUMS.sig"
 	updatePendingName       = "update-pending.json"
 	maxChecksumsBytes       = 64 << 10
+	maxChecksumsSigBytes    = 1 << 10
 	maxBundleBytes          = 1 << 30
 )
+
+const releaseChecksumsPublicKeyHex = "247960eda0e2c352ac115ac991abcc45fccca85fb429bc0e5a54426ed4aec8f1"
 
 // latestReleaseURL is a variable so tests can point it at a local server.
 var latestReleaseURL = "https://api.github.com/repos/" + releaseRepo + "/releases/latest"
@@ -99,19 +106,21 @@ type updatePending struct {
 }
 
 type updater struct {
-	mu        sync.Mutex
-	st        updateStatus
-	release   githubRelease
-	lastCheck time.Time
-	busy      bool // a check or install is running
-	loaded    bool // update-pending.json has been read
+	mu                   sync.Mutex
+	checksumPublicKeyHex string
+	st                   updateStatus
+	release              githubRelease
+	lastCheck            time.Time
+	busy                 bool // a check or install is running
+	loaded               bool // update-pending.json has been read
 }
 
 var hostUpdater = newUpdater()
 
 func newUpdater() *updater {
 	return &updater{
-		st: updateStatus{State: updateIdle, Current: hostVersion()},
+		checksumPublicKeyHex: releaseChecksumsPublicKeyHex,
+		st:                   updateStatus{State: updateIdle, Current: hostVersion()},
 	}
 }
 
@@ -205,6 +214,9 @@ func (u *updater) installability(rel githubRelease) (bool, string) {
 	if _, found := rel.asset(updateChecksumsName); !found {
 		return false, "The release has no " + updateChecksumsName + " to verify the download with."
 	}
+	if _, found := rel.asset(updateChecksumsSigName); !found {
+		return false, "The release has no " + updateChecksumsSigName + " signature."
+	}
 	return true, note
 }
 
@@ -257,10 +269,18 @@ func (u *updater) install(rel githubRelease, stop func()) error {
 	bundleName := updateBundleName(rel.Tag)
 	bundle, _ := rel.asset(bundleName)
 	sums, _ := rel.asset(updateChecksumsName)
+	signature, _ := rel.asset(updateChecksumsSigName)
 
 	var sumsText strings.Builder
 	if err := u.download(sums, maxChecksumsBytes).to(ctx, &sumsText); err != nil {
 		return fmt.Errorf("download %s: %w", updateChecksumsName, err)
+	}
+	var sig bytes.Buffer
+	if err := u.download(signature, maxChecksumsSigBytes).to(ctx, &sig); err != nil {
+		return fmt.Errorf("download %s: %w", updateChecksumsSigName, err)
+	}
+	if err := verifyReleaseChecksumSignature(u.checksumPublicKeyHex, []byte(sumsText.String()), sig.Bytes()); err != nil {
+		return err
 	}
 	want, ok := parseSHA256Sums(sumsText.String())[bundleName]
 	if !ok {
@@ -322,6 +342,18 @@ func (u *updater) install(rel githubRelease, stop func()) error {
 	time.Sleep(500 * time.Millisecond)
 	if res.restart != nil {
 		res.restart(stop)
+	}
+	return nil
+}
+
+func verifyReleaseChecksumSignature(publicKeyHex string, checksums, signature []byte) error {
+	publicKey, err := hex.DecodeString(publicKeyHex)
+	if err != nil || len(publicKey) != ed25519.PublicKeySize {
+		return errors.New("release checksum verification key is invalid")
+	}
+	if len(signature) != ed25519.SignatureSize ||
+		!ed25519.Verify(ed25519.PublicKey(publicKey), checksums, signature) {
+		return errors.New("release checksum signature verification failed")
 	}
 	return nil
 }

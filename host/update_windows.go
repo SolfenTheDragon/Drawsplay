@@ -62,16 +62,16 @@ func applyUpdate(bundlePath, tag string) (applyResult, error) {
 	return applyResult{keepDir: true, restart: func(stop func()) { stop() }}, nil
 }
 
-// verifyUpdateInstallerSigner requires a code-signed host to update only to
-// an installer signed by the same publisher. Unsigned copies (local and
-// unsigned release builds) rely on the SHA-256 check alone.
+// verifyUpdateInstallerSigner requires both the installed host and downloaded
+// installer to have valid signatures with the same certificate thumbprint.
+// Unsigned builds cannot self-update.
 func verifyUpdateInstallerSigner(current, installer string) error {
 	script := "$ErrorActionPreference='Stop'; " +
 		"$cur=Get-AuthenticodeSignature -LiteralPath $env:DRAWSPLAY_CURRENT_EXE; " +
-		"if($cur.Status -ne 'Valid' -or -not $cur.SignerCertificate){ exit 0 }; " +
+		"if($cur.Status -ne 'Valid' -or -not $cur.SignerCertificate){ throw 'the installed host is not signed by a trusted publisher' }; " +
 		"$new=Get-AuthenticodeSignature -LiteralPath $env:DRAWSPLAY_UPDATE_INSTALLER; " +
 		"if($new.Status -ne 'Valid' -or -not $new.SignerCertificate -or " +
-		"$new.SignerCertificate.Subject -ne $cur.SignerCertificate.Subject) " +
+		"$new.SignerCertificate.Thumbprint -ne $cur.SignerCertificate.Thumbprint) " +
 		"{ throw ('the installer is not signed by the publisher of this copy ('+$new.Status+')') }"
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

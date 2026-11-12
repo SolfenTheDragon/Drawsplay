@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -48,6 +49,9 @@ func fakeReleaseServer(t *testing.T, tag, bundleBody, sumOf string) *httptest.Se
 	t.Helper()
 	sum := sha256.Sum256([]byte(sumOf))
 	bundle := updateBundleName(tag)
+	checksumText := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), bundle)
+	privateKey := ed25519.NewKeyFromSeed([]byte(strings.Repeat("test-key-seed!", 3)[:ed25519.SeedSize]))
+	signature := ed25519.Sign(privateKey, []byte(checksumText))
 	mux := http.NewServeMux()
 	var srv *httptest.Server
 	mux.HandleFunc("/latest", func(w http.ResponseWriter, _ *http.Request) {
@@ -56,13 +60,13 @@ func fakeReleaseServer(t *testing.T, tag, bundleBody, sumOf string) *httptest.Se
 			Assets: []githubAsset{
 				{Name: bundle, URL: srv.URL + "/bundle", Size: int64(len(bundleBody))},
 				{Name: updateChecksumsName, URL: srv.URL + "/sums"},
+				{Name: updateChecksumsSigName, URL: srv.URL + "/signature", Size: int64(len(signature))},
 			},
 		})
 	})
 	mux.HandleFunc("/bundle", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, bundleBody) })
-	mux.HandleFunc("/sums", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(sum[:]), bundle)
-	})
+	mux.HandleFunc("/sums", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, checksumText) })
+	mux.HandleFunc("/signature", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(signature) })
 	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -71,6 +75,24 @@ func fakeReleaseServer(t *testing.T, tag, bundleBody, sumOf string) *httptest.Se
 	githubURLAllowed = func(u *url.URL) bool { return u.Host == strings.TrimPrefix(srv.URL, "http://") }
 	t.Cleanup(func() { latestReleaseURL, githubURLAllowed = oldURL, oldAllowed })
 	return srv
+}
+
+func testReleaseChecksumsPublicKeyHex() string {
+	privateKey := ed25519.NewKeyFromSeed([]byte(strings.Repeat("test-key-seed!", 3)[:ed25519.SeedSize]))
+	return hex.EncodeToString(privateKey.Public().(ed25519.PublicKey))
+}
+
+func TestVerifyReleaseChecksumSignature(t *testing.T) {
+	privateKey := ed25519.NewKeyFromSeed([]byte(strings.Repeat("test-key-seed!", 3)[:ed25519.SeedSize]))
+	message := []byte("signed checksums\n")
+	signature := ed25519.Sign(privateKey, message)
+	pub := hex.EncodeToString(privateKey.Public().(ed25519.PublicKey))
+	if err := verifyReleaseChecksumSignature(pub, message, signature); err != nil {
+		t.Fatalf("valid signature rejected: %v", err)
+	}
+	if err := verifyReleaseChecksumSignature(pub, append(message, 'x'), signature); err == nil {
+		t.Fatal("tampered checksums accepted")
+	}
 }
 
 func withHostVersion(t *testing.T, v string) {
@@ -112,6 +134,7 @@ func TestUpdateInstallRejectsChecksumMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	u.checksumPublicKeyHex = testReleaseChecksumsPublicKeyHex()
 	stopped := false
 	err = u.install(rel, func() { stopped = true })
 	if err == nil || !strings.Contains(err.Error(), "SHA-256 mismatch") {
