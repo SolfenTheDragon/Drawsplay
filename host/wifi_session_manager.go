@@ -70,7 +70,7 @@ func (m *wifiSessionManager) serve(ctx context.Context, c wifilan.Candidate) {
 	closed := make(chan struct{})
 	var once sync.Once
 	notify := func() { once.Do(func() { close(closed) }) }
-	input, video = &closeNotifyConn{Conn: input, notify: notify}, &closeNotifyConn{Conn: video, notify: notify}
+	input, video = withCloseNotify(input, notify), withCloseNotify(video, notify)
 	if err := m.inputs.Push(input); err != nil {
 		video.Close()
 		log.Printf("Wi-Fi input session rejected: %v", err)
@@ -92,6 +92,21 @@ func (m *wifiSessionManager) serve(ctx context.Context, c wifilan.Candidate) {
 type closeNotifyConn struct {
 	net.Conn
 	notify func()
+}
+
+// closeNotifyEndpointConn keeps the wrapped conn's videoEndpoint: hiding it
+// makes the video session fall back to raw byte-stream writes.
+type closeNotifyEndpointConn struct {
+	*closeNotifyConn
+	videoEndpoint
+}
+
+func withCloseNotify(conn net.Conn, notify func()) net.Conn {
+	wrapped := &closeNotifyConn{Conn: conn, notify: notify}
+	if endpoint, ok := conn.(videoEndpoint); ok {
+		return &closeNotifyEndpointConn{closeNotifyConn: wrapped, videoEndpoint: endpoint}
+	}
+	return wrapped
 }
 
 func (c *closeNotifyConn) Close() error {

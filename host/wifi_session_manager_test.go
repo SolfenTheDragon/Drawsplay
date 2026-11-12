@@ -101,3 +101,24 @@ func TestWiFiSessionManagerYieldsToUSBAndSurvivesEstablishErrors(t *testing.T) {
 		t.Fatal("did not retry after establish failure")
 	}
 }
+
+func TestWiFiSessionManagerKeepsVideoEndpointOnWrappedConn(t *testing.T) {
+	hostCtl, tabCtl := net.Pipe()
+	hostVid, tabVid := net.Pipe()
+	defer tabCtl.Close()
+	defer tabVid.Close()
+	limits := wifilan.SessionHello{MaxWidth: 1920, MaxHeight: 1200, MaxAccessUnit: 1 << 16}
+	input, video, err := newWiFiSessionConns(hostCtl, hostVid, 5, limits, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	wrapped := withCloseNotify(video, func() {})
+	defer wrapped.Close()
+	if _, ok := wrapped.(videoEndpoint); !ok {
+		t.Fatal("wrapped Wi-Fi video conn lost its videoEndpoint; video would be written as a raw byte stream")
+	}
+	if _, ok := withCloseNotify(input, func() {}).(videoEndpoint); ok {
+		t.Fatal("input conn must not become a video endpoint")
+	}
+}
