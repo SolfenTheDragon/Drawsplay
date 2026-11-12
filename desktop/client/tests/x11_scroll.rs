@@ -114,7 +114,11 @@ fn wheel_buttons_send_one_step_per_press() {
         match listener.accept() {
             Ok((stream, _)) => break stream,
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
-                assert!(client.child.try_wait().unwrap().is_none(), "client exited before connecting");
+                if let Some(status) = client.child.try_wait().unwrap() {
+                    thread::sleep(Duration::from_millis(100));
+                    let logs: Vec<String> = log_rx.try_iter().collect();
+                    panic!("client exited before connecting ({status}); stderr: {logs:#?}");
+                }
                 thread::sleep(Duration::from_millis(20));
             }
             Err(e) => panic!("client did not connect: {e}"),
