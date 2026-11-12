@@ -296,21 +296,15 @@ var globalSettingsStore *settingsStore
 // back to the old configured resolution instead of keeping the user's
 // choice.
 func (st *settingsStore) updateResolution(width, height int) error {
-	// Push to the tablet too: it is the durable store of the preferred mode.
-	publishModeChange(width, height, 0)
-	s := st.get()
-	s.Width = width
-	s.Height = height
-	if err := s.validate(); err != nil {
-		return err
+	_, _, err := st.modify(func(s *settings) error {
+		s.Width = width
+		s.Height = height
+		return nil
+	})
+	if err == nil {
+		publishModeChange(width, height, 0)
 	}
-	if err := saveSettings(s); err != nil {
-		return fmt.Errorf("saving config: %w", err)
-	}
-	st.mu.Lock()
-	st.s = s
-	st.mu.Unlock()
-	return nil
+	return err
 }
 
 func newSettingsStore(s settings) *settingsStore {
@@ -326,17 +320,31 @@ func (st *settingsStore) get() settings {
 
 // update validates, persists, and applies new settings.
 func (st *settingsStore) update(s settings) error {
-	s = applyFeatureFlags(s)
-	if err := s.validate(); err != nil {
-		return err
-	}
-	if err := saveSettings(s); err != nil {
-		return fmt.Errorf("saving config: %w", err)
-	}
+	_, _, err := st.modify(func(next *settings) error {
+		*next = s
+		return nil
+	})
+	return err
+}
+
+// modify serializes merging and persistence so patches cannot restore stale fields.
+func (st *settingsStore) modify(change func(*settings) error) (settings, settings, error) {
 	st.mu.Lock()
-	st.s = s
-	st.mu.Unlock()
-	return nil
+	defer st.mu.Unlock()
+	old := st.s
+	next := old
+	if err := change(&next); err != nil {
+		return old, old, err
+	}
+	next = applyFeatureFlags(next)
+	if err := next.validate(); err != nil {
+		return old, old, err
+	}
+	if err := saveSettings(next); err != nil {
+		return old, old, fmt.Errorf("saving config: %w", err)
+	}
+	st.s = next
+	return old, next, nil
 }
 
 // videoOptions converts a settings snapshot into the video pipeline's

@@ -23,16 +23,15 @@ package main
 //	                      — downloads, verifies and installs the newer
 //	                        release, then restarts the host (update.go)
 //
-// Security model: bound to 127.0.0.1 only. State changes additionally require
-// a per-process CSRF header token, and browser origins must match the loopback
-// UI authority to prevent hostile pages from driving the local API.
+// Security model: bound to 127.0.0.1 and accepts only connections whose
+// process owner can be verified as the current user. State changes additionally
+// require a per-process CSRF header token and a matching local browser origin.
 
 import (
 	"context"
 	"embed"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"time"
 )
@@ -45,7 +44,7 @@ var webuiFS embed.FS
 // stop and exit are as for newWebUIHandler.
 func runWebUI(ctx context.Context, store *settingsStore, stop, exit func()) {
 	addr := fmt.Sprintf("127.0.0.1:%d", webuiPort)
-	ln, err := net.Listen("tcp", addr)
+	ln, err := listenSameUser(addr)
 	if err != nil {
 		log.Printf("Web UI disabled: %v", err)
 		return

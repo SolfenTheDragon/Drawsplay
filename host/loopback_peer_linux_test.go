@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"net"
 	"net/netip"
 	"strings"
@@ -28,6 +29,37 @@ func TestParseProcAddrIPv6Loopback(t *testing.T) {
 	got, ok := parseProcAddr("00000000000000000000000001000000:0050")
 	if !ok || got != netip.MustParseAddrPort("[::1]:80") {
 		t.Fatalf("got %v ok=%v", got, ok)
+	}
+}
+
+func TestSameUserListenerRejectsUnknownPeerOwner(t *testing.T) {
+	oldCheck := checkLoopbackPeerUser
+	called := make(chan struct{}, 1)
+	checkLoopbackPeerUser = func(net.Conn) (bool, error) {
+		called <- struct{}{}
+		return false, errors.New("owner unavailable")
+	}
+	defer func() { checkLoopbackPeerUser = oldCheck }()
+
+	ln, err := listenSameUser("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	accepted := make(chan error, 1)
+	go func() {
+		_, err := ln.Accept()
+		accepted <- err
+	}()
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	<-called
+	_ = ln.Close()
+	if err := <-accepted; !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("Accept() = %v, want closed listener after refusing unknown peer", err)
 	}
 }
 

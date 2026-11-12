@@ -19,6 +19,8 @@ import (
 
 const adbLoopbackPoll = time.Second
 
+var checkLoopbackPeerUser = loopbackPeerIsOtherUser
+
 // runADBLoopbackListeners follows the ADBTunnelEnabled setting until ctx ends.
 func runADBLoopbackListeners(ctx context.Context, store *settingsStore) {
 	var (
@@ -105,12 +107,14 @@ func (l *sameUserListener) Accept() (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		if other, err := loopbackPeerIsOtherUser(c); other {
+		if other, err := checkLoopbackPeerUser(c); other {
 			throttledLog("adb-loopback-foreign", "Refused a loopback connection from %s: it belongs to another user", c.RemoteAddr())
 			_ = c.Close()
 			continue
 		} else if err != nil {
-			throttledLog("adb-loopback-owner", "Could not tell which user opened %s (%v); accepting it", c.RemoteAddr(), err)
+			throttledLog("adb-loopback-owner", "Refused a loopback connection from %s: could not verify its owner (%v)", c.RemoteAddr(), err)
+			_ = c.Close()
+			continue
 		}
 		tc := &trackedConn{Conn: c, l: l}
 		l.mu.Lock()

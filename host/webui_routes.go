@@ -18,6 +18,13 @@ type webUIAPI struct {
 	exit      func()
 }
 
+// webUIContentSecurityPolicy confines the settings page to its own embedded
+// script and stylesheet: no inline script, no foreign origins, no framing.
+// Script-driven style properties (element.style.x) stay allowed; inline
+// style attributes and javascript: URLs do not.
+const webUIContentSecurityPolicy = "default-src 'self'; img-src 'self' data:; " +
+	"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+
 // newWebUIHandler builds the web UI routes (separate from runWebUI so tests
 // can drive the handler with httptest). stop is invoked, shortly after the
 // response is written, by POST /api/stop. exit ends the whole host process
@@ -46,6 +53,7 @@ func newWebUIHandler(store *settingsStore, stop, exit func()) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Content-Security-Policy", webUIContentSecurityPolicy)
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Cache-Control", "no-store")
 		}
@@ -111,19 +119,25 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 		if !requireCSRF(w, r, api.csrfToken) {
 			return
 		}
-		// Decode over the current settings so older clients that omit a
-		// newly added field preserve its value instead of zeroing it.
-		old := api.store.get()
-		s := old
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&s); err != nil {
+		var patch json.RawMessage
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&patch); err != nil {
 			httpError(w, http.StatusBadRequest, "invalid JSON: %v", err)
 			return
 		}
-		if err := api.store.update(s); err != nil {
+		var decodeErr error
+		old, s, err := api.store.modify(func(next *settings) error {
+			decodeErr = json.Unmarshal(patch, next)
+			return decodeErr
+		})
+		if decodeErr != nil {
+			httpError(w, http.StatusBadRequest, "invalid JSON: %v", decodeErr)
+			return
+		}
+		if err != nil {
 			httpError(w, http.StatusUnprocessableEntity, "%v", err)
 			return
 		}
-		applyPairedWiFiSettings(api.store, old, api.store.get())
+		applyPairedWiFiSettings(api.store, old, s)
 		fps := 0
 		if old.FPS != s.FPS {
 			fps = s.FPS
@@ -138,7 +152,10 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 		if modeW > 0 && modeH > 0 {
 			publishModeChange(modeW, modeH, fps)
 		}
-		restarted := restartActiveVideoSession()
+		restarted := false
+		if videoSettingsChanged(old, s) {
+			restarted = restartActiveVideoSession()
+		}
 		inputRestarted := false
 		if old.TouchEnabled != s.TouchEnabled ||
 			old.PenEnabled != s.PenEnabled ||
@@ -149,7 +166,9 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 			old.VideoScaling != s.VideoScaling {
 			inputRestarted = restartActiveInputSessions()
 		}
-		runBackgroundPreflight(api.store.get())
+		if old.FFmpeg != s.FFmpeg || old.ADB != s.ADB || old.AllowToolAutoInstall != s.AllowToolAutoInstall {
+			runBackgroundPreflight(s)
+		}
 		log.Printf("Settings updated via web UI: fps=%d bitrate=%s %dx%d touch=%v pen=%v keyboard=%v keepAliveOnBackground=%v videoScaling=%s preferredADBSerial=%q requirePreferredADB=%v autoLaunchAndroidApp=%v zeroCopyCapture=%v temporalLayering=%v allowToolAutoInstall=%v noDriverInstall=%v (videoRestarted=%v inputRestarted=%v)",
 			s.FPS, s.Bitrate, s.Width, s.Height, s.TouchEnabled, s.PenEnabled,
 			s.KeyboardEnabled, s.KeepAliveOnBackground, s.VideoScaling, s.PreferredADBSerial, s.RequirePreferredADB, s.AutoLaunchAndroidApp, s.ZeroCopyCapture, s.TemporalLayering, s.AllowToolAutoInstall,
@@ -158,11 +177,25 @@ func (api webUIAPI) handleSettings(w http.ResponseWriter, r *http.Request) {
 			"ok":             true,
 			"restarted":      restarted,
 			"inputRestarted": inputRestarted,
+			"settings":       s,
 		})
 	default:
 		w.Header().Set("Allow", "GET, PUT")
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func videoSettingsChanged(old, next settings) bool {
+	return old.FFmpeg != next.FFmpeg ||
+		old.FPS != next.FPS ||
+		old.Bitrate != next.Bitrate ||
+		old.Width != next.Width ||
+		old.Height != next.Height ||
+		old.ZeroCopyCapture != next.ZeroCopyCapture ||
+		old.TemporalLayering != next.TemporalLayering ||
+		old.IdleCaptureGate != next.IdleCaptureGate ||
+		old.X11HighRateCapture != next.X11HighRateCapture ||
+		old.NativeMediaHelper != next.NativeMediaHelper
 }
 
 func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {

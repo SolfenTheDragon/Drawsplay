@@ -2,7 +2,13 @@
 
 package main
 
-import "net"
+import (
+	"errors"
+	"net"
+)
 
-// loopbackPeerIsOtherUser has no implementation here; connections are accepted.
-func loopbackPeerIsOtherUser(net.Conn) (bool, error) { return false, nil }
+// Platforms without a peer-ownership implementation must fail closed rather
+// than treating every local process as the current user.
+func loopbackPeerIsOtherUser(net.Conn) (bool, error) {
+	return false, errors.New("peer ownership checks are unsupported on this platform")
+}

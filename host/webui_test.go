@@ -2,17 +2,154 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
+
+type pausedSettingsBody struct {
+	io.Reader
+	started chan struct{}
+	resume  <-chan struct{}
+	once    sync.Once
+}
+
+func (b *pausedSettingsBody) Read(p []byte) (int, error) {
+	b.once.Do(func() {
+		close(b.started)
+		<-b.resume
+	})
+	return b.Reader.Read(p)
+}
+
+func TestSettingsConcurrentPatchesPreserveChanges(t *testing.T) {
+	for _, resolutionChange := range []bool{false, true} {
+		t.Run(fmt.Sprintf("resolution=%v", resolutionChange), func(t *testing.T) {
+			store := newTestStore(t)
+			api := webUIAPI{store: store, csrfToken: "test"}
+			resume := make(chan struct{})
+			var resumeOnce sync.Once
+			unblock := func() { resumeOnce.Do(func() { close(resume) }) }
+			defer unblock()
+			body := &pausedSettingsBody{
+				Reader:  strings.NewReader(`{"keyboardEnabled":false}`),
+				started: make(chan struct{}),
+				resume:  resume,
+			}
+			req := httptest.NewRequest(http.MethodPut, "/api/settings", body)
+			req.Header.Set("X-DrawSplay-CSRF", "test")
+			res := httptest.NewRecorder()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				api.handleSettings(res, req)
+			}()
+			select {
+			case <-body.started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("request did not begin reading its body")
+			}
+			if resolutionChange {
+				if err := store.updateResolution(2560, 1440); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"touchEnabled":false}`))
+				req.Header.Set("X-DrawSplay-CSRF", "test")
+				res := httptest.NewRecorder()
+				api.handleSettings(res, req)
+				if res.Code != http.StatusOK {
+					t.Fatalf("concurrent update failed: %d %s", res.Code, res.Body)
+				}
+			}
+			unblock()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("request did not finish")
+			}
+			if res.Code != http.StatusOK {
+				t.Fatalf("delayed update failed: %d %s", res.Code, res.Body)
+			}
+			got := store.get()
+			if got.KeyboardEnabled || (!resolutionChange && got.TouchEnabled) ||
+				(resolutionChange && (got.Width != 2560 || got.Height != 1440)) {
+				t.Fatalf("concurrent change lost: %+v", got)
+			}
+			if saved := loadSettings(); saved != got {
+				t.Fatalf("disk and memory disagree: saved=%+v memory=%+v", saved, got)
+			}
+		})
+	}
+}
+
+func TestSettingsApplyOnlyAffectedSessions(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantVideo bool
+		wantInput bool
+	}{
+		{"unchanged", `{}`, false, false},
+		{"update preference", `{"updateCheck":false}`, false, false},
+		{"keyboard policy is read live", `{"keyboardEnabled":false}`, false, false},
+		{"pen policy", `{"penPrediction":false}`, false, true},
+		{"touch input", `{"touchEnabled":false}`, false, true},
+		{"scaling policy", `{"videoScaling":"fit"}`, false, true},
+		{"bitrate", `{"bitrate":"12M"}`, true, false},
+		{"frame rate", `{"fps":60}`, true, false},
+		{"resolution", `{"width":1280,"height":720}`, true, false},
+		{"native capture", `{"nativeMediaHelper":"off"}`, true, false},
+		{"capture gating", `{"idleCaptureGate":true}`, true, false},
+		{"temporal layers", `{"temporalLayering":true}`, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newTestStore(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			setActiveVideoSession(cancel, nil)
+			defer func() { setActiveVideoSession(nil, nil); cancel() }()
+			input, peer := net.Pipe()
+			defer input.Close()
+			defer peer.Close()
+			registerInputConnection(987654, input)
+			defer unregisterInputConnection(987654)
+			srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
+			defer srv.Close()
+			res := protectedRequest(t, http.MethodPut, srv.URL, "/api/settings", tt.body, testCSRFToken(t, srv.URL))
+			defer res.Body.Close()
+			var body struct {
+				Restarted      bool     `json:"restarted"`
+				InputRestarted bool     `json:"inputRestarted"`
+				Settings       settings `json:"settings"`
+			}
+			if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if res.StatusCode != http.StatusOK || body.Restarted != tt.wantVideo || body.InputRestarted != tt.wantInput {
+				t.Fatalf("status=%d video=%v input=%v; want video=%v input=%v", res.StatusCode, body.Restarted, body.InputRestarted, tt.wantVideo, tt.wantInput)
+			}
+			if (ctx.Err() != nil) != tt.wantVideo {
+				t.Fatalf("video cancellation = %v, want %v", ctx.Err(), tt.wantVideo)
+			}
+			if body.Settings != store.get() {
+				t.Fatal("response does not contain the saved settings")
+			}
+		})
+	}
+}
 
 // newTestStore builds a store whose saves go to a temp config dir.
 func newTestStore(t *testing.T) *settingsStore {
@@ -505,6 +642,25 @@ func TestWebUIRefusesRebindedHostNames(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK {
 			t.Errorf("Host %q refused: %d", host, res.StatusCode)
+		}
+	}
+}
+
+func TestWebUISetsContentSecurityPolicy(t *testing.T) {
+	store := newTestStore(t)
+	srv := httptest.NewServer(newWebUIHandler(store, func() {}, func() {}))
+	defer srv.Close()
+	for _, path := range []string{"/", "/api/status"} {
+		res, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		csp := res.Header.Get("Content-Security-Policy")
+		for _, want := range []string{"default-src 'self'", "frame-ancestors 'none'", "object-src 'none'"} {
+			if !strings.Contains(csp, want) {
+				t.Errorf("%s: CSP %q lacks %q", path, csp, want)
+			}
 		}
 	}
 }
