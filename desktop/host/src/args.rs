@@ -25,6 +25,8 @@ pub(crate) struct Args {
     pub(crate) chosen: Encoder,
     pub(crate) show_key: bool,
     pub(crate) list_trusted: bool,
+    pub(crate) manage_trusted: bool,
+    pub(crate) terminal: bool,
     pub(crate) forget: Option<String>,
     pub(crate) remove_fake: bool,
     pub(crate) trust_key: Option<String>,
@@ -37,6 +39,7 @@ pub(crate) struct Args {
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Source {
+    /// Synthetic video only; never opens display or input backends.
     Test,
     Desktop,
     /// Create a virtual monitor (Windows: DrawSplay IDD driver; Linux/X11: a spare RandR output).
@@ -45,7 +48,7 @@ pub(crate) enum Source {
 
 pub(crate) fn parse_args() -> Result<Args, String> {
     let mut a = Args {
-        bind: format!("0.0.0.0:{DEFAULT_PORT}"),
+        bind: format!("127.0.0.1:{DEFAULT_PORT}"),
         source: Source::Virtual,
         bitrate_kbps: 12_000,
         ffmpeg: "ffmpeg".into(),
@@ -57,6 +60,8 @@ pub(crate) fn parse_args() -> Result<Args, String> {
         chosen: Encoder::Software,
         show_key: false,
         list_trusted: false,
+        manage_trusted: false,
+        terminal: false,
         forget: None,
         remove_fake: false,
         trust_key: None,
@@ -82,6 +87,8 @@ pub(crate) fn parse_args() -> Result<Args, String> {
             "--require-virtual" => a.require_virtual = true,
             "--show-key" => a.show_key = true,
             "--list-trusted" => a.list_trusted = true,
+            "--manage-trusted" => a.manage_trusted = true,
+            "--terminal" => a.terminal = true,
             "--remove-fake-displays" => a.remove_fake = true,
             "--forget" => a.forget = Some(val("--forget")?),
             "--trust" => a.trust_key = Some(val("--trust")?),
@@ -117,12 +124,15 @@ pub(crate) fn parse_args() -> Result<Args, String> {
                 println!(
                     "dd-host [--bind ADDR:PORT] [--source virtual|desktop|test] [--bitrate-kbps N]\n        [--size WxH] [--origin X,Y] [--ffmpeg PATH] [--trust-all] [--require-virtual]
         [--encoder auto|software|nvenc|qsv|amf|vaapi]
-        [--show-key] [--trust CLIENT_KEY]\n        [--list-trusted] [--forget KEY_PREFIX]\n        [--max-clients N] [--remove-fake-displays]\n        [--allow NET]... [--allow-any]\n\nOnly loopback, private, link-local and 100.64.0.0/10 addresses are served; --allow adds a network\n(ADDR/LEN), --allow-any serves everyone. The stream size defaults to the client's requested size."
+        [--show-key] [--trust CLIENT_KEY]\n        [--list-trusted] [--forget KEY_PREFIX] [--manage-trusted] [--terminal]\n        [--max-clients N] [--remove-fake-displays]\n        [--allow NET]... [--allow-any]\n\n        --terminal uses terminal prompts instead of native dialogs.\n--source test generates video without accessing displays or injecting input.\nThe default bind is loopback-only. Set --bind to a LAN/VPN address to accept remote clients; only loopback,\nprivate, link-local and 100.64.0.0/10 peers are served by default. --allow adds a network (ADDR/LEN),\n--allow-any serves every peer. The stream size defaults to the client's requested size."
                 );
                 std::process::exit(0);
             }
             o => return Err(format!("unknown argument {o}")),
         }
+    }
+    if a.source == Source::Test && a.remove_fake {
+        return Err("--source test cannot be combined with --remove-fake-displays".into());
     }
     Ok(a)
 }

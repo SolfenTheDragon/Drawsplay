@@ -10,6 +10,7 @@ use session::{FrameSlot, Settings, UiEvent};
 use std::collections::HashSet;
 use std::num::NonZeroU32;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -35,6 +36,76 @@ struct Args {
     trust_key: Option<String>,
     list_trusted: bool,
     forget: Option<String>,
+    manage_trusted: bool,
+    terminal: bool,
+}
+
+fn connection_entry(args: &mut Args) -> bool {
+    use dd_proto::desktop_ui::{choose, entry, manage};
+    loop {
+        match choose(
+            "DrawSplay Desktop",
+            "Connect to another PC running dd-host.\nOnly approve pairing when both screens show the same code.",
+            &["Connect", "Trusted devices", "Quit"],
+        )
+        .ok()
+        .flatten()
+        .as_deref()
+        {
+            Some("Connect") => {
+                let Some(host) =
+                    entry("Connect to PC", "Host name or IP address, optionally :PORT (IPv6: [address]:PORT)")
+                        .ok()
+                        .flatten()
+                else {
+                    continue;
+                };
+                if host.trim().is_empty() {
+                    continue;
+                }
+                args.host = with_default_port(host.trim());
+                match choose(
+                    "Display",
+                    "Choose how to display the remote PC.",
+                    &["Window - fit", "Fullscreen - fit", "Window - 1:1"],
+                )
+                .ok()
+                .flatten()
+                .as_deref()
+                {
+                    Some("Window - fit") => {
+                        args.fit = true;
+                        args.fullscreen = false;
+                    }
+                    Some("Fullscreen - fit") => {
+                        args.fit = true;
+                        args.fullscreen = true;
+                    }
+                    Some("Window - 1:1") => {
+                        args.fit = false;
+                        args.fullscreen = false;
+                    }
+                    _ => {
+                        args.host.clear();
+                        continue;
+                    }
+                }
+                if args.trust_all
+                    && !is_loopback_target(&args.host)
+                    && std::env::var("DD_INSECURE_TRUST_ALL").as_deref() != Ok("1")
+                {
+                    let _ = choose("Connection refused", "--trust-all is only allowed on loopback.", &["Back"]);
+                    args.host.clear();
+                    continue;
+                }
+                return true;
+            }
+            Some("Trusted devices") => {
+                let _ = manage("client", "trusted_hosts.txt");
+            }
+            _ => return false,
+        }
+    }
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -53,6 +124,8 @@ fn parse_args() -> Result<Args, String> {
         trust_key: None,
         list_trusted: false,
         forget: None,
+        manage_trusted: false,
+        terminal: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -75,11 +148,13 @@ fn parse_args() -> Result<Args, String> {
             "--fit" => a.fit = true,
             "--show-key" => a.show_key = true,
             "--list-trusted" => a.list_trusted = true,
+            "--manage-trusted" => a.manage_trusted = true,
+            "--terminal" => a.terminal = true,
             "--forget" => a.forget = Some(it.next().ok_or("--forget KEY_PREFIX")?),
             "--trust" => a.trust_key = Some(it.next().ok_or("--trust HOST_KEY")?),
             "-h" | "--help" => {
                 println!(
-                    "dd-client HOST[:PORT] [--size WxH] [--fps N] [--fullscreen] [--no-hwdec] [--fit]\n          [--trust-all] [--ffmpeg PATH]\n\n--fullscreen uses this screen's native size unless --size is given.\n--fit scales the picture to fill the window (keeps the aspect ratio); otherwise it is shown 1:1.\n--trust-all skips the pairing-code check (testing only).\nCtrl+Alt+Shift+Q closes the client."
+                    "dd-client [HOST[:PORT]] [--size WxH] [--fps N] [--fullscreen] [--no-hwdec] [--fit]\n          [--trust-all] [--ffmpeg PATH] [--terminal]\n          [--show-key] [--trust HOST_KEY] [--list-trusted] [--forget KEY_PREFIX] [--manage-trusted]\n\nWithout HOST, opens the connection/device manager.\n--terminal uses terminal prompts instead of native dialogs.\n--fullscreen uses this screen's native size unless --size is given.\n--fit scales the picture to fill the window (keeps the aspect ratio); otherwise it is shown 1:1.\n--trust-all skips the pairing-code check (testing only).\nCtrl+Alt+Shift+Q closes the client."
                 );
                 std::process::exit(0);
             }
@@ -87,13 +162,14 @@ fn parse_args() -> Result<Args, String> {
             o => return Err(format!("unknown argument {o}")),
         }
     }
-    if a.host.is_empty() && !a.show_key && a.trust_key.is_none() && !a.list_trusted && a.forget.is_none() {
-        return Err("missing HOST (try --help)".into());
-    }
     a.host = with_default_port(&a.host);
     // Without the pairing check anyone who answers at that address is taken for the host: it sees every
     // key typed into this window and shows whatever it likes. Same rule as `dd-host --trust-all`.
-    if a.trust_all && !is_loopback_target(&a.host) && std::env::var("DD_INSECURE_TRUST_ALL").as_deref() != Ok("1") {
+    if a.trust_all
+        && !a.host.is_empty()
+        && !is_loopback_target(&a.host)
+        && std::env::var("DD_INSECURE_TRUST_ALL").as_deref() != Ok("1")
+    {
         return Err("--trust-all is only allowed for a loopback HOST (for example 127.0.0.1): without the pairing \
                     check anyone on the network could pose as the host"
             .into());
@@ -126,13 +202,14 @@ fn with_default_port(h: &str) -> String {
 }
 
 fn main() {
-    let args = match parse_args() {
+    let mut args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
             eprintln!("error: {e}");
             std::process::exit(2);
         }
     };
+    dd_proto::desktop_ui::use_terminal(args.terminal);
     match dd_proto::identity::key_commands(
         "client",
         "trusted_hosts.txt",
@@ -148,6 +225,13 @@ fn main() {
             std::process::exit(1);
         }
     }
+    if args.manage_trusted {
+        let _ = dd_proto::desktop_ui::manage("client", "trusted_hosts.txt");
+        return;
+    }
+    if args.host.is_empty() && !connection_entry(&mut args) {
+        return;
+    }
     let mut builder = EventLoop::<UiEvent>::with_user_event();
     #[cfg(windows)]
     {
@@ -160,7 +244,12 @@ fn main() {
     let mut app = App::new(args, event_loop.create_proxy());
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("error: {e}");
-        std::process::exit(1);
+        app.exit_code = 1;
+    }
+    app.cancel.store(true, Ordering::Release);
+    app.tx = None;
+    for worker in app.workers.drain(..) {
+        let _ = worker.join();
     }
     std::process::exit(app.exit_code);
 }
@@ -195,6 +284,11 @@ struct App {
     shown: u32,
     stats_at: Instant,
     rtt_ms: f32,
+    status: Option<String>,
+    online: Arc<AtomicBool>,
+    cancel: Arc<AtomicBool>,
+    finished: bool,
+    workers: Vec<std::thread::JoinHandle<()>>,
 }
 
 impl App {
@@ -218,11 +312,16 @@ impl App {
             shown: 0,
             stats_at: Instant::now(),
             rtt_ms: 0.0,
+            status: Some("Connecting to PC...".into()),
+            online: Arc::new(AtomicBool::new(false)),
+            cancel: Arc::new(AtomicBool::new(false)),
+            finished: false,
+            workers: Vec::new(),
         }
     }
 
     fn send(&self, m: Message) {
-        if let Some(tx) = &self.tx {
+        if let Some(tx) = self.tx.as_ref().filter(|_| self.online.load(Ordering::Acquire)) {
             let _ = tx.send(m);
         }
     }
@@ -307,6 +406,10 @@ impl App {
     }
 
     fn draw(&mut self) {
+        if self.status.is_some() {
+            self.draw_status();
+            return;
+        }
         let Some((vx, vy, vw, vh)) = self.video_rect() else { return };
         if let Some(f) = self.slot.take() {
             let old = std::mem::replace(&mut self.last, f);
@@ -353,6 +456,129 @@ impl App {
             self.shown = 0;
             self.stats_at = Instant::now();
         }
+    }
+}
+
+impl App {
+    fn manage_devices(&mut self) {
+        let cancelled = self.cancel.clone();
+        self.workers.push(std::thread::spawn(move || {
+            let _ = dd_proto::desktop_ui::manage_until("client", "trusted_hosts.txt", cancelled);
+        }));
+    }
+
+    fn show_status(&mut self, text: String) {
+        self.release_everything();
+        self.video = None;
+        self.last.clear();
+        self.slot.take();
+        self.status = Some(text);
+        if let Some(g) = &self.gfx {
+            g.window.request_redraw();
+        }
+    }
+
+    fn draw_status(&mut self) {
+        let Some(g) = self.gfx.as_mut() else { return };
+        let size = g.window.inner_size();
+        let (Some(w), Some(h)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else { return };
+        if g.surface.resize(w, h).is_err() {
+            return;
+        }
+        let Ok(mut buf) = g.surface.buffer_mut() else { return };
+        buf.fill(0x00182030);
+        let dims = (size.width as usize, size.height as usize);
+        status_text(&mut buf, dims, 16, 40, "DRAWSPLAY DESKTOP");
+        status_text(&mut buf, dims, 64, dims.1.saturating_sub(80), self.status.as_deref().unwrap_or(""));
+        status_text(
+            &mut buf,
+            dims,
+            dims.1.saturating_sub(64),
+            dims.1.saturating_sub(36),
+            if self.finished { "R:RETRY T:DEVICES" } else { "INPUT DISABLED" },
+        );
+        status_text(&mut buf, dims, dims.1.saturating_sub(32), dims.1, "Q / ESC: QUIT");
+        let _ = buf.present();
+    }
+
+    fn start_session(&mut self) {
+        self.cancel.store(true, Ordering::Release);
+        self.workers.retain(|worker| !worker.is_finished());
+        let (tx, rx) = channel();
+        self.tx = Some(tx);
+        self.cancel = Arc::new(AtomicBool::new(false));
+        self.finished = false;
+        self.status = Some("Connecting to PC...".into());
+        let settings = Settings {
+            host: self.args.host.clone(),
+            width: self.args.width,
+            height: self.args.height,
+            fps: self.args.fps,
+            ffmpeg: self.args.ffmpeg.clone(),
+            trust_all: self.args.trust_all,
+            hwdec: self.args.hwdec,
+            online: self.online.clone(),
+            cancel: self.cancel.clone(),
+        };
+        let slot = self.slot.clone();
+        let proxy = self.proxy.clone();
+        self.workers.push(std::thread::spawn(move || {
+            session::run(settings, rx, slot, move |ev| {
+                let _ = proxy.send_event(ev);
+            })
+        }));
+        if let Some(g) = &self.gfx {
+            g.window.request_redraw();
+        }
+    }
+}
+
+fn status_text(buf: &mut [u32], (width, height): (usize, usize), top: usize, bottom: usize, text: &str) {
+    use font8x8::UnicodeFonts;
+    let cols = (width / 16).saturating_sub(2).max(1);
+    let (mut x, mut y, mut col) = (16usize, top, 0usize);
+    for ch in text.chars() {
+        if ch == '\n' || col >= cols {
+            x = 16;
+            y += 20;
+            col = 0;
+            if ch == '\n' {
+                continue;
+            }
+        }
+        if y + 16 > bottom.min(height) {
+            break;
+        }
+        let glyph = font8x8::BASIC_FONTS.get(ch).unwrap_or_else(|| font8x8::BASIC_FONTS.get('?').unwrap());
+        for (gy, bits) in glyph.iter().enumerate() {
+            for gx in 0..8 {
+                if bits & (1 << gx) == 0 {
+                    continue;
+                }
+                for sy in 0..2 {
+                    for sx in 0..2 {
+                        let (px, py) = (x + gx * 2 + sx, y + gy * 2 + sy);
+                        if px < width {
+                            buf[py * width + px] = 0x00ffffff;
+                        }
+                    }
+                }
+            }
+        }
+        x += 16;
+        col += 1;
+    }
+}
+
+fn track_key(pressed: &mut HashSet<u16>, code: u16, down: bool, repeat: bool) -> bool {
+    if down {
+        if repeat && !pressed.contains(&code) {
+            return false; // A key held through a disconnect is not a new press.
+        }
+        pressed.insert(code);
+        true
+    } else {
+        pressed.remove(&code)
     }
 }
 
@@ -426,34 +652,28 @@ impl ApplicationHandler<UiEvent> for App {
             .unwrap_or(self.args.fps);
         self.gfx = Some(Gfx { window, surface });
 
-        let (tx, rx) = channel();
-        self.tx = Some(tx);
-        let settings = Settings {
-            host: self.args.host.clone(),
-            width,
-            height,
-            fps: refresh,
-            ffmpeg: self.args.ffmpeg.clone(),
-            trust_all: self.args.trust_all,
-            hwdec: self.args.hwdec,
-        };
-        let slot = self.slot.clone();
-        let proxy = self.proxy.clone();
-        std::thread::spawn(move || {
-            session::run(settings, rx, slot, move |ev| {
-                let _ = proxy.send_event(ev);
-            })
-        });
+        self.args.width = width;
+        self.args.height = height;
+        self.args.fps = refresh;
+        self.start_session();
     }
 
     fn user_event(&mut self, el: &ActiveEventLoop, ev: UiEvent) {
         match ev {
             UiEvent::Connected { width, height, fps } => {
                 eprintln!("connected: {width}x{height}@{fps}");
+                self.exit_code = 0;
                 self.video = Some((width, height));
                 self.need_clear = true;
+                self.status = Some("Connected. Waiting for first video frame...".into());
+                if let Some(g) = &self.gfx {
+                    g.window.request_redraw();
+                }
             }
             UiEvent::Frame => {
+                if self.online.load(Ordering::Acquire) && self.status.take().is_some() {
+                    eprintln!("video ready");
+                }
                 if let Some(g) = &self.gfx {
                     g.window.request_redraw();
                 }
@@ -464,17 +684,79 @@ impl ApplicationHandler<UiEvent> for App {
                 if reason != "connection closed" {
                     self.exit_code = 1;
                 }
-                el.exit();
+                self.finished = true;
+                self.show_status(reason.clone());
+                if dd_proto::desktop_ui::graphical_available() {
+                    let request = self.cancel.clone();
+                    let proxy = self.proxy.clone();
+                    self.workers.push(std::thread::spawn(move || {
+                        let action = dd_proto::desktop_ui::choose_until(
+                            "DrawSplay: connection ended",
+                            &reason,
+                            &["Retry", "Trusted devices", "Quit"],
+                            || !request.load(Ordering::Acquire),
+                        )
+                        .ok()
+                        .flatten();
+                        let _ = proxy.send_event(UiEvent::Decision { action, request });
+                    }));
+                }
+            }
+            UiEvent::Status(text) => self.show_status(text),
+            UiEvent::Decision { action, request } => {
+                if request.load(Ordering::Acquire) {
+                    return;
+                }
+                match action.as_deref() {
+                    Some("Retry") => self.start_session(),
+                    Some("Trusted devices") => {
+                        self.manage_devices();
+                    }
+                    Some("Quit") => {
+                        self.cancel.store(true, Ordering::Release);
+                        self.tx = None;
+                        el.exit();
+                    }
+                    _ => {}
+                }
             }
         }
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        if self.status.is_some() || !self.online.load(Ordering::Acquire) {
+            match &event {
+                WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                    use winit::keyboard::KeyCode;
+                    match event.physical_key {
+                        PhysicalKey::Code(KeyCode::KeyQ | KeyCode::Escape) => {
+                            self.cancel.store(true, Ordering::Release);
+                            self.tx = None;
+                            el.exit();
+                        }
+                        PhysicalKey::Code(KeyCode::KeyR) if self.finished => self.start_session(),
+                        PhysicalKey::Code(KeyCode::KeyT) if self.finished => {
+                            self.manage_devices();
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
+                WindowEvent::CursorMoved { .. }
+                | WindowEvent::MouseInput { .. }
+                | WindowEvent::MouseWheel { .. }
+                | WindowEvent::Touch(_)
+                | WindowEvent::KeyboardInput { .. } => return,
+                _ => {}
+            }
+        }
         match event {
             WindowEvent::CloseRequested => {
+                self.cancel.store(true, Ordering::Release);
                 self.tx = None; // ends the session thread
                 el.exit();
             }
+
             WindowEvent::RedrawRequested => self.draw(),
             WindowEvent::Resized(_) => {
                 self.need_clear = true;
@@ -607,10 +889,8 @@ impl ApplicationHandler<UiEvent> for App {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     if let Some(hid) = keys::hid(code) {
                         let down = event.state == ElementState::Pressed;
-                        if down {
-                            self.pressed.insert(hid);
-                        } else {
-                            self.pressed.remove(&hid);
+                        if !track_key(&mut self.pressed, hid, down, event.repeat) {
+                            return;
                         }
                         // Local escape hatch so a fullscreen client can always be left.
                         if down
@@ -635,6 +915,18 @@ impl ApplicationHandler<UiEvent> for App {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn held_keys_do_not_resume_after_connection_state_is_cleared() {
+        let mut pressed = std::collections::HashSet::new();
+        assert!(super::track_key(&mut pressed, 4, true, false));
+        assert!(super::track_key(&mut pressed, 4, true, true));
+        pressed.clear(); // Disconnect/focus loss releases local input state.
+        assert!(!super::track_key(&mut pressed, 4, true, true));
+        assert!(!super::track_key(&mut pressed, 4, false, false));
+        assert!(super::track_key(&mut pressed, 4, true, false));
+        assert!(super::track_key(&mut pressed, 4, false, false));
+    }
+
     #[test]
     fn trust_all_is_only_for_this_computer() {
         for ok in ["127.0.0.1:47800", "[::1]:47800", "localhost:47800", "LOCALHOST:1"] {

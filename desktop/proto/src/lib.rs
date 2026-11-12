@@ -6,6 +6,7 @@
 
 use std::io::{self, Read, Write};
 
+pub mod desktop_ui;
 pub mod identity;
 pub mod secure;
 

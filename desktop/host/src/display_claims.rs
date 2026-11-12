@@ -13,6 +13,7 @@
 use serde_json::{json, Value};
 use std::io::Write;
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;
 
 const OWNER: &str = "desktop-host";
@@ -64,13 +65,24 @@ impl Claim {
 /// Run `f` on the live claims under the lock; when it returns true the list is written back.
 fn with_claims(f: impl FnOnce(&mut Vec<Claim>) -> bool) -> std::io::Result<()> {
     let dir = dir();
-    std::fs::create_dir_all(&dir)?;
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    #[cfg(not(test))]
+    if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
+        ensure_private_dir(&PathBuf::from(runtime_dir))?;
     }
-    let lock =
-        std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("display-claims.lock"))?;
+    ensure_private_dir(&dir)?;
+    let lock_path = dir.join("display-claims.lock");
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(&lock_path)?;
+    let lock_metadata = lock.metadata()?;
+    if !lock_metadata.file_type().is_file() || lock_metadata.uid() != unsafe { libc::geteuid() } {
+        return Err(std::io::Error::other("display-claims lock is not a regular file owned by this user"));
+    }
+    lock.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     // SAFETY: flock on a descriptor we own; released when `lock` closes.
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
         return Err(std::io::Error::last_os_error());
@@ -89,6 +101,19 @@ fn with_claims(f: impl FnOnce(&mut Vec<Claim>) -> bool) -> std::io::Result<()> {
         std::fs::rename(&tmp, &path)?;
     }
     Ok(())
+}
+
+fn ensure_private_dir(path: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::create_dir(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e),
+    }
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_dir() || metadata.uid() != unsafe { libc::geteuid() } {
+        return Err(std::io::Error::other(format!("{} is not a real directory owned by this user", path.display())));
+    }
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
 }
 
 /// Record that this process holds `name`.
@@ -195,5 +220,17 @@ mod tests {
         for (c, v) in claims.iter().zip(doc["claims"].as_array().unwrap()) {
             assert_eq!(&c.to_json(), v);
         }
+    }
+
+    #[test]
+    fn refuses_a_symlink_claims_directory() {
+        let root = std::env::temp_dir().join(format!("dd-claims-symlink-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("target");
+        let link = root.join("link");
+        std::fs::create_dir(&target).unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(ensure_private_dir(&link).is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

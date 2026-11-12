@@ -142,12 +142,16 @@ pub(crate) struct Shared {
 
 /// One served client. Dropping it frees the slot; when it was the last session, every fake display
 /// still around (whoever made it) is removed, so nothing is left behind on the desktop.
-pub(crate) struct SessionSlot<'a>(&'a Shared);
+pub(crate) struct SessionSlot<'a>(&'a Shared, bool);
 impl Drop for SessionSlot<'_> {
     fn drop(&mut self) {
         self.0.sessions.fetch_sub(1, Ordering::SeqCst);
         let _life = self.0.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
-        if self.0.sessions.load(Ordering::SeqCst) == 0 {
+        #[cfg(target_os = "linux")]
+        if self.1 {
+            display::layout_changed();
+        }
+        if self.1 && self.0.sessions.load(Ordering::SeqCst) == 0 {
             #[cfg(target_os = "linux")]
             fake_displays::remove_all("last session ended");
         }
@@ -275,9 +279,24 @@ pub(crate) fn serve(
     // The label is how the trust list names the client, and what the "trusted before with a different
     // key" warning compares: the address only, since the source port changes on every connection.
     let peer_label = stream.peer_addr().map(|p| p.ip().to_canonical().to_string()).unwrap_or_else(|_| peer.clone());
+    let notice = if trusted_before && !a.trust_all {
+        dd_proto::desktop_ui::pairing_notice(format!(
+            "Known client at {peer_label}\nPeer identity: {}\nThis host's identity: {}\n\nPairing code: {}\nCompare on the client if it asks to pair. This window grants no new trust.",
+            dd_proto::identity::to_hex(&session.remote_public),
+            dd_proto::identity::to_hex(&id.public),
+            session.sas,
+        ))
+    } else {
+        None
+    };
     let answer =
         authorize_with(&session, &mut trust, &format!("client at {peer_label}"), a.trust_all, &mut |desc, sas| {
-            pairing::ask(desc, sas, PROMPT_TIMEOUT, || peer_alive(&stream, &mut ahead))
+            pairing::ask(
+                &format!("{desc}\nThis host's identity: {}", dd_proto::identity::to_hex(&id.public)),
+                sas,
+                PROMPT_TIMEOUT,
+                || peer_alive(&stream, &mut ahead),
+            )
         });
     if let Some(ip) = peer_ip.filter(|_| prompt_guard.is_some()) {
         let mut blocked = shared.pair_blocked.lock().unwrap_or_else(|e| e.into_inner());
@@ -300,6 +319,7 @@ pub(crate) fn serve(
     let mut stream = session.writer(stream);
     reader.get_ref().set_read_timeout(Some(hello_wait))?;
     let hello = read_message_limited(&mut reader, MAX_CONTROL_FRAME)?;
+    drop(notice);
     let Message::Hello { version, width, height, refresh_hz, name } = hello else {
         return Err(std::io::Error::other("first message was not Hello"));
     };
@@ -325,13 +345,21 @@ pub(crate) fn serve(
         return Err(std::io::Error::other(too_many(a.max_clients)));
     }
     shared.sessions.fetch_add(1, Ordering::SeqCst);
-    let _slot = SessionSlot(shared);
+    let _slot = SessionSlot(shared, a.source != Source::Test);
     // Keep the display alive for the whole session; dropping it unplugs a virtual monitor.
-    let acquired = display::acquire(a.source == Source::Virtual, a.require_virtual, a.origin, rw, rh, fps);
+    let acquired = if a.source == Source::Test {
+        Ok(display::synthetic(rw, rh))
+    } else {
+        display::acquire(a.source == Source::Virtual, a.require_virtual, a.origin, rw, rh, fps)
+    };
     drop(life);
     // The connection is a served session now; it no longer takes up a handshake slot.
     drop(pending);
     let display = acquired?;
+    #[cfg(target_os = "linux")]
+    if a.source != Source::Test {
+        display::layout_changed();
+    }
     let target = display.target;
     let (w, h) = target.size;
     let origin = target.origin;
@@ -374,10 +402,18 @@ pub(crate) fn serve(
     let w2 = writer.clone();
     #[allow(clippy::clone_on_copy)] // an Arc on Linux, () elsewhere
     let portal = display.portal.clone();
+    #[cfg(target_os = "linux")]
+    let output = display.input_output();
+    let synthetic = a.source == Source::Test;
     let input = thread::spawn(move || {
         // Whatever ends the input (disconnect, silence, even a panic), stop streaming to this peer too.
         let _stop = ShutdownOnDrop(raw_input);
-        let mut inj = inject::Injector::new(target, portal);
+        let mut inj = (!synthetic).then(|| {
+            #[cfg(target_os = "linux")]
+            return inject::Injector::new(target, portal, output);
+            #[cfg(not(target_os = "linux"))]
+            inject::Injector::new(target, portal)
+        });
         loop {
             match read_message_limited(&mut reader, MAX_CONTROL_FRAME) {
                 Ok(Message::Ping(v)) => {
@@ -385,7 +421,11 @@ pub(crate) fn serve(
                         break;
                     }
                 }
-                Ok(m @ (Message::Pointer { .. } | Message::Key { .. })) => inj.handle(&m),
+                Ok(m @ (Message::Pointer { .. } | Message::Key { .. })) => {
+                    if let Some(inj) = inj.as_mut() {
+                        inj.handle(&m);
+                    }
+                }
                 Ok(_) => {}
                 Err(_) => break,
             }

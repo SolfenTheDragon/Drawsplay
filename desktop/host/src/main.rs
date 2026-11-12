@@ -108,6 +108,13 @@ fn main() {
             std::process::exit(2);
         }
     };
+    dd_proto::desktop_ui::use_terminal(args.terminal);
+    if args.manage_trusted {
+        if let Err(e) = dd_proto::desktop_ui::manage("host", "trusted_clients.txt") {
+            eprintln!("trusted devices: {e}");
+        }
+        return;
+    }
     // Without the pairing question anyone who can reach the port controls this computer.
     if args.trust_all
         && !args.bind.parse::<std::net::SocketAddr>().is_ok_and(|a| a.ip().is_loopback())
@@ -158,11 +165,15 @@ fn main() {
     // Dropping the session does not run when the process is signalled; switch the extra X output
     // off explicitly so Ctrl+C or `systemctl stop` does not leave it enabled.
     #[cfg(target_os = "linux")]
-    if let Err(e) = ctrlc::set_handler(|| {
+    let synthetic = args.source == Source::Test;
+    #[cfg(target_os = "linux")]
+    if let Err(e) = ctrlc::set_handler(move || {
         kill_tracked_children();
-        linux_display::cleanup_active();
-        wayland_display::cleanup_active();
-        fake_displays::remove_all("shutdown");
+        if !synthetic {
+            linux_display::cleanup_active();
+            wayland_display::cleanup_active();
+            fake_displays::remove_all("shutdown");
+        }
         status::shutdown();
         std::process::exit(130);
     }) {
@@ -200,9 +211,26 @@ fn main() {
         eprintln!("cannot read trusted clients: {e}");
         std::process::exit(1);
     }
+    if std::env::args_os().len() == 1 && dd_proto::desktop_ui::graphical_available() {
+        loop {
+            match dd_proto::desktop_ui::choose(
+                "DrawSplay host",
+                "Start listening with the default loopback-only bind.\nPairing requests appear separately. --bind selects a LAN/VPN address.\nForgetting a client also disconnects its active session.",
+                &["Start host", "Trusted devices", "Quit"],
+            ) {
+                Ok(Some(action)) if action == "Trusted devices" => {
+                    if let Err(e) = dd_proto::desktop_ui::manage("host", "trusted_clients.txt") {
+                        eprintln!("trusted devices: {e}");
+                    }
+                }
+                Ok(Some(action)) if action == "Start host" => break,
+                _ => return,
+            }
+        }
+    }
     // A monitor left over from a host that was killed or crashed would otherwise stay forever.
     #[cfg(target_os = "linux")]
-    {
+    if args.source != Source::Test {
         active_record::init(&dir);
         for msg in active_record::sweep_stale() {
             eprintln!("{msg}");
@@ -213,7 +241,7 @@ fn main() {
     if args.allow_any {
         eprintln!("WARNING: --allow-any is set: connections from every address are served");
     } else if args.allow.is_empty() {
-        eprintln!("serving private networks only (loopback, LAN, link-local, 100.64.0.0/10); --allow NET adds more");
+        eprintln!("serving permitted peers only (loopback, LAN, link-local, 100.64.0.0/10); --allow NET adds more");
     } else {
         eprintln!("serving private networks plus {} extra network(s) given with --allow", args.allow.len());
     }

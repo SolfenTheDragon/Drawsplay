@@ -27,12 +27,14 @@ if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
 New-Item -ItemType Directory -Force $dir | Out-Null
 Copy-Item "$bin\dd-host.exe", "$bin\dd-client.exe" $dir
 # Documentation is optional (it may not be in the checkout).
-if (Test-Path ..\README.md) { Copy-Item ..\README.md $dir }
+Copy-Item README.md, GUIDE.md, ..\LICENSE, ..\THIRD-PARTY-NOTICES.md $dir
+$driverLicenseDir = Join-Path $dir 'drivers\windows\idd'
+New-Item -ItemType Directory -Force $driverLicenseDir | Out-Null
+Copy-Item ..\drivers\windows\idd\LICENSE $driverLicenseDir
 if (Test-Path docs) {
     New-Item -ItemType Directory -Force (Join-Path $dir 'docs') | Out-Null
     Copy-Item docs\*.md (Join-Path $dir 'docs')
 }
-if (Test-Path ..\LICENSE) { Copy-Item ..\LICENSE (Join-Path $dir 'LICENSE') }
 $zip = "dist\$name.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
 Compress-Archive -Path $dir -DestinationPath $zip

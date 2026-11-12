@@ -9,6 +9,7 @@ install -m 0755 "$here/dd-host" "$here/dd-client" "$dest/"
 echo "Installed dd-host and dd-client to $dest"
 case ":$PATH:" in *":$dest:"*) ;; *) echo "Note: $dest is not on your PATH." ;; esac
 command -v ffmpeg >/dev/null 2>&1 || echo "Warning: ffmpeg is not installed (needed by both programs)."
+command -v zenity >/dev/null 2>&1 || echo "Warning: zenity is not installed; start the programs in a terminal to answer prompts."
 if [ "${1:-}" = "--udev" ]; then
     # The DrawSplay host's installer installs the same rule under the same name.
     sudo install -m 0644 "$here/99-drawsplay-uinput.rules" /etc/udev/rules.d/

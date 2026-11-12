@@ -4,6 +4,19 @@
 use crate::inject::Target;
 use std::io;
 
+#[cfg(target_os = "linux")]
+static LAYOUT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(target_os = "linux")]
+pub fn layout_changed() {
+    LAYOUT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Release);
+}
+
+#[cfg(target_os = "linux")]
+pub fn layout_generation() -> u64 {
+    LAYOUT_GENERATION.load(std::sync::atomic::Ordering::Acquire)
+}
+
 /// The captured area, plus whatever must stay alive to keep it (dropping it removes the
 /// virtual monitor again).
 /// Wayland portal session, which also carries input (an empty type elsewhere).
@@ -59,7 +72,29 @@ impl Display {
 
     /// True when the host created a monitor for this session (as opposed to mirroring one).
     pub fn is_virtual(&self) -> bool {
-        !matches!(self._guard, Guard::None)
+        match &self._guard {
+            Guard::None => false,
+            #[cfg(target_os = "linux")]
+            Guard::Wayland(None) => false,
+            _ => true,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn input_output(&self) -> Option<String> {
+        match &self._guard {
+            Guard::X11(output) => Some(output.name().to_string()),
+            _ => self.wayland_output.clone(),
+        }
+    }
+}
+
+pub fn synthetic(w: u32, h: u32) -> Display {
+    Display {
+        target: Target { origin: (0, 0), size: (even(w), even(h)), desktop: (0, 0) },
+        portal: None,
+        wayland_output: None,
+        _guard: Guard::None,
     }
 }
 
@@ -226,4 +261,29 @@ pub fn acquire(
         portal: None,
         _guard: Guard::None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn synthetic_display_keeps_requested_geometry_without_a_backend() {
+        let display = synthetic(1921, 1081);
+        assert_eq!(display.target.size, (1920, 1080));
+        assert_eq!(display.target.origin, (0, 0));
+        assert!(!display.is_virtual());
+        assert!(display.portal.is_none());
+        assert!(display.wayland_output.is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mirrored_wayland_output_is_not_virtual() {
+        let mut display = synthetic(1280, 720);
+        display._guard = Guard::Wayland(None);
+        display.wayland_output = Some("eDP-1".into());
+        assert!(!display.is_virtual());
+        assert_eq!(display.backend(), "wayland-mirror");
+    }
 }

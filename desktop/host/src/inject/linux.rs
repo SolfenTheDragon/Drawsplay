@@ -67,6 +67,28 @@ pub fn to_axis(ax: i32, ay: i32, t: Target) -> (i32, i32) {
     (scale(ax, dw), scale(ay, dh))
 }
 
+pub fn target_for_x11(mut target: Target, query: &crate::linux_display::Query, output: Option<&str>) -> Target {
+    if query.screen.0 > 0 && query.screen.1 > 0 {
+        target.desktop = query.screen;
+    }
+    if let Some((_, _, x, y)) = query.outputs.iter().find(|o| Some(o.name.as_str()) == output).and_then(|o| o.geometry)
+    {
+        target.origin = (x, y);
+    }
+    target
+}
+
+pub fn target_for_wayland(mut target: Target, outputs: &[crate::wayland_display::Out], output: Option<&str>) -> Target {
+    let (x, y, w, h) = crate::wayland_display::bounds(outputs);
+    if w > 0 && h > 0 {
+        target.desktop = (w, h);
+        if let Some(out) = outputs.iter().find(|o| Some(o.name.as_str()) == output) {
+            target.origin = (out.x - x, out.y - y);
+        }
+    }
+    target
+}
+
 fn abs(code: u16, min: i32, max: i32, res: i32) -> UinputAbsSetup {
     UinputAbsSetup::new(AbsoluteAxisCode(code), AbsInfo::new(0, min, max, 0, 0, res))
 }
@@ -379,5 +401,36 @@ mod tests {
     fn out_of_range_is_clamped() {
         let tg = t((0, 0), (100, 100), (100, 100));
         assert_eq!(to_axis(-50, 9999, tg), (0, AXIS_MAX));
+    }
+
+    #[test]
+    fn existing_x11_contact_tracks_desktop_growth_and_shrinkage() {
+        let original = t((1920, 0), (1280, 800), (3200, 1080));
+        let query = |width| crate::linux_display::Query { outputs: Vec::new(), screen: (width, 1080) };
+        let grown = target_for_x11(original, &query(4480), None);
+        assert_eq!(to_axis(3199, 799, grown).0, (3199i64 * AXIS_MAX as i64 / 4479) as i32);
+        let shrunk = target_for_x11(grown, &query(3200), None);
+        assert_eq!(to_axis(3199, 799, shrunk).0, AXIS_MAX);
+        let moved = crate::linux_display::parse_query(
+            "Screen 0: current 3200 x 1080, maximum 16384 x 16384\nVIRTUAL1 connected 1280x800+0+0",
+        );
+        assert_eq!(target_for_x11(original, &moved, Some("VIRTUAL1")).origin, (0, 0));
+    }
+
+    #[test]
+    fn wayland_contact_tracks_output_layout_origin_changes() {
+        let original = t((1920, 0), (1280, 800), (3200, 1080));
+        let outputs = crate::wayland_display::parse_sway(
+            r#"[{"name":"real","active":true,"rect":{"x":-1920,"y":0,"width":1920,"height":1080}},
+                {"name":"HEADLESS-1","active":true,"rect":{"x":0,"y":0,"width":1280,"height":800}},
+                {"name":"HEADLESS-2","active":true,"rect":{"x":1280,"y":0,"width":1280,"height":800}}]"#,
+        );
+        let expanded = target_for_wayland(original, &outputs, Some("HEADLESS-1"));
+        assert_eq!(expanded.desktop, (4480, 1080));
+        assert_eq!(expanded.origin, (1920, 0));
+        let shrunk = target_for_wayland(expanded, &outputs[1..], Some("HEADLESS-1"));
+        assert_eq!(shrunk.desktop, (2560, 800));
+        assert_eq!(shrunk.origin, (0, 0));
+        assert_eq!(to_axis(1279, 799, shrunk).1, AXIS_MAX);
     }
 }

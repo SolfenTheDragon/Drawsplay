@@ -1,11 +1,11 @@
 //! Everything that talks to the host, off the UI thread: connect, pair, receive video,
 //! feed the decoder, and send queued input.
 
-use dd_proto::identity::{authorize, config_dir, load_or_create_identity, TrustStore};
+use dd_proto::identity::{authorize_with, config_dir, load_or_create_identity, to_hex, TrustStore};
 use dd_proto::secure::handshake;
 use dd_proto::{read_message, video_size_ok, write_message, Message, PointerPhase, PROTOCOL_VERSION};
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -84,8 +84,17 @@ impl FrameSlot {
 }
 
 pub enum UiEvent {
+    Status(String),
+    Decision {
+        action: Option<String>,
+        request: Arc<AtomicBool>,
+    },
     /// The host accepted us; the video will be this size.
-    Connected { width: u32, height: u32, fps: u32 },
+    Connected {
+        width: u32,
+        height: u32,
+        fps: u32,
+    },
     /// A new frame is waiting in the [`FrameSlot`].
     Frame,
     /// Round-trip time to the host in milliseconds.
@@ -102,6 +111,8 @@ pub struct Settings {
     pub ffmpeg: String,
     pub trust_all: bool,
     pub hwdec: bool,
+    pub online: Arc<AtomicBool>,
+    pub cancel: Arc<AtomicBool>,
 }
 
 /// Wall-clock microseconds, used as the opaque value in Ping so the echo yields an RTT.
@@ -154,13 +165,18 @@ pub fn run(
             ui(ev)
         }
     };
-    // Set when the host ends the session on purpose: reconnecting would undo that.
+    // Explicit disconnection, declined pairing or trust revocation must not reconnect automatically.
     let bye: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let mut lost_at: Option<Instant> = None;
     let mut backoff = Duration::from_millis(500);
     let reason = loop {
+        if s.cancel.load(Ordering::Acquire) {
+            break "connection closed".into();
+        }
         connected.store(false, Ordering::SeqCst);
         let r = session(&s, &input, &bye, slot.clone(), ui_inner.clone());
+        s.online.store(false, Ordering::Release);
+        slot.take();
         if connected.load(Ordering::SeqCst) {
             lost_at = None; // it worked for a while: start counting afresh
             backoff = Duration::from_millis(500);
@@ -182,9 +198,15 @@ pub fn run(
         if !had_session || first_loss.elapsed() > RECONNECT_WINDOW {
             break why;
         }
-        eprintln!("connection lost ({why}); reconnecting in {:.1} s", backoff.as_secs_f32());
+        ui(UiEvent::Status(format!(
+            "Connection lost: {why}\nReconnecting in {:.1} seconds (up to 60 seconds)...",
+            backoff.as_secs_f32()
+        )));
         let until = Instant::now() + backoff;
         while Instant::now() < until {
+            if s.cancel.load(Ordering::Acquire) {
+                return ui(UiEvent::Closed("connection closed".into()));
+            }
             // Input typed during the outage must not replay later.
             match input.try_recv() {
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => return ui(UiEvent::Closed(why)),
@@ -204,7 +226,41 @@ fn session(
     ui: impl Fn(UiEvent) + Send + Sync + Clone + 'static,
 ) -> Result<(), String> {
     let e = |what: &'static str| move |err: std::io::Error| format!("{what}: {err}");
-    let mut stream = TcpStream::connect(&s.host).map_err(e("cannot connect"))?;
+    let mut last_error = std::io::Error::other("host has no addresses");
+    let mut connection = None;
+    for address in s.host.to_socket_addrs().map_err(e("host lookup"))? {
+        if s.cancel.load(Ordering::Acquire) {
+            return Err("connection closed".into());
+        }
+        match TcpStream::connect_timeout(&address, Duration::from_secs(5)) {
+            Ok(stream) => {
+                connection = Some(stream);
+                break;
+            }
+            Err(error) => last_error = error,
+        }
+    }
+    let mut stream = connection.ok_or(last_error).map_err(e("cannot connect"))?;
+    // Closing the window also interrupts handshake/config reads and withdraws a pairing dialog.
+    let watcher_socket = stream.try_clone().map_err(e("socket"))?;
+    let stop = Arc::new(AtomicBool::new(false));
+    struct Watcher(Arc<AtomicBool>);
+    impl Drop for Watcher {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+    let _watcher = Watcher(stop.clone());
+    let cancel = s.cancel.clone();
+    thread::spawn(move || {
+        while !stop.load(Ordering::Acquire) {
+            if cancel.load(Ordering::Acquire) {
+                let _ = watcher_socket.shutdown(std::net::Shutdown::Both);
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
     stream.set_nodelay(true).map_err(e("socket"))?;
 
     let dir = config_dir("client").map_err(e("config directory"))?;
@@ -214,10 +270,35 @@ fn session(
     stream.set_write_timeout(Some(IDLE_TIMEOUT)).map_err(e("socket"))?;
     let sess = handshake(&mut stream, &id, true).map_err(e("secure handshake failed"))?;
     // The pairing question waits for a person; the host may also take a while to create its display.
-    stream.set_read_timeout(None).map_err(e("socket"))?;
-    let first_time = !trust.contains(&sess.remote_public) && !s.trust_all;
-    if !authorize(&sess, &mut trust, &format!("host at {}", s.host), s.trust_all).map_err(e("pairing"))? {
-        return Err("pairing declined".into());
+    stream.set_read_timeout(Some(Duration::from_millis(100))).map_err(e("socket"))?;
+    ui(UiEvent::Status(format!(
+        "Pairing code: {}\nCompare on the host if asked.\nWaiting for host approval...\nHost: {}\nIdentity: {}",
+        sess.sas,
+        s.host,
+        to_hex(&sess.remote_public)
+    )));
+    let authorization = authorize_with(&sess, &mut trust, &format!("host at {}", s.host), s.trust_all, &mut |desc, sas| {
+        dd_proto::desktop_ui::approve(
+            &format!("{desc}\nThis client's identity: {}\n\nPairing code: {sas}\nCompare on BOTH computers. Trust only if the codes match.\nThis host will see input typed into the remote screen.", to_hex(&id.public)),
+            Duration::from_secs(120),
+            || {
+                if s.cancel.load(Ordering::Acquire) { return false; }
+                let mut byte = [0];
+                match stream.peek(&mut byte) {
+                    Ok(0) => false,
+                    Ok(_) => true,
+                    Err(e) => matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock),
+                }
+            },
+        )
+    }).map_err(e("pairing"));
+    match authorization {
+        Ok(true) => {}
+        answer => {
+            let reason = answer.err().unwrap_or_else(|| "pairing declined".into());
+            *bye.lock().unwrap() = Some(reason.clone());
+            return Err(reason);
+        }
     }
     let raw = stream.try_clone().map_err(e("socket"))?;
     let mut reader = sess.reader(stream.try_clone().map_err(e("socket"))?);
@@ -238,9 +319,6 @@ fn session(
     // The host's user may be answering a pairing question about this computer, whether or not we
     // trust the host already (for example after the host forgot us).
     let config_wait = Duration::from_secs(300);
-    if !first_time && !s.trust_all {
-        eprintln!("Connected. If the host asks to pair this computer, its code should read {}", sess.sas);
-    }
     reader.get_ref().set_read_timeout(Some(config_wait)).map_err(e("socket"))?;
     let (w, h, fps) = match read_message(&mut reader).map_err(e("waiting for host"))? {
         Message::Config { width, height, fps } if video_size_ok(width, height) => {
@@ -250,13 +328,15 @@ fn session(
     };
     // The host streams continuously, so a quiet connection means it is gone (cable pulled, Wi-Fi lost).
     reader.get_ref().set_read_timeout(Some(IDLE_TIMEOUT)).map_err(e("socket"))?;
-    ui(UiEvent::Connected { width: w as u32, height: h as u32, fps });
-
     let mut dec = spawn_decoder(&s.ffmpeg, s.hwdec, w as u32, h as u32)
         .map_err(|x| format!("cannot start ffmpeg ({}): {x}", s.ffmpeg))?;
     let mut dec_in = dec.stdin.take().unwrap();
     let mut dec_out = dec.stdout.take().unwrap();
     let epoch = Instant::now();
+    // No input collected during handshake, approval or a reconnect may reach the new session.
+    while input.try_recv().is_ok() {}
+    s.online.store(true, Ordering::Release);
+    ui(UiEvent::Connected { width: w as u32, height: h as u32, fps });
 
     // network -> decoder
     let pong = writer.clone();
@@ -277,7 +357,7 @@ fn session(
                 }
             }
             Ok(Message::Bye { reason }) => {
-                *bye_net.lock().unwrap() = Some(reason);
+                *bye_net.lock().unwrap() = Some(format!("the host ended the session ({reason})"));
                 break;
             }
             Ok(Message::Pong(sent)) => {
@@ -312,7 +392,29 @@ fn session(
 
     // input -> host (plus a periodic ping)
     let mut next_ping = Instant::now();
+    let mut last_frame_at = Instant::now();
+    let mut decoded = slot.frames_decoded.load(Ordering::Relaxed);
+    let mut last_trust_check = Instant::now();
     let result = loop {
+        if s.cancel.load(Ordering::Acquire) {
+            break Ok(());
+        }
+        if !s.trust_all && last_trust_check.elapsed() >= Duration::from_secs(2) {
+            last_trust_check = Instant::now();
+            if TrustStore::load(dir.join("trusted_hosts.txt")).is_ok_and(|store| !store.contains(&sess.remote_public)) {
+                let reason = "Host removed from this client's trusted devices.".to_string();
+                *bye.lock().unwrap() = Some(reason.clone());
+                break Err(reason);
+            }
+        }
+        let current = slot.frames_decoded.load(Ordering::Relaxed);
+        if current != decoded {
+            decoded = current;
+            last_frame_at = Instant::now();
+        }
+        if last_frame_at.elapsed() >= IDLE_TIMEOUT {
+            break Err("video stopped responding for 10 seconds".into());
+        }
         if net.is_finished() || dec_thread.is_finished() {
             break Ok(());
         }
@@ -334,13 +436,15 @@ fn session(
             next_ping = Instant::now() + Duration::from_secs(2);
         }
     };
+    s.online.store(false, Ordering::Release);
+    ui(UiEvent::Status("Connection interrupted. Stopping the old stream...".into()));
     let _ = raw.shutdown(std::net::Shutdown::Both);
     let _ = dec.kill();
     let _ = dec.wait();
     let _ = net.join();
     let _ = dec_thread.join();
     if let Some(reason) = bye.lock().unwrap().clone() {
-        return Err(format!("the host ended the session ({reason})"));
+        return Err(reason);
     }
     if timed_out.load(Ordering::SeqCst) {
         return Err(format!("host stopped responding (nothing received for {} s)", IDLE_TIMEOUT.as_secs()));

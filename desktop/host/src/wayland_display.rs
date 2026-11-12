@@ -80,10 +80,18 @@ pub fn parse_hyprland(json: &str) -> Vec<Out> {
     list.iter()
         .filter_map(|o| {
             let n = |k: &str| o.get(k)?.as_i64();
+            let (mut width, mut height) = (n("width")?, n("height")?);
+            let scale = o.get("scale").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            if width <= 0 || height <= 0 || !scale.is_finite() || scale <= 0.0 {
+                return None;
+            }
+            if o.get("transform").and_then(|v| v.as_u64()).unwrap_or(0) % 2 == 1 {
+                std::mem::swap(&mut width, &mut height);
+            }
             Some(Out {
                 name: o.get("name")?.as_str()?.to_string(),
-                w: n("width")? as u32,
-                h: n("height")? as u32,
+                w: ((width as f64 / scale).round() as u32).max(1),
+                h: ((height as f64 / scale).round() as u32).max(1),
                 x: n("x")? as i32,
                 y: n("y")? as i32,
             })
@@ -286,5 +294,20 @@ mod tests {
         assert_eq!(parse_hyprland(j)[0].w, 2560);
         assert!(parse_sway("not json").is_empty());
         assert!(parse_hyprland("{}").is_empty());
+    }
+
+    #[test]
+    fn hyprland_bounds_use_scaled_and_rotated_logical_dimensions() {
+        let outs = parse_hyprland(
+            r#"[{"name":"DP-1","width":3840,"height":2160,"scale":2,"transform":0,"x":0,"y":0},
+                {"name":"DP-2","width":2560,"height":1440,"scale":1.25,"transform":1,"x":1920,"y":0},
+                {"name":"DP-3","width":1920,"height":1080,"scale":1,"transform":5,"x":-1080,"y":0}]"#,
+        );
+        assert_eq!((outs[0].w, outs[0].h), (1920, 1080));
+        assert_eq!((outs[1].w, outs[1].h), (1152, 2048));
+        assert_eq!((outs[2].w, outs[2].h), (1080, 1920));
+        assert_eq!(bounds(&outs), (-1080, 0, 4152, 2048));
+        assert!(parse_hyprland(r#"[{"name":"off","width":0,"height":0,"x":0,"y":0}]"#).is_empty());
+        assert!(parse_hyprland(r#"[{"name":"bad","width":1920,"height":1080,"scale":0,"x":0,"y":0}]"#).is_empty());
     }
 }

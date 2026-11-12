@@ -72,10 +72,82 @@ pub struct Injector {
     portal: Option<std::sync::Arc<crate::portal::Portal>>,
     #[cfg(target_os = "linux")]
     portal_touches: HashSet<u8>,
+    /// Geometry kept current by a background poller (uinput only), so a monitor added or removed
+    /// mid-session does not leave absolute input mapped to a stale desktop.
+    #[cfg(target_os = "linux")]
+    layout: Option<LayoutWatch>,
+}
+
+/// Polls the desktop layout off the input path: a layout query runs `xrandr`/`hyprctl`, which
+/// would add tens of milliseconds to pen events if done inline.
+#[cfg(target_os = "linux")]
+struct LayoutWatch {
+    latest: std::sync::Arc<std::sync::Mutex<Target>>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(target_os = "linux")]
+impl LayoutWatch {
+    fn start(target: Target, output: Option<String>) -> Self {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+        let latest = Arc::new(Mutex::new(target));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (slot, stop_flag) = (latest.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let mut generation = crate::display::layout_generation();
+            let mut last = Instant::now() - Duration::from_secs(10);
+            while !stop_flag.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(100));
+                let now_generation = crate::display::layout_generation();
+                if now_generation == generation && last.elapsed() < Duration::from_secs(2) {
+                    continue;
+                }
+                generation = now_generation;
+                last = Instant::now();
+                let current = *slot.lock().unwrap_or_else(|e| e.into_inner());
+                let refreshed = Self::query(current, output.as_deref());
+                *slot.lock().unwrap_or_else(|e| e.into_inner()) = refreshed;
+            }
+        });
+        Self { latest, stop }
+    }
+
+    fn query(target: Target, output: Option<&str>) -> Target {
+        if crate::wayland_display::active() {
+            match crate::wayland_display::outputs() {
+                Ok(outputs) => linux::target_for_wayland(target, &outputs, output),
+                Err(_) => target,
+            }
+        } else {
+            match crate::linux_display::query() {
+                Ok(query) => linux::target_for_x11(target, &query, output),
+                Err(_) => target,
+            }
+        }
+    }
+
+    fn current(&self) -> Target {
+        *self.latest.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for LayoutWatch {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 impl Injector {
-    pub fn new(target: Target, portal: crate::display::PortalHandle) -> Self {
+    pub fn new(
+        target: Target,
+        portal: crate::display::PortalHandle,
+        #[cfg(target_os = "linux")] output: Option<String>,
+    ) -> Self {
+        #[cfg(target_os = "linux")]
+        let layout = portal.is_none().then(|| LayoutWatch::start(target, output));
         #[cfg(not(target_os = "linux"))]
         let _ = portal;
         let enigo = match Enigo::new(&Settings::default()) {
@@ -120,6 +192,15 @@ impl Injector {
             portal: portal.filter(|p| p.has_input),
             #[cfg(target_os = "linux")]
             portal_touches: HashSet::new(),
+            #[cfg(target_os = "linux")]
+            layout,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn refresh_target(&mut self) {
+        if let Some(watch) = &self.layout {
+            self.target = watch.current();
         }
     }
 
@@ -134,6 +215,8 @@ impl Injector {
     pub fn handle(&mut self, m: &Message) {
         match *m {
             Message::Pointer { id, source, phase, x, y, pressure, buttons, tilt_x, tilt_y, wheel_x, wheel_y } => {
+                #[cfg(target_os = "linux")]
+                self.refresh_target();
                 let (ax, ay) = self.absolute(x, y);
                 #[cfg(target_os = "linux")]
                 if self.portal_pointer(id, source, phase, ax, ay, buttons, wheel_x, wheel_y) {
@@ -314,11 +397,39 @@ impl Injector {
     }
 
     fn key(&mut self, code: u16, down: bool) {
+        #[cfg(target_os = "linux")]
+        if code == 0x46 {
+            // Linux maps HID Print Screen to KEY_SYSRQ. Alt+SysRq can reboot
+            // the host, so never expose the kernel SysRq interface remotely.
+            return;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let is_ctrl = matches!(code, 0xE0 | 0xE4);
+            let is_alt = matches!(code, 0xE2 | 0xE6);
+            let ctrl_alt_after = Self::linux_ctrl_alt_active(&self.pressed_keys, code, down);
+            let is_function = (0x3A..=0x45).contains(&code);
+            if down && is_function && ctrl_alt_after {
+                return;
+            }
+            if down && (is_ctrl || is_alt) && ctrl_alt_after {
+                let held_functions: Vec<u16> =
+                    self.pressed_keys.iter().copied().filter(|key| (0x3A..=0x45).contains(key)).collect();
+                for key in held_functions {
+                    self.pressed_keys.remove(&key);
+                    self.inject_key(key, false);
+                }
+            }
+        }
         if down {
             self.pressed_keys.insert(code);
         } else {
             self.pressed_keys.remove(&code);
         }
+        self.inject_key(code, down);
+    }
+
+    fn inject_key(&mut self, code: u16, down: bool) {
         #[cfg(windows)]
         {
             let _ = win::key(code, down);
@@ -340,6 +451,13 @@ impl Injector {
                 let _ = enigo.key(k, if down { Direction::Press } else { Direction::Release });
             }
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn linux_ctrl_alt_active(held: &HashSet<u16>, code: u16, down: bool) -> bool {
+        let ctrl = if matches!(code, 0xE0 | 0xE4) { down } else { held.contains(&0xE0) || held.contains(&0xE4) };
+        let alt = if matches!(code, 0xE2 | 0xE6) { down } else { held.contains(&0xE2) || held.contains(&0xE6) };
+        ctrl && alt
     }
 
     /// Release every key, button and contact still held, so a dropped client cannot leave them stuck.
@@ -425,5 +543,17 @@ mod tests {
         assert_eq!(whole_steps(&mut rest, f32::NAN), 0);
         assert_eq!(whole_steps(&mut rest, f32::INFINITY), 0);
         assert_eq!(whole_steps(&mut rest, 1e30), 100);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ctrl_alt_function_key_chords_are_blocked() {
+        let mut held = HashSet::new();
+        assert!(!Injector::linux_ctrl_alt_active(&held, 0xE0, true));
+        held.insert(0xE0);
+        assert!(Injector::linux_ctrl_alt_active(&held, 0xE2, true));
+        held.insert(0xE2);
+        assert!(Injector::linux_ctrl_alt_active(&held, 0x3B, true));
+        assert!(!Injector::linux_ctrl_alt_active(&held, 0xE2, false));
     }
 }

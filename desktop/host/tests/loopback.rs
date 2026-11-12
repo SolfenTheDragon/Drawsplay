@@ -38,12 +38,26 @@ impl Host {
         let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let config = std::env::temp_dir().join(format!("dd-loopback-{}-{port}", std::process::id()));
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_dd-host"));
-        cmd.args(["--bind", &format!("127.0.0.1:{port}"), "--source", "test", "--encoder", "software"]);
+        cmd.args(["--terminal", "--bind", &format!("127.0.0.1:{port}"), "--source", "test", "--encoder", "software"]);
         cmd.args(extra_args);
         if trust_all {
             cmd.arg("--trust-all");
         }
         cmd.env("XDG_CONFIG_HOME", &config).env("APPDATA", &config);
+        for name in [
+            "DISPLAY",
+            "WAYLAND_DISPLAY",
+            "XDG_SESSION_TYPE",
+            "XDG_RUNTIME_DIR",
+            "SWAYSOCK",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            "DBUS_SESSION_BUS_ADDRESS",
+            "XAUTHORITY",
+            "DRAWSPLAY_DESKTOP_CONFIG",
+            "DD_INSECURE_TRUST_ALL",
+        ] {
+            cmd.env_remove(name);
+        }
         for (k, v) in extra_env {
             cmd.env(k, v);
         }
@@ -105,6 +119,25 @@ fn streams_video_after_hello() {
             bytes += data.len();
         }
     }
+}
+
+#[test]
+fn synthetic_source_does_not_open_a_wayland_portal_or_clip_to_a_real_screen() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let host = Host::start(
+        true,
+        "",
+        &[
+            ("WAYLAND_DISPLAY", "drawsplay-nonexistent-test-display"),
+            ("XDG_SESSION_TYPE", "wayland"),
+            ("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent-drawsplay-test-bus"),
+        ],
+    );
+    let (mut reader, _writer) = client(host.port, PROTOCOL_VERSION, 320, 240);
+    expect_config(&mut reader, 320, 240);
+    assert!(matches!(read_message(&mut reader), Ok(Message::Video { .. })));
 }
 
 #[test]

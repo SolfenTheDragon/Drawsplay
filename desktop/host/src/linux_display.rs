@@ -185,6 +185,10 @@ pub struct VirtualOutput {
 }
 
 impl VirtualOutput {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn create(w: u32, h: u32, hz: u32) -> Result<VirtualOutput, String> {
         if std::env::var_os("DISPLAY").is_none() {
             return Err("no X11 display (Wayland sessions are not supported yet)".into());

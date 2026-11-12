@@ -141,7 +141,7 @@ fn clean_label(label: &str) -> String {
 /// a reinstalled computer looks like, and also what someone who has taken over its address looks like.
 fn trusted_with_other_key(entries: &[(PublicKey, String)], key: &PublicKey, desc: &str) -> bool {
     let desc = without_port(clean_label(desc).trim());
-    entries.iter().any(|(k, label)| without_port(label) == desc && k != key)
+    entries.iter().any(|(k, label)| without_port(label.split(" | ").next().unwrap_or(label)) == desc && k != key)
 }
 
 /// Older hosts labelled clients `client at IP:PORT`, with the client's changing source port; compare
@@ -181,6 +181,27 @@ impl TrustStore {
 
     pub fn contains(&self, k: &PublicKey) -> bool {
         self.keys.contains(k)
+    }
+
+    /// Keep the original address label: renaming must not disable changed-identity warnings.
+    pub fn rename(&mut self, key: &PublicKey, name: &str) -> io::Result<()> {
+        let text = fs::read_to_string(&self.path)?;
+        let name = clean_label(name).replace('|', "");
+        let mut updated = String::new();
+        for line in text.lines() {
+            let (hex, label) = line.split_once('#').unwrap_or((line, ""));
+            if from_hex::<32>(hex).as_ref() == Some(key) {
+                let address = label.trim().split(" | ").next().unwrap_or("");
+                updated.push_str(&format!("{} # {} | {}\n", to_hex(key), address, name));
+            } else {
+                updated.push_str(line);
+                updated.push('\n');
+            }
+        }
+        let tmp = self.path.with_extension("tmp");
+        use std::io::Write;
+        open_private(&tmp, false)?.write_all(updated.as_bytes())?;
+        fs::rename(tmp, &self.path)
     }
 
     /// Every entry as (key, label) in file order; the label is the comment after the key.
@@ -328,7 +349,8 @@ pub fn authorize_with(
     if store.contains(&session.remote_public) {
         return Ok(true);
     }
-    if !trust_all && trusted_with_other_key(&store.entries().unwrap_or_default(), &session.remote_public, peer_desc) {
+    let changed = trusted_with_other_key(&store.entries()?, &session.remote_public, peer_desc);
+    if !trust_all && changed {
         eprintln!(
             "\nWARNING: {peer_desc} was trusted before with a DIFFERENT key. That is expected if its DrawSplay \
              Desktop identity was reset or the computer was reinstalled; if not, someone else may be answering at \
@@ -340,7 +362,16 @@ pub fn authorize_with(
         eprintln!("WARNING: accepting unknown peer {peer_desc} for this session without confirmation (--trust-all)");
         return Ok(true);
     }
-    let accept = ask(peer_desc, &session.sas)?;
+    let description = format!(
+        "{peer_desc}\nPeer identity: {}{}",
+        to_hex(&session.remote_public),
+        if changed {
+            "\nWARNING: DIFFERENT identity at a previously trusted address. Deny unless you know why it changed."
+        } else {
+            ""
+        }
+    );
+    let accept = ask(&description, &session.sas)?;
     if accept {
         store.add(session.remote_public, peer_desc)?;
     }
@@ -431,6 +462,28 @@ mod tests {
         // Labels are stored cleaned, so the comparison cleans the description the same way.
         let entries = vec![([1u8; 32], "host at ab".to_string())];
         assert!(trusted_with_other_key(&entries, &[9; 32], "host at a\nb"));
+    }
+
+    #[test]
+    fn friendly_names_keep_address_identity_checks_and_other_entries() {
+        let d = tmp("names");
+        let p = d.join("trusted.txt");
+        let key = [0xAB; 32];
+        let address = "client at 192.168.1.20:51234";
+        let mut store = TrustStore::load(p.clone()).unwrap();
+        store.add(key, address).unwrap();
+        store.add([0xCD; 32], "other").unwrap();
+        store.rename(&key, "Desk\nPC | not a new address").unwrap();
+        store.rename(&key, "Office PC").unwrap();
+        let entries = store.entries().unwrap();
+        assert_eq!(entries[0].1, format!("{address} | Office PC"));
+        assert_eq!(entries[1].1, "other");
+        assert!(trusted_with_other_key(&entries, &[1; 32], "client at 192.168.1.20"));
+        assert!(!trusted_with_other_key(&entries, &key, "client at 192.168.1.20"));
+        assert!(TrustStore::load(p).unwrap().contains(&key));
+        assert_eq!(store.forget(&to_hex(&key)).unwrap(), 1);
+        assert_eq!(store.entries().unwrap().len(), 1);
+        let _ = fs::remove_dir_all(d);
     }
 
     #[test]

@@ -5,9 +5,13 @@ edition.workspace = true
 
 [dependencies]
 bytemuck = "1"
+font8x8 = "0.3"
 dd-proto.workspace = true
 softbuffer = "0.4"
-winit = "0.30"
+# Explicitly identify the fork supplying the still-unmerged X11 scroll fix.
+# The dependency is pinned to the pull request's immutable commit.
+# https://github.com/rust-windowing/winit/pull/4823
+winit = { version = "0.30.13", git = "https://github.com/shtse8/winit", rev = "5a82761936380f812dd601274e9e9589a145e42f" }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_Input_Pointer", "Win32_UI_WindowsAndMessaging"] }
