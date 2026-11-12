@@ -25,6 +25,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ProgressBar
+import android.widget.PopupWindow
 import android.widget.TextView
 import android.media.ImageReader
 import androidx.appcompat.app.AppCompatActivity
@@ -80,8 +81,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var inputChannel: InputChannel
     private lateinit var videoChannel: VideoChannel
-    // The adb loopback tunnel is only tried while USB debugging is on (see HostEndpointSelector).
-    private val endpointSelector = HostEndpointSelector { usbDebuggingEnabled() }
+    private val endpointSelector = HostEndpointSelector()
     private lateinit var pairedWifiHost: WiFiPairedSessionHost
     private lateinit var waitingGroup: View
     private lateinit var wifiPairPanel: View
@@ -94,6 +94,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var wifiPairScroll: View
     private lateinit var connectionBack: OnBackPressedCallback
     private var connectionDialog: AlertDialog? = null
+    private var resumed = false
+    private var highRefreshRequested = false
+    private var originalDisplayModeId = 0
+    private var originalRefreshRate = 0f
+    private val remotePressedKeys = mutableSetOf<Int>()
+    private var connectionHint: PopupWindow? = null
+    private val hideConnectionHint = Runnable { dismissConnectionHint() }
     private val pairingAttempt = PairingAttemptState()
     private var usbStatus = UsbConnectionStatus.WAITING
     private var pairedStatus = PairedConnectionStatus.IDLE
@@ -141,8 +148,23 @@ class MainActivity : AppCompatActivity() {
         wifiForgetButton = findViewById(R.id.wifiForgetButton)
         wifiForgetButton.setOnClickListener { confirmForgetWifiHost() }
         findViewById<View>(R.id.usbRetryButton).setOnClickListener { AccessoryTransport.retryPermission() }
+        configureHelp(R.id.usbHelpToggle, R.id.usbHelpDetails)
+        configureHelp(R.id.wifiHelpToggle, R.id.wifiHelpDetails)
         findViewById<View>(R.id.wifiPairClose).setOnClickListener { closeWifiPairing() }
-        wifiPairCode.setOnEditorActionListener { _, _, _ -> wifiPairSubmit.performClick(); true }
+        wifiPairCode.setOnEditorActionListener { _, actionId, event ->
+            when {
+                event != null && (event.keyCode == KeyEvent.KEYCODE_ENTER ||
+                    event.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) -> {
+                    if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) wifiPairSubmit.performClick()
+                    true
+                }
+                actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE -> {
+                    wifiPairSubmit.performClick()
+                    true
+                }
+                else -> false
+            }
+        }
         wifiPairSubmit.setOnClickListener {
             if (pairing?.submitCode(wifiPairCode.text.toString()) == true) {
                 wifiPairCode.text.clear()
@@ -161,8 +183,11 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.setAccessibilityHeading(statusText, true)
         ViewCompat.setAccessibilityHeading(findViewById(R.id.wifiPairTitle), true)
         inputPad = findViewById(R.id.inputPad)
+        inputPad.isFocusableInTouchMode = true
+        inputPad.setOnFocusChangeListener { _, _ -> releaseRemoteKeysIfLocal() }
         connectionBack = object : OnBackPressedCallback(false) {
             override fun handleOnBackPressed() {
+                dismissConnectionHint()
                 if (wifiPairPanel.visibility == View.VISIBLE) closeWifiPairing()
                 else showConnectionOptions()
             }
@@ -176,9 +201,6 @@ class MainActivity : AppCompatActivity() {
             "lowLatencyHint=${AndroidCompat.supportsLowLatencyDecoderHint}")
 
         enterImmersiveMode()
-        requestHighRefreshMode()
-        // A monitor must not sleep while in use.
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         removeRetiredWifiSecrets()
         videoScaling = VideoScaling.fromWireName(displayPrefs.getString(KEY_VIDEO_SCALING, null))
             ?: VideoScaling.DEFAULT
@@ -259,12 +281,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onVideoSize(width: Int, height: Int) {
-                runOnUiThread {
-                    videoWidth = width
-                    videoHeight = height
-                    inputPad.setVideoSize(width, height)
-                    applyVideoLayout()
-                }
+                updateVideoSize(width, height)
             }
 
             override fun onHostCursor(packet: CursorPacket?) {
@@ -302,7 +319,8 @@ class MainActivity : AppCompatActivity() {
                     wifiStreamUp = true
                     updateStatus()
                 }
-            }
+            },
+            onVideoSize = ::updateVideoSize
         ) { wifiAllowedNow() }
 
         videoChannel.tileSink = tileView
@@ -359,6 +377,20 @@ class MainActivity : AppCompatActivity() {
         AccessoryTransport.refresh()
     }
 
+    override fun onResume() {
+        super.onResume()
+        resumed = true
+        updateStatus()
+    }
+
+    override fun onPause() {
+        resumed = false
+        releaseRemoteKeysIfLocal()
+        dismissConnectionHint()
+        updateDisplayPolicy()
+        super.onPause()
+    }
+
     override fun onStop() {
         appForeground = false
         connectionDialog?.dismiss()
@@ -371,6 +403,7 @@ class MainActivity : AppCompatActivity() {
         pairing?.cancel()
         pairing = null
         hideWifiPanel()
+        updateStatus()
         super.onStop()
     }
 
@@ -480,6 +513,16 @@ class MainActivity : AppCompatActivity() {
         applyVideoLayout()
     }
 
+    private fun updateVideoSize(width: Int, height: Int) {
+        runOnUiThread {
+            if (isDestroyed) return@runOnUiThread
+            videoWidth = width
+            videoHeight = height
+            inputPad.setVideoSize(width, height)
+            applyVideoLayout()
+        }
+    }
+
     private fun applyVideoLayout() {
         val root = videoFrame.parent as View
         // Fill would stretch the landscape host picture in portrait; letterbox instead.
@@ -500,11 +543,13 @@ class MainActivity : AppCompatActivity() {
     // --- Keyboard passthrough (M5) ---
     //
     // Physical keyboards attached to the tablet type on the host. Key
-    // events are forwarded and consumed here so the tablet UI never reacts
-    // to them; device-local keys (back, volume, power) stay local.
+    // events belong to the host only while the streaming pad owns input.
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (wifiPairPanel.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
+        if (!localUiPolicy().remoteInput) {
+            releaseRemoteKeysIfLocal()
+            return super.dispatchKeyEvent(event)
+        }
         if (isLocalKey(event.keyCode)) return super.dispatchKeyEvent(event)
         val action = when (event.action) {
             KeyEvent.ACTION_DOWN -> "down"
@@ -513,8 +558,24 @@ class MainActivity : AppCompatActivity() {
         }
         val chars = event.unicodeChar.takeIf { it != 0 }
             ?.let { String(Character.toChars(it and Int.MAX_VALUE)) }
+        if (event.action == KeyEvent.ACTION_DOWN) remotePressedKeys.add(event.keyCode)
+        else remotePressedKeys.remove(event.keyCode)
         inputChannel.sendKey(action, event.keyCode, event.metaState, chars)
         return true
+    }
+
+    private fun localUiPolicy() = LocalUiPolicy(
+        foreground = appForeground, resumed = resumed, picture = streamUp || wifiStreamUp,
+        waiting = statusOverlay.visibility == View.VISIBLE,
+        pairing = wifiPairPanel.visibility == View.VISIBLE, dialog = connectionDialog != null,
+        windowFocused = hasWindowFocus(), streamingViewFocused = currentFocus === inputPad
+    )
+
+    private fun releaseRemoteKeysIfLocal() {
+        if (!::inputPad.isInitialized || !::inputChannel.isInitialized || localUiPolicy().remoteInput) return
+        // A modifier held when Back opens local UI must not remain pressed on the host.
+        remotePressedKeys.forEach { inputChannel.sendKey("up", it, 0, null) }
+        remotePressedKeys.clear()
     }
 
     private fun isLocalKey(keyCode: Int): Boolean = when (keyCode) {
@@ -592,6 +653,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderPairingStatus(state: PairingStatus) {
+        findViewById<TextView>(R.id.wifiPairTitle).setText(when (state) {
+            PairingStatus.SEARCHING -> R.string.pair_headline_searching
+            PairingStatus.ENTER_CODE, PairingStatus.INVALID_CODE -> R.string.pair_headline_code
+            PairingStatus.CHECKING -> R.string.pair_headline_checking
+            PairingStatus.APPROVAL -> R.string.pair_headline_approval
+            PairingStatus.SAVING -> R.string.pair_headline_saving
+            PairingStatus.PAIRED -> R.string.status_streaming
+            else -> R.string.pair_headline_recovery
+        })
         val showInput = state == PairingStatus.ENTER_CODE || state == PairingStatus.INVALID_CODE
         wifiPairInputGroup.visibility = if (showInput) View.VISIBLE else View.GONE
         wifiPairProgress.visibility = if (showInput || state.canRetry || state == PairingStatus.PAIRED) View.GONE else View.VISIBLE
@@ -713,8 +783,11 @@ class MainActivity : AppCompatActivity() {
         if (isDestroyed) return
         val localPanel = wifiPairPanel.visibility == View.VISIBLE
         val picture = streamUp || wifiStreamUp
+        val wasWaiting = statusOverlay.visibility == View.VISIBLE
+        inputPad.isFocusable = picture && !localPanel
         if (picture && !localPanel) {
             statusOverlay.visibility = FrameLayout.GONE
+            if (wasWaiting && connectionDialog == null) inputPad.requestFocus()
         } else {
             statusOverlay.visibility = FrameLayout.VISIBLE
             val state = ConnectionPresentation.status(
@@ -736,12 +809,30 @@ class MainActivity : AppCompatActivity() {
                 ConnectionStatus.TRUST_REPAIR -> R.string.wifi_trust_repair
                 ConnectionStatus.IDENTITY_REPAIR -> R.string.wifi_identity_repair
             })
-            if (statusText.text.toString() != message) statusText.text = message
+            val headline = getString(when (state) {
+                ConnectionStatus.WAITING -> R.string.headline_waiting
+                ConnectionStatus.STREAMING -> R.string.status_streaming
+                ConnectionStatus.WAITING_PICTURE -> R.string.headline_picture
+                ConnectionStatus.USB_PERMISSION -> R.string.headline_usb_permission
+                ConnectionStatus.USB_DENIED, ConnectionStatus.USB_ERROR -> R.string.headline_usb_recovery
+                ConnectionStatus.CONNECTING_USB -> R.string.headline_usb_connecting
+                ConnectionStatus.USB_PRIORITY -> R.string.headline_usb_priority
+                ConnectionStatus.RECONNECTING_WIFI -> R.string.headline_wifi_reconnecting
+                ConnectionStatus.CONNECTING_WIFI -> R.string.status_connecting_wifi
+                ConnectionStatus.WIFI_NETWORK -> R.string.headline_wifi_network
+                ConnectionStatus.TRUST_REPAIR, ConnectionStatus.IDENTITY_REPAIR -> R.string.headline_wifi_repair
+            })
+            if (statusText.text.toString() != headline) statusText.text = headline
+            val detail = findViewById<TextView>(R.id.statusDetail)
+            if (detail.text.toString() != message) detail.text = message
             findViewById<View>(R.id.usbRetryButton).visibility =
                 if (usbStatus == UsbConnectionStatus.PERMISSION_DENIED || usbStatus == UsbConnectionStatus.OPEN_FAILED) View.VISIBLE else View.GONE
         }
         connectionBack.isEnabled = localPanel || picture
+        releaseRemoteKeysIfLocal()
+        updateDisplayPolicy()
         enterImmersiveMode()
+        maybeShowConnectionHint()
     }
 
     /** The update card on the waiting screen; never shown over the picture. */
@@ -794,12 +885,78 @@ class MainActivity : AppCompatActivity() {
     private fun showLocalDialog(builder: AlertDialog.Builder) {
         val dialog = builder.create()
         connectionDialog = dialog
+        dismissConnectionHint()
+        releaseRemoteKeysIfLocal()
         dialog.setOnDismissListener {
             if (connectionDialog === dialog) connectionDialog = null
+            if (statusOverlay.visibility != View.VISIBLE) inputPad.requestFocus()
             enterImmersiveMode()
         }
         dialog.show()
         enterImmersiveMode()
+    }
+
+    private fun configureHelp(toggleId: Int, detailsId: Int) {
+        val toggle = findViewById<Button>(toggleId)
+        val details = findViewById<View>(detailsId)
+        ViewCompat.setStateDescription(toggle, getString(R.string.help_collapsed))
+        toggle.setOnClickListener {
+            val expanded = details.visibility != View.VISIBLE
+            details.visibility = if (expanded) View.VISIBLE else View.GONE
+            toggle.setText(if (expanded) R.string.help_hide else R.string.help_show)
+            ViewCompat.setStateDescription(toggle, getString(if (expanded) R.string.help_expanded else R.string.help_collapsed))
+        }
+    }
+
+    private fun maybeShowConnectionHint() {
+        if (connectionHint != null || !localUiPolicy().remoteInput ||
+            displayPrefs.getBoolean(KEY_CONNECTION_HINT_SHOWN, false)) return
+        val text = TextView(this).apply {
+            setText(R.string.connection_hint)
+            setTextColor(getColor(R.color.ds_text))
+            setBackgroundResource(R.drawable.ds_panel)
+            textSize = 16f
+            val pad = (16 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad, pad, pad)
+            maxWidth = (360 * resources.displayMetrics.density).toInt()
+        }
+        // This is a passive hint, not an overlay that steals touches or pen strokes.
+        connectionHint = PopupWindow(text, FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT, false).apply {
+            isTouchable = false
+            inputMethodMode = PopupWindow.INPUT_METHOD_NOT_NEEDED
+            showAtLocation(window.decorView, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
+                0, (48 * resources.displayMetrics.density).toInt())
+        }
+        displayPrefs.edit().putBoolean(KEY_CONNECTION_HINT_SHOWN, true).apply()
+        @Suppress("DEPRECATION")
+        window.decorView.announceForAccessibility(getString(R.string.connection_hint))
+        window.decorView.postDelayed(hideConnectionHint, 10_000)
+    }
+
+    private fun dismissConnectionHint() {
+        window.decorView.removeCallbacks(hideConnectionHint)
+        connectionHint?.dismiss()
+        connectionHint = null
+    }
+
+    private fun updateDisplayPolicy() {
+        val policy = localUiPolicy()
+        if (policy.keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (policy.highRefresh && !highRefreshRequested) {
+            originalDisplayModeId = window.attributes.preferredDisplayModeId
+            originalRefreshRate = window.attributes.preferredRefreshRate
+            requestHighRefreshMode()
+            highRefreshRequested = true
+        } else if (!policy.highRefresh && highRefreshRequested) {
+            window.attributes = window.attributes.apply {
+                preferredDisplayModeId = originalDisplayModeId
+                preferredRefreshRate = originalRefreshRate
+            }
+            highRefreshRequested = false
+        }
+        if (!policy.remoteInput) dismissConnectionHint()
     }
 
     private fun configureLocalInsets() {
@@ -828,7 +985,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Holds the tablet panel at its highest mode while DrawSplay is active.
+     * Holds the tablet panel at its highest mode while a foreground picture is streaming.
      *
      * Some adaptive-refresh Android builds (notably Samsung/MediaTek) apply
      * an "idle" override that drops a SurfaceView to 30 Hz even when the
@@ -879,20 +1036,11 @@ class MainActivity : AppCompatActivity() {
         backgroundSink = null
     }
 
-    /** USB (accessory, or USB power with adb on) has priority over a paired Wi-Fi session. */
+    /** An opened USB accessory has priority over a paired Wi-Fi session. */
     private fun wifiAllowedNow(): Boolean {
         if (wifiHostReset.reconnectBlocked) return false
-        val battery = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        val usbPowered = battery?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) == android.os.BatteryManager.BATTERY_PLUGGED_USB
-        return UsbPriorityPolicy.allowWifi(endpointSelector.isAccessoryAttached(), usbPowered, usbDebuggingEnabled())
+        return UsbPriorityPolicy.allowWifi(endpointSelector.isAccessoryAttached())
     }
-
-    private fun usbDebuggingEnabled(): Boolean =
-        try {
-            android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.ADB_ENABLED, 0) == 1
-        } catch (e: Exception) {
-            false
-        }
 
     private fun maybeStartForegroundVideo() {
         val surface = pendingForegroundSurface ?: return
@@ -918,8 +1066,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        if (!::inputPad.isInitialized) return
+        releaseRemoteKeysIfLocal()
         // Older Android versions bring the bars back after focus changes.
         if (hasFocus) enterImmersiveMode()
+        if (hasFocus) maybeShowConnectionHint() else dismissConnectionHint()
     }
 
     /** Hides system bars: a monitor shows only the host's pixels. */
@@ -933,6 +1084,10 @@ class MainActivity : AppCompatActivity() {
         }
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         val localUi = statusOverlay.visibility == View.VISIBLE || connectionDialog != null
+        val light = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK !=
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        controller.isAppearanceLightStatusBars = localUi && light
+        controller.isAppearanceLightNavigationBars = localUi && light
         if (localUi) controller.show(WindowInsetsCompat.Type.systemBars())
         else controller.hide(WindowInsetsCompat.Type.systemBars())
         controller.systemBarsBehavior =
@@ -944,6 +1099,7 @@ class MainActivity : AppCompatActivity() {
         private val wifiTrustWorker = Executors.newSingleThreadExecutor()
         private const val TAG = "MainActivity"
         private const val KEY_VIDEO_SCALING = "videoScaling"
+        private const val KEY_CONNECTION_HINT_SHOWN = "connectionHintShown"
         private const val KEY_RETIRED_WIFI_CLEANED = "retiredWifiCredentialsRemoved"
         private const val RETIRED_MASTER_KEY_ALIAS = "_androidx_security_master_key_"
     }

@@ -10,16 +10,15 @@ data class HostEndpoint(
 )
 
 /**
- * Orders the ways the app can reach the host: USB accessory, then the adb
- * reverse tunnel on this device's loopback, then a paired Wi-Fi session.
+ * Orders authenticated ways the app can reach the host: USB accessory, then
+ * a paired Wi-Fi session.
  *
- * The loopback endpoint is plain, unauthenticated TCP. Without adb reverse
- * nothing legitimate listens there, and any other app on the tablet could
- * open 127.0.0.1:27183/27184 and pose as the host (receiving pen input and
- * keystrokes). It is therefore offered only while USB debugging is on, which
- * the adb tunnel needs anyway; [adbEnabled] reports that setting.
+ * The legacy ADB reverse endpoint is plain, unauthenticated TCP. A local app
+ * could pose as the host and receive pen input and keystrokes, so this client
+ * deliberately does not use it. [adbEnabled] remains in the constructor for
+ * source compatibility with existing call sites.
  */
-class HostEndpointSelector(private val adbEnabled: () -> Boolean = { false }) {
+class HostEndpointSelector(@Suppress("unused") private val adbEnabled: () -> Boolean = { false }) {
     @Volatile
     private var accessoryAttached = false
 
@@ -49,9 +48,6 @@ class HostEndpointSelector(private val adbEnabled: () -> Boolean = { false }) {
         val candidates = mutableListOf<HostEndpoint>()
         if (accessoryAttached) {
             candidates += HostEndpoint(host = "usb-accessory", inputPort = 0, videoPort = 0, accessory = true)
-        }
-        if (adbEnabled()) {
-            candidates += HostEndpoint(host = "127.0.0.1", inputPort = ADB_INPUT_PORT, videoPort = ADB_VIDEO_PORT)
         }
         return candidates
     }

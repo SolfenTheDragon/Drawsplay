@@ -11,10 +11,9 @@ import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.Socket
 
-/** USB (accessory, or a USB-powered tablet with adb on) always wins over Wi-Fi. */
+/** An opened USB accessory wins over Wi-Fi; charging or debugging alone does not. */
 object UsbPriorityPolicy {
-    fun allowWifi(accessoryAttached: Boolean, usbPowered: Boolean, adbEnabled: Boolean): Boolean =
-        !accessoryAttached && !(usbPowered && adbEnabled)
+    fun allowWifi(accessoryAttached: Boolean): Boolean = !accessoryAttached
 }
 
 object WiFiLanPolicy {

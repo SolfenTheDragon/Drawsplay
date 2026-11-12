@@ -38,6 +38,31 @@ fun updateUrlAllowed(scheme: String?, host: String?): Boolean {
 }
 
 /**
+ * Ed25519 public key (hex) that signs each release's SHA256SUMS.txt; the same
+ * key the PC host pins. With it, a compromised GitHub account alone cannot
+ * publish a checksum list the app would trust.
+ */
+const val RELEASE_CHECKSUMS_PUBLIC_KEY_HEX = "247960eda0e2c352ac115ac991abcc45fccca85fb429bc0e5a54426ed4aec8f1"
+
+/** Whether [signature] is a valid Ed25519 signature of [checksums] under [publicKeyHex]. */
+fun verifyChecksumSignature(publicKeyHex: String, checksums: ByteArray, signature: ByteArray): Boolean {
+    if (publicKeyHex.length != 64 || signature.size != 64) return false
+    val key = try {
+        publicKeyHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+    } catch (_: NumberFormatException) {
+        return false
+    }
+    return try {
+        val signer = org.bouncycastle.crypto.signers.Ed25519Signer()
+        signer.init(false, org.bouncycastle.crypto.params.Ed25519PublicKeyParameters(key, 0))
+        signer.update(checksums, 0, checksums.size)
+        signer.verifySignature(signature)
+    } catch (_: Exception) {
+        false
+    }
+}
+
+/**
  * Whether an APK signed by [candidate] can update an app signed by [installed]
  * (certificate digests). With several signers Android needs the same set;
  * with one, the candidate's lineage must include the installed signer.

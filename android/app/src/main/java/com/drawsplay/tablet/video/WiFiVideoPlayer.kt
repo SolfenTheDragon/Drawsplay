@@ -53,10 +53,11 @@ object WiFiVideoPlayer {
         statsLink: WiFiControlLink?,
         linkSample: () -> WiFiVideoStats.Link?,
         onPictureReady: () -> Unit = {},
+        onVideoSize: (Int, Int) -> Unit = { _, _ -> },
         cancelled: () -> Boolean
     ) = run(media, closeMedia, link, limits, epoch, { config, queue ->
         MediaCodecPlayerDecoder(WiFiVideoDecoder(surface, config, queue, limits.maxAccessUnit))
-    }, statsLink, STATS_INTERVAL_MS, linkSample, onPictureReady, cancelled)
+    }, statsLink, STATS_INTERVAL_MS, linkSample, onPictureReady, onVideoSize, cancelled)
 
     fun run(
         media: InputStream,
@@ -69,9 +70,11 @@ object WiFiVideoPlayer {
         statsIntervalMs: Long = STATS_INTERVAL_MS,
         linkSample: () -> WiFiVideoStats.Link? = { null },
         onPictureReady: () -> Unit = {},
+        onVideoSize: (Int, Int) -> Unit = { _, _ -> },
         cancelled: () -> Boolean
     ) {
         val receiver = WiFiVideoReceiver(media, limits, epoch)
+        onVideoSize(receiver.config.width, receiver.config.height)
         val ready = CompletableFuture<Unit>()
         val ended = AtomicBoolean(false)
         val failure = AtomicReference<Throwable>()

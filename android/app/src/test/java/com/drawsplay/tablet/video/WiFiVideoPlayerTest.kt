@@ -57,15 +57,20 @@ class WiFiVideoPlayerTest {
         val wire = frame(5, 2, config()) + frame(6, 3, idr) + frame(6, 4, idr) + frame(WiFiFrameCodec.CONTROL, 5, byteArrayOf(5, 0, 0, 1))
         val controlOut = ByteArrayOutputStream()
         val order = mutableListOf<String>()
+        var videoSize = 1920 to 1080
         var decoder: FakeDecoder? = null
         val link = WiFiControlLink(ByteArrayInputStream(ByteArray(0)), object : java.io.OutputStream() {
             override fun write(b: Int) = controlOut.write(b)
             override fun write(b: ByteArray, o: Int, l: Int) { order += "ready-sent"; controlOut.write(b, o, l) }
         }, 42)
         WiFiVideoPlayer.run(ByteArrayInputStream(wire), {}, link, limits(), 42, { _, queue ->
+            assertEquals(640 to 360, videoSize)
             FakeDecoder(queue, order).also { decoder = it; order += "decoder-created" }
+        }, onVideoSize = { width, height ->
+            videoSize = width to height
+            order += "video-size"
         }) { false }
-        assertEquals(listOf("decoder-created", "ready-sent", "decoder-closed"), order.distinct())
+        assertEquals(listOf("video-size", "decoder-created", "ready-sent", "decoder-closed"), order.distinct())
         assertEquals(2, decoder!!.decoded.get())
         assertTrue(decoder!!.closed)
         val reader = WiFiFrameCodec.Reader(ByteArrayInputStream(controlOut.toByteArray()))
@@ -73,6 +78,19 @@ class WiFiVideoPlayerTest {
         val payload = ByteArray(header.payloadLength)
         reader.readPayload(payload)
         assertArrayEquals(byteArrayOf(7, 0, 0, 1), payload.copyOf(4))
+    }
+
+    @Test
+    fun invalidConfigCannotReplaceTheDisplayedVideoSize() {
+        val wire = frame(WiFiFrameCodec.CONFIG, 2, byteArrayOf(0))
+        val link = WiFiControlLink(ByteArrayInputStream(ByteArray(0)), ByteArrayOutputStream(), 42)
+        var sizePublished = false
+        assertThrows(IOException::class.java) {
+            WiFiVideoPlayer.run(ByteArrayInputStream(wire), {}, link, limits(), 42,
+                { _, queue -> FakeDecoder(queue, mutableListOf()) },
+                onVideoSize = { _, _ -> sizePublished = true }) { false }
+        }
+        assertFalse(sizePublished)
     }
 
     @Test

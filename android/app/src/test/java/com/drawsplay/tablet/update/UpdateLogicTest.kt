@@ -51,4 +51,23 @@ class UpdateLogicTest {
         assertFalse(signersCompatible(setOf("k1", "k2"), setOf("k1"), multipleSigners = true))
         assertFalse(signersCompatible(emptySet(), setOf("k1"), multipleSigners = false))
     }
+
+    @Test
+    fun checksumSignatureMustMatchReleaseKey() {
+        val seed = ByteArray(32) { it.toByte() }
+        val priv = org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters(seed, 0)
+        val pubHex = priv.generatePublicKey().encoded.joinToString("") { "%02x".format(it) }
+        val sums = "ab".repeat(32).toByteArray() + "  DrawSplay.APK\n".toByteArray()
+        val signer = org.bouncycastle.crypto.signers.Ed25519Signer()
+        signer.init(true, priv)
+        signer.update(sums, 0, sums.size)
+        val sig = signer.generateSignature()
+
+        assertTrue(verifyChecksumSignature(pubHex, sums, sig))
+        assertFalse(verifyChecksumSignature(pubHex, sums + "x".toByteArray(), sig))
+        assertFalse(verifyChecksumSignature(pubHex, sums, sig.copyOf(63)))
+        assertFalse(verifyChecksumSignature(RELEASE_CHECKSUMS_PUBLIC_KEY_HEX, sums, sig))
+        assertFalse(verifyChecksumSignature("not hex", sums, sig))
+        assertEquals(64, RELEASE_CHECKSUMS_PUBLIC_KEY_HEX.length)
+    }
 }

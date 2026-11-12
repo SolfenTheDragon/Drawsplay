@@ -53,7 +53,8 @@ private fun downloadError(message: String) = UpdateException(UpdateFailure.DOWNL
  * While the app is in the foreground it checks the latest release at most
  * every [CHECK_INTERVAL_MS]. A newer DrawSplay.APK downloads by itself on an
  * unmetered network (on tap otherwise) and is accepted only if it matches the
- * release's SHA256SUMS.txt, is this package with a higher versionCode, and is
+ * release's SHA256SUMS.txt (itself verified against the release signing key
+ * via SHA256SUMS.sig), is this package with a higher versionCode, and is
  * signed with the installed app's key. Installing always starts from a tap
  * on the waiting screen, so an update never interrupts a session; Android
  * then asks once to confirm (on Android 12+ it can skip that once DrawSplay
@@ -65,9 +66,11 @@ object AppUpdater {
     private const val LATEST_URL = "https://api.github.com/repos/SolfenTheDragon/Drawsplay/releases/latest"
     private const val APK_ASSET = "DrawSplay.APK"
     private const val SUMS_ASSET = "SHA256SUMS.txt"
+    private const val SUMS_SIG_ASSET = "SHA256SUMS.sig"
     private const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
     private const val MAX_JSON_BYTES = 2L shl 20
     private const val MAX_SUMS_BYTES = 64L shl 10
+    private const val MAX_SUMS_SIG_BYTES = 1L shl 10
     private const val MAX_APK_BYTES = 512L shl 20
     private const val PREFS = "update"
     private const val KEY_LAST_CHECK = "lastCheck"
@@ -82,7 +85,7 @@ object AppUpdater {
     private var busy = false
     private var release: Release? = null
 
-    private class Release(val version: ReleaseVersion, val apkUrl: String, val apkSize: Long, val sumsUrl: String)
+    private class Release(val version: ReleaseVersion, val apkUrl: String, val apkSize: Long, val sumsUrl: String, val sumsSigUrl: String)
 
     fun setListener(l: ((UpdateState) -> Unit)?) {
         listener = l
@@ -135,19 +138,21 @@ object AppUpdater {
         }
         var apk: Pair<String, Long>? = null
         var sums: String? = null
+        var sumsSig: String? = null
         val assets = json.optJSONArray("assets")
         for (i in 0 until (assets?.length() ?: 0)) {
             val a = assets!!.getJSONObject(i)
             when (a.optString("name")) {
                 APK_ASSET -> apk = a.optString("browser_download_url") to a.optLong("size")
                 SUMS_ASSET -> sums = a.optString("browser_download_url")
+                SUMS_SIG_ASSET -> sumsSig = a.optString("browser_download_url")
             }
         }
-        if (apk == null || sums == null) {
-            Log.w(TAG, "Release $latest has no $APK_ASSET or $SUMS_ASSET")
+        if (apk == null || sums == null || sumsSig == null) {
+            Log.w(TAG, "Release $latest has no $APK_ASSET, $SUMS_ASSET or $SUMS_SIG_ASSET")
             return
         }
-        val rel = Release(latest, apk.first, apk.second, sums)
+        val rel = Release(latest, apk.first, apk.second, sums, sumsSig)
         main.post { release = rel }
         Log.i(TAG, "Update available: $latest (running $current)")
         if (readyFile(app, latest).isFile) {
@@ -186,7 +191,12 @@ object AppUpdater {
         val dir = updateDir(app)
         try {
             publish(UpdateState.Downloading(version, 0))
-            val sums = parseSha256Sums(String(fetch(rel.sumsUrl, MAX_SUMS_BYTES), Charsets.UTF_8))
+            val sumsBytes = fetch(rel.sumsUrl, MAX_SUMS_BYTES)
+            val sumsSig = fetch(rel.sumsSigUrl, MAX_SUMS_SIG_BYTES)
+            if (!verifyChecksumSignature(RELEASE_CHECKSUMS_PUBLIC_KEY_HEX, sumsBytes, sumsSig)) {
+                throw UpdateException(UpdateFailure.DAMAGED, "$SUMS_ASSET is not signed by the DrawSplay release key")
+            }
+            val sums = parseSha256Sums(String(sumsBytes, Charsets.UTF_8))
             val want = sums[APK_ASSET] ?: throw downloadError("$SUMS_ASSET does not list $APK_ASSET")
             dir.listFiles()?.forEach { it.delete() } // older downloads
             val tmp = File(dir, "download.tmp")
