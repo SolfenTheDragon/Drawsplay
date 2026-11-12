@@ -37,7 +37,41 @@ const featureFlags = { wifi: false };
 const DEBUG_LOG_MAX_LINES = 600;
 const THEME_STORAGE_KEY = "drawsplay-theme";
 const CUSTOM_RESOLUTION = "custom";
-const FPS_DEFAULT = 120;
+// FPS_LOCK_THRESHOLD: while the host's stream-rate ceiling (status.maxFps,
+// the host's maxCaptureFPS constant) is at or below this, the framerate is
+// locked at that ceiling: the Framerate select and the X11 high-rate toggle
+// are hidden and settings are saved with fps = ceiling. Raising maxCaptureFPS
+// on the host above 60 brings the controls back with options up to it.
+const FPS_LOCK_THRESHOLD = 60;
+let hostMaxFPS = FPS_LOCK_THRESHOLD;
+let framerateLimitApplied = false;
+
+function framerateLocked() {
+  return hostMaxFPS <= FPS_LOCK_THRESHOLD;
+}
+
+function applyFramerateLimit(status) {
+  const maxFps = Number.parseInt(status?.maxFps, 10);
+  const next = maxFps > 0 ? maxFps : FPS_LOCK_THRESHOLD;
+  if (next === hostMaxFPS && framerateLimitApplied) return;
+  hostMaxFPS = next;
+  framerateLimitApplied = true;
+  const locked = framerateLocked();
+  for (const el of document.querySelectorAll("[data-high-fps-only]")) {
+    const platformHidden = el.hasAttribute("data-linux-only") && hostOSName !== "linux";
+    el.hidden = locked || platformHidden;
+  }
+  const label = $("x11-high-rate-capture-label");
+  if (label) label.textContent = `Capture X11 at up to ${Math.min(120, hostMaxFPS)} fps (uses more CPU)`;
+  const lockedHint = $("fps-locked-hint");
+  if (lockedHint) {
+    lockedHint.hidden = !locked;
+    lockedHint.textContent = `The stream runs at ${hostMaxFPS} fps. Bitrate adjusts automatically.`;
+  }
+  const unlockedHint = $("fps-unlocked-hint");
+  if (unlockedHint) unlockedHint.hidden = locked;
+  refreshFramerateOptions();
+}
 const RESOLUTION_PRESETS = new Set([
   "1280x720",
   "1600x900",
@@ -141,15 +175,18 @@ function selectedResolutionDimensions() {
 
 function availableFrameratesForResolution(width, height) {
   const pixels = width * height;
-  if (!Number.isFinite(pixels) || pixels <= 0) return [30, 60];
-  if (pixels <= 1920 * 1080) return [30, 60, 90, 120];
-  if (pixels <= 2560 * 1600) return [30, 60, 90];
-  if (pixels <= 3840 * 2160) return [30, 60];
-  return [30];
+  let rates;
+  if (!Number.isFinite(pixels) || pixels <= 0) rates = [30, 60];
+  else if (pixels <= 1920 * 1080) rates = [30, 60, 90, 120];
+  else if (pixels <= 2560 * 1600) rates = [30, 60, 90];
+  else if (pixels <= 3840 * 2160) rates = [30, 60];
+  else rates = [30];
+  const capped = rates.filter(fps => fps <= hostMaxFPS);
+  return capped.length > 0 ? capped : [Math.min(30, hostMaxFPS)];
 }
 
 function chooseFramerate(requested, available) {
-  if (!Array.isArray(available) || available.length === 0) return FPS_DEFAULT;
+  if (!Array.isArray(available) || available.length === 0) return hostMaxFPS;
   if (available.includes(requested)) return requested;
   let best = available[0];
   let bestDelta = Math.abs(requested - best);
@@ -167,12 +204,13 @@ function refreshFramerateOptions(preferredFPS) {
   const fpsSelect = $("fps");
   const { width, height } = selectedResolutionDimensions();
   if (![width, height].every(value => Number.isFinite(value) && value > 0)) return;
-  const options = availableFrameratesForResolution(width, height);
-  if (Number(preferredFPS) > 0 && !options.includes(Number(preferredFPS))) {
-    options.push(Number(preferredFPS));
+  const options = framerateLocked() ? [hostMaxFPS] : availableFrameratesForResolution(width, height);
+  const preferred = Math.min(Number(preferredFPS) || 0, hostMaxFPS);
+  if (!framerateLocked() && preferred > 0 && !options.includes(preferred)) {
+    options.push(preferred);
     options.sort((a, b) => a - b);
   }
-  const current = Number.parseInt(preferredFPS, 10) || Number.parseInt(fpsSelect.value, 10) || FPS_DEFAULT;
+  const current = preferred || Number.parseInt(fpsSelect.value, 10) || hostMaxFPS;
   const chosen = chooseFramerate(current, options);
 
   fpsSelect.innerHTML = "";
@@ -207,7 +245,7 @@ function applyPlatformVisibility(hostOS) {
     el.hidden = !showWindowsOnly;
   }
   for (const el of document.querySelectorAll("[data-linux-only]")) {
-    el.hidden = hostOS !== "linux";
+    el.hidden = hostOS !== "linux" || (el.hasAttribute("data-high-fps-only") && framerateLocked());
   }
 }
 
@@ -342,8 +380,9 @@ function applyResolutionPolicy(status) {
     controls.style.display = managed ? "none" : "";
   }
   if (fpsRow) {
-    fpsRow.hidden = windowsManaged;
-    fpsRow.style.display = windowsManaged ? "none" : "";
+    const hideFps = windowsManaged || framerateLocked();
+    fpsRow.hidden = hideFps;
+    fpsRow.style.display = hideFps ? "none" : "";
   }
   if (hint) hint.hidden = !windowsManaged;
   if (linuxHint) linuxHint.hidden = !linuxManaged;
@@ -513,7 +552,7 @@ function draftSettings() {
   const dimensions = selectedResolutionDimensions();
   const body = {
     ...readSettingControls(), width: dimensions.width, height: dimensions.height,
-    fps: parseInt($("fps").value, 10),
+    fps: framerateLocked() ? hostMaxFPS : parseInt($("fps").value, 10),
   };
   if (resolutionManagedByOS || !resolutionDirty) {
     body.width = loadedSettings?.width;
@@ -745,6 +784,7 @@ async function refreshStatus() {
     const st = await api("/api/status");
     hostReachable = true;
     hostStopped = false;
+    applyFramerateLimit(st);
     applyResolutionPolicy(st);
     const versionEl = document.getElementById("host-version");
     if (versionEl && st.version) {
@@ -1745,7 +1785,7 @@ try {
 }
 setCustomResolutionVisibility();
 captureResolutionBaseLabels();
-refreshFramerateOptions(FPS_DEFAULT);
+refreshFramerateOptions(hostMaxFPS);
 $("show-debug-console").checked = false;
 resetDebugConsole();
 setDebugConsoleEnabled(false);

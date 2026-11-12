@@ -278,21 +278,28 @@ func TestEffectiveCaptureFPSClampsX11Grab(t *testing.T) {
 	}
 }
 
+// The x11grab+VAAPI path may run up to x11HighFPSCeiling, which is itself
+// bounded by maxCaptureFPS: with the rate locked at 60 the ceiling is 60; once
+// maxCaptureFPS is raised the same test checks the higher rate.
 func TestEffectiveCaptureFPSAllowsHighRateX11WithVAAPI(t *testing.T) {
 	ffmpeg := withFakeFFmpegEncoders(t, "ffmpeg-x11-120", " V..... h264_vaapi \n V..... libx264 \n")
 	withFakeVAAPIProbe(t, "/dev/dri/renderD128", true)
 
-	if got := effectiveCaptureFPS(x11TestTarget(), 120, ffmpeg); got != 120 {
-		t.Fatalf("x11grab+VAAPI fps = %d, want 120", got)
+	want := x11HighFPSCeiling
+	if want > maxCaptureFPS {
+		t.Fatalf("x11HighFPSCeiling %d exceeds maxCaptureFPS %d", want, maxCaptureFPS)
 	}
-	if got := effectiveCaptureFPS(x11TestTarget(), 240, ffmpeg); got != 120 {
-		t.Fatalf("x11grab+VAAPI fps ceiling = %d, want 120", got)
+	if got := effectiveCaptureFPS(x11TestTarget(), 120, ffmpeg); got != want {
+		t.Fatalf("x11grab+VAAPI fps = %d, want %d", got, want)
+	}
+	if got := effectiveCaptureFPS(x11TestTarget(), 240, ffmpeg); got != want {
+		t.Fatalf("x11grab+VAAPI fps ceiling = %d, want %d", got, want)
 	}
 	if got := effectiveCaptureFPS(captureTarget{Kind: capturePipeWire}, 120, ffmpeg); got != 60 {
 		t.Fatalf("pipewire must stay at 60, got %d", got)
 	}
 
-	opts := videoOptions{FPS: 120, Bitrate: "24M", Codec: "h264", FFmpeg: ffmpeg}
+	opts := videoOptions{FPS: want, Bitrate: "24M", Codec: "h264", FFmpeg: ffmpeg}
 	specs, err := buildCapturePipelines(x11TestTarget(), opts)
 	if err != nil {
 		t.Fatalf("buildCapturePipelines: %v", err)
@@ -300,8 +307,12 @@ func TestEffectiveCaptureFPSAllowsHighRateX11WithVAAPI(t *testing.T) {
 	for _, spec := range specs {
 		joined := strings.Join(spec.Args, " ")
 		if spec.BaseEncoder == vaapiH264Encoder {
-			if !strings.Contains(joined, "-framerate 120") || !strings.Contains(joined, "-level 5.2") || !strings.Contains(joined, "-r 120") {
-				t.Errorf("vaapi spec not 120 fps with a level: %s", joined)
+			if !strings.Contains(joined, fmt.Sprintf("-framerate %d", want)) || !strings.Contains(joined, "-level 5.2") {
+				t.Errorf("vaapi spec not %d fps with a level: %s", want, joined)
+			}
+			// -r paces the unpaced raw output only above the 60 Hz desktop rate.
+			if want > linuxCaptureFPSCeiling && !strings.Contains(joined, fmt.Sprintf("-r %d", want)) {
+				t.Errorf("vaapi spec above %d fps lacks -r %d: %s", linuxCaptureFPSCeiling, want, joined)
 			}
 		} else if !strings.Contains(joined, "-framerate 60") {
 			t.Errorf("%s fallback must stay at 60 fps: %s", spec.BaseEncoder, joined)

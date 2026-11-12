@@ -1,6 +1,9 @@
 package main
 
-import "flag"
+import (
+	"flag"
+	"fmt"
+)
 
 // bindSettingFlags declares the command-line flags that override saved
 // settings, each bound to its field in s. It is the only list of them: main
@@ -18,7 +21,7 @@ func bindSettingFlags(fs *flag.FlagSet, s *settings) {
 	fs.BoolVar(&s.ADBTunnelEnabled, "adb-tunnel", s.ADBTunnelEnabled, "enable the adb reverse tunnel transport (needs USB debugging on the tablet)")
 	fs.StringVar(&s.FFmpeg, "ffmpeg", s.FFmpeg, "ffmpeg executable path (used for screen capture/encode)")
 	fs.BoolVar(&s.AllowToolAutoInstall, "allow-tool-auto-install", s.AllowToolAutoInstall, "allow automatic download of the newest ffmpeg when missing (Windows)")
-	fs.IntVar(&s.FPS, "fps", s.FPS, "capture frame rate")
+	fs.IntVar(&s.FPS, "fps", s.FPS, fmt.Sprintf("capture frame rate (max %d)", maxCaptureFPS))
 	fs.StringVar(&s.Bitrate, "bitrate", s.Bitrate, "video bitrate at 1080p (ffmpeg syntax, e.g. 24M); scaled by display pixel count and capped at the USB 2.0 link budget")
 	fs.IntVar(&s.Width, "width", s.Width, "virtual display width (extend mode)")
 	fs.IntVar(&s.Height, "height", s.Height, "virtual display height (extend mode)")

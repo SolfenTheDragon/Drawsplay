@@ -724,6 +724,7 @@ func streamVideo(ctx context.Context, conn net.Conn, opts videoOptions) error {
 		if target.Kind == captureX11Grab && !opts.X11HighRate && effOpts.FPS > 60 {
 			effOpts.FPS = 60
 		}
+		effOpts.FPS = clampFPS(effOpts.FPS)
 		if lastEffectiveFPS != 0 && effOpts.FPS != lastEffectiveFPS {
 			log.Printf("Capture framerate now following active display refresh: %d fps", effOpts.FPS)
 			publishModeChange(target.Width, target.Height, effOpts.FPS)
@@ -920,7 +921,11 @@ func buildBlackoutPipelines(opts videoOptions, width int, height int) ([]pipelin
 	specs := make([]pipelineSpec, 0, len(encoders))
 	source := fmt.Sprintf("color=c=black:s=%dx%d:r=%d", width, height, opts.FPS)
 	for _, enc := range encoders {
+		// lavfi sources have no natural pacing: without -re ffmpeg renders
+		// and encodes black frames as fast as the CPU allows (thousands per
+		// second), flooding the link and tripping pump-lag restarts.
 		args := []string{
+			"-re",
 			"-f", "lavfi",
 			"-i", source,
 			"-pix_fmt", "yuv420p",

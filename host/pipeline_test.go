@@ -41,10 +41,10 @@ func TestEncoderArgsUseTwoSecondGOP(t *testing.T) {
 	}
 }
 
-func TestDefaultSettingsFavorSmoothMotion(t *testing.T) {
+func TestDefaultSettingsUseTheMaxCaptureRate(t *testing.T) {
 	s := defaultSettings()
-	if s.FPS != 120 || s.Width != 1920 || s.Height != 1080 {
-		t.Fatalf("default mode = %dx%d @ %d, want 1920x1080 @ 120", s.Width, s.Height, s.FPS)
+	if s.FPS != maxCaptureFPS || s.Width != 1920 || s.Height != 1080 {
+		t.Fatalf("default mode = %dx%d @ %d, want 1920x1080 @ %d", s.Width, s.Height, s.FPS, maxCaptureFPS)
 	}
 }
 

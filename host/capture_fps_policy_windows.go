@@ -15,18 +15,18 @@ func shouldRespectWindowsResolutionSetting() bool {
 }
 
 // platformFirstConnectFPSCeiling bounds the default rate for a new tablet.
-const platformFirstConnectFPSCeiling = 240
+const platformFirstConnectFPSCeiling = min(240, maxCaptureFPS)
 
 func effectiveCaptureFPS(target captureTarget, configuredFPS int, ffmpeg string) int {
 	if !shouldRespectWindowsResolutionSetting() {
-		return configuredFPS
+		return clampFPS(configuredFPS)
 	}
 	if target.DeviceName == "" {
-		return configuredFPS
+		return clampFPS(configuredFPS)
 	}
 	_, _, hz, ok := currentModeOf(target.DeviceName)
 	if !ok || hz <= 0 {
-		return configuredFPS
+		return clampFPS(configuredFPS)
 	}
 	if hz < 30 {
 		return 30
@@ -35,9 +35,9 @@ func effectiveCaptureFPS(target captureTarget, configuredFPS int, ffmpeg string)
 		hz = 240
 	}
 	if panelHz := tabletPanelHz(); hz > panelHz {
-		return panelHz
+		hz = panelHz
 	}
-	return hz
+	return clampFPS(hz)
 }
 
 // defaultTabletPanelHz is assumed when the tablet reports no refresh rate:

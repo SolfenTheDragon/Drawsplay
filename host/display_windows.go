@@ -85,8 +85,9 @@ func vddCaptureFallbackActive(now time.Time) (time.Time, map[string]bool, bool) 
 // setting are not used: a stale remembered mode (e.g. 1920x1080 stored during
 // the former Parsec integration) would otherwise stick forever. Clients that
 // report no native size use the host-configured size (opts), then 1080p. The
-// refresh rate defaults to the tablet panel (tabletPanelHz, 120 Hz when none
-// reported).
+// refresh rate is the tablet panel's (tabletPanelHz, 120 Hz when none
+// reported) bounded by maxCaptureFPS, so the display never runs faster than
+// the stream.
 func desiredDisplayMode(opts videoOptions) (w, h, hz, nativeW, nativeH int) {
 	ident := activeClientIdentity()
 	if ident.NativeWidth > 0 && ident.NativeHeight > 0 {
@@ -104,7 +105,7 @@ func desiredDisplayMode(opts videoOptions) (w, h, hz, nativeW, nativeH int) {
 	if nativeW <= 0 || nativeH <= 0 {
 		nativeW, nativeH = w, h
 	}
-	hz = tabletPanelHz()
+	hz = clampFPS(tabletPanelHz())
 	if hz <= 0 {
 		hz = 60
 	}

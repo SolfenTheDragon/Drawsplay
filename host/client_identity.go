@@ -106,7 +106,7 @@ func applyClientDisplayDefaults(opts *videoOptions, ident clientIdentity) {
 	}
 	opts.FPS = firstConnectFPS(ident)
 	if ident.PrefFPS > 0 {
-		opts.FPS = ident.PrefFPS
+		opts.FPS = clampFPS(ident.PrefFPS)
 	}
 }
 

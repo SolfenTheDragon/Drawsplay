@@ -28,8 +28,8 @@ func TestDesiredDisplayModePrefersTabletNative(t *testing.T) {
 	defer unbindClientSession(session)
 
 	w, h, hz, nw, nh := desiredDisplayMode(videoOptions{Width: 1920, Height: 1080, FPS: 60})
-	if w != 2960 || h != 1848 || hz != 120 {
-		t.Fatalf("mode = %dx%d@%d, want 2960x1848@120 (tablet native, not remembered 1080p)", w, h, hz)
+	if wantHz := min(120, maxCaptureFPS); w != 2960 || h != 1848 || hz != wantHz {
+		t.Fatalf("mode = %dx%d@%d, want 2960x1848@%d (tablet native, not remembered 1080p)", w, h, hz, wantHz)
 	}
 	if nw != 2960 || nh != 1848 {
 		t.Fatalf("native = %dx%d, want 2960x1848", nw, nh)

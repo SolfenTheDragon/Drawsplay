@@ -18,22 +18,23 @@ package main
 const linuxCaptureFPSCeiling = 60
 
 // platformFirstConnectFPSCeiling bounds the default rate for a new tablet.
-const platformFirstConnectFPSCeiling = linuxCaptureFPSCeiling
+const platformFirstConnectFPSCeiling = min(linuxCaptureFPSCeiling, maxCaptureFPS)
 
 // x11HighFPSCeiling is the x11grab capture ceiling when a hardware encoder
 // can sustain it. Cinnamon/Muffin on X11 composites at 60 Hz, so the extra
 // frames are duplicates; the gain is a shorter capture-phase wait (avg 8.3 ms
 // at 60 fps, 4.2 ms at 120) and the tablet's 120 Hz panel presenting sooner.
 // Measured on Intel UHD (iHD): x11grab -> scale_vaapi -> h264_vaapi -level 5.1
-// sustains 119 fps; libx264 on one thread does not reach 80.
-const x11HighFPSCeiling = 120
+// sustains 119 fps; libx264 on one thread does not reach 80. Bounded by
+// maxCaptureFPS, so it only applies once that is raised above 60.
+const x11HighFPSCeiling = min(120, maxCaptureFPS)
 
 // x11HighFPSSupported reports whether the x11grab path can encode above
 // linuxCaptureFPSCeiling. Replaced on Linux, where the VAAPI candidate exists.
 var x11HighFPSSupported = func(ffmpeg string) bool { return false }
 
 func effectiveCaptureFPS(target captureTarget, configuredFPS int, ffmpeg string) int {
-	ceiling := linuxCaptureFPSCeiling
+	ceiling := min(linuxCaptureFPSCeiling, maxCaptureFPS)
 	if target.Kind == captureX11Grab && x11HighFPSSupported(ffmpeg) {
 		ceiling = x11HighFPSCeiling
 	}

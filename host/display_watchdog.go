@@ -17,6 +17,7 @@ const displayWatchdogInterval = 30 * time.Second
 // tablet is disconnected.
 func startDisplayWatchdog(ctx context.Context, store *settingsStore) {
 	go func() {
+		var reaper disconnectedDisplayReaper
 		var idle idleDisplayTracker
 		ticker := time.NewTicker(displayWatchdogInterval)
 		defer ticker.Stop()
@@ -25,17 +26,46 @@ func startDisplayWatchdog(ctx context.Context, store *settingsStore) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				reapDisconnectedDisplay()
-				idle.check(time.Now(), time.Duration(store.get().IdleDisplayTimeoutSec)*time.Second)
+				now := time.Now()
+				reaper.check(now, displayWatchdogInterval)
+				idle.check(now, time.Duration(store.get().IdleDisplayTimeoutSec)*time.Second)
 			}
 		}
 	}()
 }
 
+// disconnectedDisplayReaper tears down the active video session once no
+// tablet has been connected for a grace period (the same status the tray
+// shows as "Disconnected"). Teardown runs the session's deferred display
+// Close, so the virtual display assigned to the session is removed.
+//
+// The grace period matters: the input connection drops for about a second
+// whenever the tablet reconnects it (an input setting changed, a transient
+// link hiccup) while the video session keeps streaming. Reaping on a single
+// sample would remove the virtual display, and with it the user's windows,
+// whenever a tick happened to land in that window.
+type disconnectedDisplayReaper struct {
+	since time.Time
+}
+
+// check reports whether it tore down the session on this call. A zero grace
+// period reaps as soon as the tablet is absent.
+func (r *disconnectedDisplayReaper) check(now time.Time, grace time.Duration) bool {
+	if activeInputDevice() != "" {
+		r.since = time.Time{}
+		return false
+	}
+	if r.since.IsZero() {
+		r.since = now
+	}
+	if now.Sub(r.since) < grace {
+		return false
+	}
+	return reapDisconnectedDisplay()
+}
+
 // reapDisconnectedDisplay tears down the active video session when no tablet
-// is connected (the same status the tray shows as "Disconnected"). Teardown
-// runs the session's deferred display Close, so the virtual display assigned
-// to the session is removed. It reports whether a session was torn down.
+// is connected. It reports whether a session was torn down.
 func reapDisconnectedDisplay() bool {
 	if activeInputDevice() != "" {
 		return false

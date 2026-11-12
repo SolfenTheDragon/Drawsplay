@@ -8,7 +8,7 @@ Use your Android tablet as a touch- and pen-enabled extension of your computer's
 - Touch, multi-touch and pen input, including pressure, tilt and buttons
 - Connects automatically over USB; no IP addresses or pairing codes
 - Wi-Fi connection (**beta**, opt-in) for cable-free use
-- Tablet's native resolution and highest refresh rate by default, remembered per computer
+- Tablet's native resolution by default, remembered per computer; streams at 60 fps on every platform
 - Windows and Linux computers
 
 ## Download
@@ -80,7 +80,7 @@ The navigation groups **Overview**, **Display & input**, **Connections**, **Trou
 
 **Pen alignment:** in **Pen calibration**, choose **Calibrate with targets**, move the browser onto the tablet's display, and enter fullscreen. Tap the four targets with your pen, inspect the corrected-position preview, then choose **Use these adjustments** and **Save calibration**. Nothing is saved by entering or cancelling the guide. Manual adjustments, reset and discard are also available.
 
-**Resolution and refresh rate:** change them in your computer's display settings (Windows Display Settings; GNOME Settings > Displays; on X11, the `HDMI-1` or `Virtual-1-1` display). On KDE Plasma use DrawSplay's settings page. Linux streams at up to 60 fps (up to 120 on X11 with Intel or AMD graphics).
+**Resolution and refresh rate:** change them in your computer's display settings (Windows Display Settings; GNOME Settings > Displays; on X11, the `HDMI-1` or `Virtual-1-1` display). On KDE Plasma use DrawSplay's settings page. The stream runs at 60 fps on every platform (the Windows virtual display is created at 60 Hz); higher refresh rates are not supported.
 
 ## Troubleshooting
 

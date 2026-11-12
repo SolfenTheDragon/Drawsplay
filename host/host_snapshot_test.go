@@ -28,7 +28,7 @@ func jsonKeys(t *testing.T, v any) []string {
 func TestStatusAndDiagnosticsKeepTheirJSONNames(t *testing.T) {
 	status := []string{"activeClient", "activeInputDevice", "activeTransport", "adb", "adbTunnelEnabled", "aoa", "aoaEnabled",
 		"autostart", "autostartImplementation", "clientVideoStats", "connectionKind", "desktopHost", "featureFlags", "hostOS",
-		"inputLocked", "metrics", "setup", "version", "video", "warnings"}
+		"inputLocked", "maxFps", "metrics", "setup", "version", "video", "warnings"}
 	if got := jsonKeys(t, hostStatus{}); !slices.Equal(got, status) {
 		t.Errorf("status keys = %v\nwant %v", got, status)
 	}

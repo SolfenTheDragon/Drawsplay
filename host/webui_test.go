@@ -109,7 +109,7 @@ func TestSettingsApplyOnlyAffectedSessions(t *testing.T) {
 		{"touch input", `{"touchEnabled":false}`, false, true},
 		{"scaling policy", `{"videoScaling":"fit"}`, false, true},
 		{"bitrate", `{"bitrate":"12M"}`, true, false},
-		{"frame rate", `{"fps":60}`, true, false},
+		{"frame rate", `{"fps":30}`, true, false},
 		{"resolution", `{"width":1280,"height":720}`, true, false},
 		{"native capture", `{"nativeMediaHelper":"off"}`, true, false},
 		{"capture gating", `{"idleCaptureGate":true}`, true, false},
@@ -253,7 +253,7 @@ func TestSettingsAPIPreservesWiFiFieldsWhenFeatureDisabled(t *testing.T) {
 	token := testCSRFToken(t, srv.URL)
 
 	// Simulate a non-Wi-Fi settings save payload from UI while Wi-Fi feature is hidden.
-	body := `{"adb":"adb","ffmpeg":"ffmpeg","fps":75,"bitrate":"16M","width":1920,"height":1080,"touchEnabled":true,"penEnabled":true,"keyboardEnabled":true,"keepAliveOnBackground":false,"autoLaunchAndroidApp":false,"zeroCopyCapture":true,"temporalLayering":false,"allowToolAutoInstall":true,"noDriverInstall":false}`
+	body := `{"adb":"adb","ffmpeg":"ffmpeg","fps":30,"bitrate":"16M","width":1920,"height":1080,"touchEnabled":true,"penEnabled":true,"keyboardEnabled":true,"keepAliveOnBackground":false,"autoLaunchAndroidApp":false,"zeroCopyCapture":true,"temporalLayering":false,"allowToolAutoInstall":true,"noDriverInstall":false}`
 	res := protectedRequest(t, http.MethodPut, srv.URL, "/api/settings", body, token)
 	res.Body.Close()
 	if res.StatusCode != http.StatusOK {
@@ -490,10 +490,11 @@ func TestSettingsAPIRejectsInvalid(t *testing.T) {
 	token := testCSRFToken(t, srv.URL)
 
 	cases := []string{
-		`{"adb":"adb","ffmpeg":"ffmpeg","fps":5,"bitrate":"12M","width":1920,"height":1080}`, // fps too low
-		`{"adb":"adb","ffmpeg":"ffmpeg","fps":60,"bitrate":"1k","width":1920,"height":1080}`, // bitrate under floor
-		`{"adb":"adb","ffmpeg":"ffmpeg","fps":60,"bitrate":"12M","width":100,"height":1080}`, // width too small
-		`{"adb":"","ffmpeg":"ffmpeg","fps":60,"bitrate":"12M","width":1920,"height":1080}`,   // empty adb
+		`{"adb":"adb","ffmpeg":"ffmpeg","fps":5,"bitrate":"12M","width":1920,"height":1080}`,   // fps too low
+		`{"adb":"adb","ffmpeg":"ffmpeg","fps":120,"bitrate":"12M","width":1920,"height":1080}`, // fps above maxCaptureFPS
+		`{"adb":"adb","ffmpeg":"ffmpeg","fps":60,"bitrate":"1k","width":1920,"height":1080}`,   // bitrate under floor
+		`{"adb":"adb","ffmpeg":"ffmpeg","fps":60,"bitrate":"12M","width":100,"height":1080}`,   // width too small
+		`{"adb":"","ffmpeg":"ffmpeg","fps":60,"bitrate":"12M","width":1920,"height":1080}`,     // empty adb
 		`{"adb":"adb","preferredADBSerial":"","requirePreferredADB":true,"ffmpeg":"ffmpeg","fps":60,"bitrate":"12M","width":1920,"height":1080}`,
 		`not json`,
 	}

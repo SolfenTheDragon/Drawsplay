@@ -41,17 +41,20 @@ func currentHostSnapshot(cfg settings) hostSnapshot {
 // needs about this host and its connections.
 type hostStatus struct {
 	hostSnapshot
-	ADBTunnelEnabled        bool              `json:"adbTunnelEnabled"`
-	AOAEnabled              bool              `json:"aoaEnabled"`
-	Autostart               bool              `json:"autostart"`
-	AutostartError          string            `json:"autostartError,omitempty"`
-	AutostartImplementation string            `json:"autostartImplementation"`
-	HostOS                  string            `json:"hostOS"`
-	Version                 string            `json:"version"`
-	FeatureFlags            map[string]bool   `json:"featureFlags"`
-	DesktopHost             desktopHostStatus `json:"desktopHost"`
-	ConnectionKind          string            `json:"connectionKind"`
-	ActiveTransport         string            `json:"activeTransport"`
+	ADBTunnelEnabled        bool   `json:"adbTunnelEnabled"`
+	AOAEnabled              bool   `json:"aoaEnabled"`
+	Autostart               bool   `json:"autostart"`
+	AutostartError          string `json:"autostartError,omitempty"`
+	AutostartImplementation string `json:"autostartImplementation"`
+	HostOS                  string `json:"hostOS"`
+	// MaxFPS is the stream-rate ceiling (maxCaptureFPS); the Web UI hides the
+	// framerate choice while it is 60 or lower.
+	MaxFPS          int               `json:"maxFps"`
+	Version         string            `json:"version"`
+	FeatureFlags    map[string]bool   `json:"featureFlags"`
+	DesktopHost     desktopHostStatus `json:"desktopHost"`
+	ConnectionKind  string            `json:"connectionKind"`
+	ActiveTransport string            `json:"activeTransport"`
 }
 
 func currentHostStatus(cfg settings) hostStatus {
@@ -64,6 +67,7 @@ func currentHostStatus(cfg settings) hostStatus {
 		Autostart:               autostart,
 		AutostartImplementation: autostartImplementation(),
 		HostOS:                  runtime.GOOS,
+		MaxFPS:                  maxCaptureFPS,
 		Version:                 hostVersion(),
 		FeatureFlags:            map[string]bool{"wifi": wifiFeatureEnabled()},
 		DesktopHost:             desktop,

@@ -320,3 +320,35 @@ func TestIsStartupPipelineFailure(t *testing.T) {
 		t.Fatal("did not expect long-running pipeline to be treated as startup failure")
 	}
 }
+
+// A lavfi source has no natural pacing: without -re ffmpeg encodes black
+// frames as fast as the CPU allows and floods the link during the lock
+// screen.
+func TestBlackoutPipelinesPaceLavfiSourceInRealTime(t *testing.T) {
+	resetEncoderHealthForTest()
+	ffmpeg := "ffmpeg-blackout-test"
+	encoderProbeMu.Lock()
+	encoderProbeOutput[ffmpeg] = " V..... libx264 \n"
+	encoderProbeMu.Unlock()
+
+	specs, err := buildBlackoutPipelines(videoOptions{FFmpeg: ffmpeg, Codec: "h264", FPS: 60, Bitrate: "8000k"}, 1280, 800)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 1 || specs[0].Name != "libx264_blackout" {
+		t.Fatalf("specs = %+v", specs)
+	}
+	args := specs[0].Args
+	re, lavfi := -1, -1
+	for i, a := range args {
+		switch a {
+		case "-re":
+			re = i
+		case "lavfi":
+			lavfi = i
+		}
+	}
+	if re < 0 || lavfi < 0 || re > lavfi {
+		t.Fatalf("expected -re before the lavfi input, got %v", args)
+	}
+}

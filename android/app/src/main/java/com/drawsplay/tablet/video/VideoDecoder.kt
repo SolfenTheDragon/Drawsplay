@@ -8,7 +8,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.view.Display
 import android.view.Surface
 import com.drawsplay.tablet.AndroidCompat
 import java.nio.ByteBuffer
@@ -51,20 +50,11 @@ import java.util.concurrent.atomic.AtomicLong
 class VideoDecoder(
     private val surface: Surface,
     onPictureReady: () -> Unit = {},
-    private val onVideoSize: (width: Int, height: Int) -> Unit = { _, _ -> }
+    private val onVideoSize: (width: Int, height: Int) -> Unit = { _, _ -> },
+    /** Refresh rate of the display showing [surface] in Hz; 0 when unknown. */
+    private val initialRefreshHz: Float = 0f
 ) {
     private val pictureReady = FirstPictureSignal(onPictureReady = onPictureReady)
-    private val initialRefreshHz: Float = try {
-        @Suppress("DEPRECATION")
-        val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            surface.javaClass.getMethod("getDisplay").invoke(surface) as? Display
-        } else {
-            null
-        }
-        display?.refreshRate ?: 0f
-    } catch (_: Exception) {
-        0f
-    }
 
     private var codec: MediaCodec? = null
     private var vps: ByteArray? = null

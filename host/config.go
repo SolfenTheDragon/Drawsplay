@@ -64,7 +64,8 @@ type settings struct {
 	// X11HighRateCapture lets Linux X11 capture run above 60 fps (up to the
 	// tablet's rate) when VAAPI can sustain it, sampling the 60 Hz desktop
 	// twice per frame to cut capture-phase latency at about 2x encoder CPU.
-	// Off clamps X11 capture to 60 fps.
+	// Off clamps X11 capture to 60 fps. Has no effect (and is hidden in the
+	// Web UI) while maxCaptureFPS <= 60.
 	X11HighRateCapture bool `json:"x11HighRateCapture"`
 	// NativeMediaHelper selects the optional native capture/encode helper
 	// ("auto", "on", "off"; empty is auto). It only ever adds a candidate in
@@ -100,7 +101,7 @@ func defaultSettings() settings {
 	return settings{
 		ADB:                   "adb",
 		FFmpeg:                "ffmpeg",
-		FPS:                   120,
+		FPS:                   maxCaptureFPS,
 		Bitrate:               "24M",
 		Width:                 1920,
 		Height:                1080,
@@ -152,8 +153,8 @@ func validVideoScaling(mode string) bool {
 // validate rejects values that would break the capture pipeline or the
 // virtual display. Returned errors are user-facing (web UI form feedback).
 func (s settings) validate() error {
-	if s.FPS < 10 || s.FPS > 240 {
-		return errors.New("fps must be between 10 and 240")
+	if s.FPS < 10 || s.FPS > maxCaptureFPS {
+		return fmt.Errorf("fps must be between 10 and %d", maxCaptureFPS)
 	}
 	if kbps := parseBitrateKbps(s.Bitrate); kbps < minLadderKbps {
 		return fmt.Errorf("bitrate must be at least %dk (ffmpeg syntax, e.g. 24M)", minLadderKbps)
@@ -258,6 +259,8 @@ func loadSettings() settings {
 		fmt.Fprintf(os.Stderr, "Warning: ignoring corrupt config %s: %v\n", path, err)
 		return defaultSettings()
 	}
+	// Configs written before the rate was locked may hold a higher fps.
+	s.FPS = clampFPS(s.FPS)
 	return applyFeatureFlags(s)
 }
 

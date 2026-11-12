@@ -42,8 +42,8 @@ func TestApplyClientDisplayDefaults(t *testing.T) {
 	android.PrefWidth, android.PrefHeight, android.PrefFPS = 1920, 1200, 90
 	opts = base
 	applyClientDisplayDefaults(&opts, android)
-	if opts.Width != 1920 || opts.Height != 1200 || opts.FPS != 90 {
-		t.Fatalf("remembered = %dx%d@%d, want 1920x1200@90", opts.Width, opts.Height, opts.FPS)
+	if want := min(90, maxCaptureFPS); opts.Width != 1920 || opts.Height != 1200 || opts.FPS != want {
+		t.Fatalf("remembered = %dx%d@%d, want 1920x1200@%d", opts.Width, opts.Height, opts.FPS, want)
 	}
 
 	opts = base

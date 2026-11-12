@@ -205,7 +205,8 @@
             <select id="fps"></select>
           </div>
         </div>
-        <div class="hint">Bitrate adjusts automatically.</div>
+        <div class="hint" id="fps-locked-hint">The stream runs at 60 fps. Bitrate adjusts automatically.</div>
+        <div class="hint" id="fps-unlocked-hint" hidden>Bitrate adjusts automatically.</div>
         <label for="idle-display-timeout">Idle display timeout (seconds; 0 = never)</label>
         <input id="idle-display-timeout" data-setting="idleDisplayTimeoutSec" type="number" min="0" max="86400" step="1">
         <label for="ffmpeg">ffmpeg path</label>
@@ -284,8 +285,8 @@
               <span class="slider"></span>
             </label>
           </div>
-          <div class="toggle-row" data-linux-only>
-              <label for="x11-high-rate-capture">Capture X11 at up to 120 fps (uses more CPU)</label>
+          <div class="toggle-row" data-linux-only data-high-fps-only>
+              <label for="x11-high-rate-capture" id="x11-high-rate-capture-label">Capture X11 at up to 120 fps (uses more CPU)</label>
             <label class="switch">
               <input id="x11-high-rate-capture" data-setting="x11HighRateCapture" type="checkbox">
               <span class="slider"></span>

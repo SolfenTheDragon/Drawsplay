@@ -43,7 +43,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 class VideoChannel(
     private val listener: VideoChannelListener,
     private val endpointSelector: HostEndpointSelector,
-    private val isAppForeground: () -> Boolean = { true }
+    private val isAppForeground: () -> Boolean = { true },
+    /** Refresh rate of the display showing the render surface in Hz; 0 when unknown. */
+    private val displayRefreshHz: () -> Float = { 0f }
 ) {
 
     /** Owner-facing status callbacks. UI thread is not guaranteed. */
@@ -186,7 +188,12 @@ class VideoChannel(
                 dispatch = { callback -> mainHandler.post { callback() } },
                 onPictureReady = listener::onPictureReady
             )
-            val decoder = VideoDecoder(renderSurface, onPictureReady = pictureReady::signal) { w, h -> listener.onVideoSize(w, h) }
+            val decoder = VideoDecoder(
+                renderSurface,
+                onPictureReady = pictureReady::signal,
+                onVideoSize = { w, h -> listener.onVideoSize(w, h) },
+                initialRefreshHz = displayRefreshHz()
+            )
             val upstreamLock = Any()
             val statsThread = startStatsReporter(socket, decoder, upstreamLock)
             val acks = FrameAckReporter(socket.getOutputStream(), upstreamLock, decoder::ackedFrames)

@@ -293,7 +293,7 @@ class MainActivity : AppCompatActivity() {
             override fun onHostFrameShown(inputSeq: Int) {
                 inputPad.post { inputPad.onHostFrameShown(inputSeq) }
             }
-        }, endpointSelector) { appForeground }
+        }, endpointSelector, { appForeground }, { currentDisplay()?.refreshRate ?: 0f })
         pairedWifiHost = WiFiPairedSessionHost(this, endpointSelector, { pendingForegroundSurface },
             onStreaming = { up ->
                 runOnUiThread {
