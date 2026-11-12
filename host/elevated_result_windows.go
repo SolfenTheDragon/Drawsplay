@@ -42,6 +42,9 @@ func writeElevatedResult(path string, v any) error {
 // splitElevatedResultPath validates path as a plain absolute local file
 // path and returns its folder and file name.
 func splitElevatedResultPath(path string) (dir, name string, err error) {
+	if strings.HasSuffix(path, `\`) || strings.HasSuffix(path, `/`) {
+		return "", "", fmt.Errorf("result path %q names a folder, not a file", path)
+	}
 	clean := filepath.Clean(path)
 	vol := filepath.VolumeName(clean)
 	if !filepath.IsAbs(clean) || len(vol) != 2 || vol[1] != ':' || strings.HasPrefix(clean, `\\`) {

@@ -12,7 +12,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const driveRemote = 4
+const (
+	driveRemote     = 4
+	fileDeleteChild = 0x40 // FILE_DELETE_CHILD
+)
 
 var (
 	kernel32ConfigPath = windows.NewLazySystemDLL("kernel32.dll")
@@ -91,14 +94,28 @@ func validateExecutablePathACL(path string) error {
 	if acl == nil {
 		return errors.New("executable path has no restrictive access control list")
 	}
-	const writeAccess = 0x00000002 | 0x00000004 | 0x00000010 | 0x00000100 |
-		0x00010000 | 0x00040000 | 0x00080000 | 0x10000000 | 0x40000000
+	// For the file itself any write right lets another user change what runs.
+	// For an ancestor folder only rights that replace or remove an existing
+	// child matter: adding a new file or subfolder (which the default C:\ ACL
+	// grants Authenticated Users) cannot swap out a path component.
+	const (
+		fileWriteAccess = windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA | windows.FILE_WRITE_EA |
+			windows.FILE_WRITE_ATTRIBUTES | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER |
+			windows.GENERIC_WRITE | windows.GENERIC_ALL
+		dirWriteAccess = fileDeleteChild | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER |
+			windows.GENERIC_WRITE | windows.GENERIC_ALL
+	)
+	writeAccess := windows.ACCESS_MASK(fileWriteAccess)
+	if attrs&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
+		writeAccess = windows.ACCESS_MASK(dirWriteAccess)
+	}
 	for i := uint32(0); i < uint32(acl.AceCount); i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(acl, i, &ace); err != nil {
 			return err
 		}
-		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Mask&writeAccess == 0 {
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Mask&writeAccess == 0 ||
+			ace.Header.AceFlags&windows.INHERIT_ONLY_ACE != 0 {
 			continue
 		}
 		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
