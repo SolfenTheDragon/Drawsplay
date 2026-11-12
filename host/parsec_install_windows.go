@@ -32,6 +32,11 @@ func setupWindowsDisplayDriver(installIDD func() string, iddReady func() bool,
 	if iddReady() {
 		return windowsDriverSetupResult{status: status}
 	}
+	if status == driverStatusPendingReboot {
+		// The DrawSplay driver is staged and only needs a reboot; adding a
+		// second virtual display driver now would leave two installed.
+		return windowsDriverSetupResult{status: status}
+	}
 	log.Printf("DrawSplay virtual display setup: %s; trying signed Parsec VDD fallback", status)
 	owned, err := installParsec()
 	if err != nil {

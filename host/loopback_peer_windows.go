@@ -29,8 +29,11 @@ func loopbackPeerIsOtherUser(c net.Conn) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if pid == 0 || pid == 4 {
-		return false, nil // System Idle / System
+	if pid == 0 {
+		return false, errors.New("TCP socket owner is unknown")
+	}
+	if pid == 4 {
+		return false, nil // SYSTEM can act as any local user.
 	}
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {

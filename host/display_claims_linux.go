@@ -22,11 +22,13 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -73,11 +75,31 @@ func (c displayClaim) live() bool {
 // true the (pruned) list is written back.
 func withDisplayClaims(fn func(*displayClaimFile) bool) error {
 	dir := displayClaimsDir()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" && filepath.Dir(dir) == runtimeDir {
+		if err := ensurePrivateClaimDir(runtimeDir); err != nil {
+			return fmt.Errorf("unsafe XDG_RUNTIME_DIR: %w", err)
+		}
+	}
+	if err := ensurePrivateClaimDir(dir); err != nil {
 		return err
 	}
-	lock, err := os.OpenFile(filepath.Join(dir, "display-claims.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	lockPath := filepath.Join(dir, "display-claims.lock")
+	fd, err := unix.Open(lockPath, unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0o600)
 	if err != nil {
+		return err
+	}
+	lock := os.NewFile(uintptr(fd), lockPath)
+	var lockStat unix.Stat_t
+	if err := unix.Fstat(fd, &lockStat); err != nil {
+		lock.Close()
+		return err
+	}
+	if lockStat.Mode&unix.S_IFMT != unix.S_IFREG || int(lockStat.Uid) != os.Getuid() {
+		lock.Close()
+		return errors.New("display-claims lock is not a regular file owned by this user")
+	}
+	if err := lock.Chmod(0o600); err != nil {
+		lock.Close()
 		return err
 	}
 	defer lock.Close()
@@ -101,6 +123,27 @@ func withDisplayClaims(fn func(*displayClaimFile) bool) error {
 		return nil
 	}
 	return writeJSONAtomic(path, f)
+}
+
+func ensurePrivateClaimDir(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		info, err = os.Lstat(path)
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is not a real directory", path)
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(st.Uid) != os.Getuid() {
+		return fmt.Errorf("%s is not owned by this user", path)
+	}
+	return os.Chmod(path, 0o700)
 }
 
 // claimDisplay records that this process holds the display.

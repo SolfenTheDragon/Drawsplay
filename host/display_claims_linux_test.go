@@ -45,6 +45,20 @@ func TestDisplayClaimsSeeOtherLiveOwnersOnly(t *testing.T) {
 	}
 }
 
+func TestDisplayClaimsRejectSymlinkDirectory(t *testing.T) {
+	target := t.TempDir()
+	link := filepath.Join(t.TempDir(), "claims-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	old := displayClaimsDir
+	displayClaimsDir = func() string { return link }
+	defer func() { displayClaimsDir = old }()
+	if err := withDisplayClaims(func(*displayClaimFile) bool { return false }); err == nil {
+		t.Fatal("symlink display-claims directory unexpectedly accepted")
+	}
+}
+
 func TestDisplayClaimsGoldenFileReads(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "testdata", "protocols", "display-claims.json"))
 	if err != nil {

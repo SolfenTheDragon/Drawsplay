@@ -35,7 +35,7 @@ func writeHelperTaskResult(name string, taskErr error) {
 	if taskErr != nil {
 		res.Error = taskErr.Error()
 	}
-	if err := writeJSONAtomic(filepath.Join(dir, name), res); err != nil {
+	if err := writeElevatedResult(filepath.Join(dir, name), res); err != nil {
 		log.Printf("Writing %s failed: %v", name, err)
 	}
 }

@@ -27,7 +27,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode/utf16"
 
 	"golang.org/x/sys/windows/registry"
 )
@@ -178,18 +177,6 @@ func scanAOAWinUSBInfs() (owned, zadig []string) {
 		}
 	}
 	return owned, zadig
-}
-
-// decodeINFText handles UTF-16LE INFs (with BOM) as well as ANSI/UTF-8.
-func decodeINFText(data []byte) string {
-	if len(data) >= 2 && data[0] == 0xFF && data[1] == 0xFE {
-		u := make([]uint16, 0, len(data)/2)
-		for i := 2; i+1 < len(data); i += 2 {
-			u = append(u, uint16(data[i])|uint16(data[i+1])<<8)
-		}
-		return string(utf16.Decode(u))
-	}
-	return string(data)
 }
 
 func parsecAppInstalled() bool {

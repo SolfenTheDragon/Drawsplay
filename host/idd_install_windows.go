@@ -20,15 +20,18 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 //go:embed driver/idd
@@ -156,7 +159,7 @@ func installIDDDriverPackage() string {
 	if !isProcessElevated() {
 		return "failed: virtual display driver installation requires administrator approval"
 	}
-	if _, err := iddDevicePath(); err == nil {
+	if _, err := iddDevicePath(); err == nil && (!driverBundled() || !iddDriverNeedsUpdate()) {
 		return driverStatusPresent
 	}
 	if !driverBundled() {
@@ -190,6 +193,8 @@ func installIDDDriverPackage() string {
 	}
 	if reboot {
 		log.Println("Virtual display driver install reported a pending reboot")
+		markVDDOwned()
+		return driverStatusPendingReboot
 	}
 	// The control interface can take a moment to appear; retry briefly.
 	deadline := time.Now().Add(15 * time.Second)
@@ -203,6 +208,69 @@ func installIDDDriverPackage() string {
 			return driverStatusPendingReboot
 		}
 		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func iddDriverNeedsUpdate() bool {
+	installedINF, err := installedIDDDriverINF()
+	if err != nil {
+		log.Printf("Cannot inspect installed DrawSplay driver package: %v; refreshing it", err)
+		return true
+	}
+	installedDLL, err := os.ReadFile(system32Path(filepath.Join("drivers", "UMDF", "DrawSplayIdd.dll")))
+	if err != nil {
+		return true
+	}
+	bundledINF, _ := embeddedDriver.ReadFile("driver/idd/" + iddInfName)
+	bundledDLL, _ := embeddedDriver.ReadFile("driver/idd/DrawSplayIdd.dll")
+	return driverPackageNeedsUpdate(bundledINF, bundledDLL, installedINF, installedDLL)
+}
+
+func installedIDDDriverINF() ([]byte, error) {
+	set, _, callErr := procSetupDiGetClassDevsW.Call(0, 0, 0, uintptr(digcfAllClasses|digcfPresent))
+	if set == invalidHandleValue {
+		return nil, fmt.Errorf("SetupDiGetClassDevs: %w", callErr)
+	}
+	defer procSetupDiDestroyDeviceInfoList.Call(set)
+	want, _ := windows.UTF16FromString(iddHardwareID)
+	buf := make([]byte, 4096)
+	for i := uint32(0); ; i++ {
+		info := spDevInfoData{cbSize: uint32(unsafe.Sizeof(spDevInfoData{}))}
+		r, _, callErr := procSetupDiEnumDeviceInfo.Call(set, uintptr(i), uintptr(unsafe.Pointer(&info)))
+		if r == 0 {
+			if callErr == windows.ERROR_NO_MORE_ITEMS {
+				return nil, os.ErrNotExist
+			}
+			return nil, fmt.Errorf("SetupDiEnumDeviceInfo: %w", callErr)
+		}
+		var regType, size uint32
+		r, _, _ = procSetupDiGetDeviceRegistryProperty.Call(
+			set, uintptr(unsafe.Pointer(&info)), uintptr(spdrpHardwareID),
+			uintptr(unsafe.Pointer(&regType)), uintptr(unsafe.Pointer(&buf[0])),
+			uintptr(len(buf)), uintptr(unsafe.Pointer(&size)))
+		if r == 0 || !multiSzHasID(buf, want) {
+			continue
+		}
+		const diregDrv = 0x2
+		handle, _, callErr := procSetupDiOpenDevRegKey.Call(
+			set, uintptr(unsafe.Pointer(&info)), dicsFlagGlobal, 0, diregDrv, uintptr(registry.QUERY_VALUE))
+		if handle == invalidHandleValue {
+			return nil, fmt.Errorf("SetupDiOpenDevRegKey: %w", callErr)
+		}
+		key := registry.Key(handle)
+		name, _, err := key.GetStringValue("InfPath")
+		key.Close()
+		if err != nil {
+			return nil, err
+		}
+		if name == "" || filepath.Base(name) != name {
+			return nil, fmt.Errorf("invalid installed INF name %q", name)
+		}
+		dir, err := windows.GetWindowsDirectory()
+		if err != nil {
+			return nil, err
+		}
+		return os.ReadFile(filepath.Join(dir, "INF", name))
 	}
 }
 
@@ -303,6 +371,13 @@ const invalidHandleValue = ^uintptr(0)
 // device for hardwareID and installs the driver from infPath. Returns whether
 // a reboot is required.
 func createRootDevnodeAndInstall(hardwareID, infPath string) (bool, error) {
+	reboot, err := updateIDDDevice(hardwareID, infPath)
+	if err == nil {
+		return reboot, nil
+	}
+	if !errors.Is(err, windows.ERROR_NO_SUCH_DEVINST) && !errors.Is(err, syscall.Errno(0xE000020B)) {
+		return false, err
+	}
 	infPtr, err := windows.UTF16PtrFromString(infPath)
 	if err != nil {
 		return false, err
@@ -364,10 +439,20 @@ func createRootDevnodeAndInstall(hardwareID, infPath string) (bool, error) {
 		return false, fmt.Errorf("SetupDiCallClassInstaller(REGISTERDEVICE): %w", callErr)
 	}
 
-	// Install the matching driver onto the freshly registered devnode.
-	hwidPtr, _ := windows.UTF16PtrFromString(hardwareID)
+	return updateIDDDevice(hardwareID, infPath)
+}
+
+func updateIDDDevice(hardwareID, infPath string) (bool, error) {
+	hwidPtr, err := windows.UTF16PtrFromString(hardwareID)
+	if err != nil {
+		return false, err
+	}
+	infPtr, err := windows.UTF16PtrFromString(infPath)
+	if err != nil {
+		return false, err
+	}
 	var reboot int32
-	r, _, callErr = procUpdateDriverForPlugAndPlayDevicesW.Call(
+	r, _, callErr := procUpdateDriverForPlugAndPlayDevicesW.Call(
 		0,
 		uintptr(unsafe.Pointer(hwidPtr)),
 		uintptr(unsafe.Pointer(infPtr)),
