@@ -30,6 +30,8 @@ The Rust components link the following direct dependencies, each under its own p
 | `winit` (window and input events) | Apache-2.0 |
 | `softbuffer` (window pixel buffer) | MIT OR Apache-2.0 |
 | `bytemuck` | Zlib OR Apache-2.0 OR MIT |
+| `font8x8` (launcher bitmap font) | MIT |
+| `blake2` (pairing-code commitment hash) | MIT OR Apache-2.0 |
 | `enigo` (mouse and key injection) | MIT |
 | `evdev` (Linux uinput) | Apache-2.0 OR MIT |
 | `ctrlc` (Linux signal handling) | MIT/Apache-2.0 |

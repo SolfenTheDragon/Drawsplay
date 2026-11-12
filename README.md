@@ -31,7 +31,7 @@ Get the latest [DrawSplay release](https://github.com/SolfenTheDragon/Drawsplay/
 ### Windows
 
 1. Install the app on the tablet: copy `DrawSplay.APK` to it, open it and allow installs from that source if asked.
-2. Extract the zip and run `drawsplay_installer_vX.Y.Z.exe`. Answer its questions (desktop shortcut, start at sign-in, virtual display), then approve the administrator prompt once. It installs DrawSplay, its virtual display driver, ffmpeg and a USB driver for the tablet.
+2. Extract the zip and run `drawsplay_installer_vX.Y.Z.exe`. Choose the desktop shortcut and startup preferences on one setup screen. Select **Enable an extra screen** to install the virtual display driver; leave it off for mirror-only setup without a new display driver. Setup explains any local signing-certificate change before you proceed. Click **Install**, then approve the administrator prompt once. A progress window stays visible while files, ffmpeg and USB drivers are installed.
 3. DrawSplay runs in the **system tray**. Right-click the tray icon to open settings, start/stop or exit.
 
 If the tablet isn't detected, unplug and reconnect it. If it still isn't detected, run the installer again.
@@ -63,16 +63,22 @@ To remove DrawSplay, run `./uninstall-drawsplay-host-linux.sh` (your settings ar
 
 The tablet shows the extended desktop and sends touch and pen input back. It reconnects by itself after drops and unplugging. While the display is shown, swipe from a screen edge and press **Back** for **Connection options**.
 
+The waiting screen follows the tablet's light/dark theme. **Show setup help** expands connection instructions. A once-only hint explains Back without blocking drawing; local setup screens and dialogs keep keyboard input on the tablet instead of forwarding it to the computer.
+
 **USB file transfer:** while DrawSplay runs, it takes over the tablet's USB connection, so *File transfer* mode is not available. On Linux, pick *File transfer* on the tablet to move files, then *No data transfer* to return to DrawSplay. On Windows, quit DrawSplay to transfer files. To switch only when you choose, turn off **Switch the tablet to accessory mode automatically** in the settings and use **Switch to USB accessory mode** when you want DrawSplay.
 
 ## Settings
 
 While DrawSplay is running, open `http://127.0.0.1:27180` (or **Settings** in the tray menu) to:
 
-- change the bitrate and turn touch or pen input on and off
-- disconnect the tablet, lock input for a while, or restart the video
+- change tablet scaling and turn touch or pen input on and off
+- reset a connection, lock input for a while, or reconnect video
 - see setup checks and connection health, and download a diagnostics file
-- turn **Run at login** and **Auto-launch Android app on USB connect** on or off
+- turn **Run at login** and **Open the tablet app when USB connects** on or off
+
+The navigation groups **Overview**, **Display & input**, **Connections**, **Troubleshooting**, and **Settings & about**. Appearance can follow the system or use light/dark mode. Preference edits show a **Save changes / Discard** bar; only changed preferences are sent, and unrelated changes do not restart video. Startup and live session controls apply immediately. Tablet settings are disabled during a PC-only session or when the host cannot be reached; unsaved edits are kept on this page.
+
+**Pen alignment:** in **Pen calibration**, choose **Calibrate with targets**, move the browser onto the tablet's display, and enter fullscreen. Tap the four targets with your pen, inspect the corrected-position preview, then choose **Use these adjustments** and **Save calibration**. Nothing is saved by entering or cancelling the guide. Manual adjustments, reset and discard are also available.
 
 **Resolution and refresh rate:** change them in your computer's display settings (Windows Display Settings; GNOME Settings > Displays; on X11, the `HDMI-1` or `Virtual-1-1` display). On KDE Plasma use DrawSplay's settings page. Linux streams at up to 60 fps (up to 120 on X11 with Intel or AMD graphics).
 
@@ -86,7 +92,7 @@ While DrawSplay is running, open `http://127.0.0.1:27180` (or **Settings** in th
 
 **Linux shows a mirror instead of an extra display.**
 - Wayland: use GNOME, KDE Plasma 6, sway or Hyprland.
-- X11: DrawSplay needs an unused HDMI port on your graphics card and asks for your password once when the tablet connects. Without a spare port, start DrawSplay with `DRAWSPLAY_X11_VKMS_AUTOLOAD=1` to use a virtual one instead; on some systems this can crash the desktop session.
+- X11: DrawSplay first tries the `vkms` virtual-display module, then an unused HDMI port, then mirroring. It may ask for your password when the tablet connects. Automatic `vkms` loading is enabled by default but blocked after detected setup crashes or known kernel failures. Set `DRAWSPLAY_X11_VKMS_AUTOLOAD=0` to disable loading it. Setting it to `1` **overrides the crash guards** and can crash the desktop session; do not use that as a routine repair.
 - The settings page shows the reason.
 
 **Windows: no extended display.** Run the installer again and restart Windows if it asks.
@@ -97,7 +103,7 @@ While DrawSplay is running, open `http://127.0.0.1:27180` (or **Settings** in th
 
 **Multi-touch doesn't work in an X11 app.** Some apps need touch turned on; for Firefox start it with `MOZ_USE_XINPUT2=1 firefox`.
 
-**The tablet doesn't open DrawSplay when plugged in.** Turn on **Auto-launch Android app on USB connect** in the settings, or open the app yourself.
+**The tablet doesn't open DrawSplay when plugged in.** Turn on **Open the tablet app when USB connects** in the settings and save, or open the app yourself.
 
 ## Wi-Fi (beta)
 
@@ -132,18 +138,22 @@ Windows and Linux work in any combination.
 
 ### Start
 
+```sh
+dd-host --bind 0.0.0.0:47800              # on the computer to extend
+dd-client                               # on the computer that becomes the display
 ```
-dd-host                                  # on the computer to extend
-dd-client HOST_IP --fullscreen           # on the computer that becomes the display
-```
+
+The client launcher offers **Connect**, **Trusted devices**, and **Quit**. Enter the host's LAN address, then choose a fitted window, fitted fullscreen, or a 1:1 window. For terminal/automated use, `dd-client HOST_IP --fullscreen` still works. Linux graphical dialogs need `zenity`; unavailable dialogs fall back to terminal prompts. `--terminal` explicitly uses terminal prompts.
+
+The host command above listens on all interfaces; prefer `--bind YOUR_LAN_IP:47800` to select one interface. Allow the chosen port through your firewall if necessary. Bare `dd-host` offers a local start/device-management menu, but still listens only on `127.0.0.1:47800`; that menu does not enable LAN access.
 
 Press `Ctrl+Alt+Shift+Q` to close the client. `--size 1920x1080` opens a window instead of fullscreen, `--fit` scales the picture to the window, and `--help` lists all options.
 
 ### Pairing
 
-The first time, both computers show a 10-digit code. Type `y` on both only if the codes match; if they differ, type `n`. After that the computers recognise each other.
+The first time, both computers show their identities and a 10-digit code. Approve on both only if the codes match; otherwise reject. With terminal prompts, type `y` to approve or `n` to reject. Requests expire after two minutes and close when the peer disconnects. After approval, the computers recognise each other.
 
-If the host has no terminal (for example when it runs in the background), pair by hand:
+For deployments without graphical dialogs or an interactive terminal, pair by exchanging keys:
 
 ```
 dd-client --show-key        # on the client: prints its key
@@ -152,16 +162,18 @@ dd-host --show-key          # on the host
 dd-client --trust <that key>
 ```
 
-`--list-trusted` shows paired devices and `--forget KEY_PREFIX` removes one.
+**Trusted devices** in the launcher, or `--manage-trusted` on either binary, lets you name or remove paired computers. Removal asks for confirmation. `--list-trusted` and `--forget KEY_PREFIX` remain available for terminal use.
 
-A paired computer can type, click and draw on the host as you, so pair only computers you trust. By default the host accepts connections only from your local network. If it can't create an extra display it shows your real screen instead; start it with `--require-virtual` to prevent that.
+A paired computer can type, click and draw on the host as you, so pair only computers you trust. The host listens only on loopback unless you choose another bind address; the peer-address filter still rejects public-network peers by default. If it can't create an extra display it shows your real screen instead; start it with `--require-virtual` to prevent that.
+
+If a connection drops, the client clears the stale picture, stops forwarding input and shows reconnect progress even in fullscreen. It retries for about a minute, then offers retry, trusted-device management or quit.
 
 ### Limitations
 
 - No audio.
 - One client at a time unless the host is started with `--max-clients N`.
 - Pen pressure, tilt and the pen's buttons work only when the client runs on Windows. On a Linux client the pen acts as a mouse.
-- The pairing question needs a terminal (see manual pairing above).
+- Display mode choices are made at startup; there is no live drawing toolbar.
 
 ## Privacy
 

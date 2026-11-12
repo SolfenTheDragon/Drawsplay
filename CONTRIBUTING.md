@@ -15,8 +15,10 @@ Thanks for your interest in DrawSplay. Contributions are welcome, with one impor
 - Describe what changed and why, and how you tested it (OS, GPU and tablet if relevant).
 - Make sure CI passes. Run what applies to your change before opening the pull request:
   - `host/`: `gofmt -l .` (no output), `go vet ./...`, `go test -race ./...` and `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...`. For Windows code, also `GOOS=windows go vet ./...`; for new platform files, also `GOOS=darwin go vet ./...`.
+  - Browser calibration math: from the repository root, `node --test host/webui_calibration_test.cjs` (Node's built-in test runner; no npm dependencies).
+  - Linux installer detection: `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_*.py'` (isolated detection fixtures; does not install anything).
   - `desktop/`: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`.
-  - `android/`: `./gradlew :app:compileReleaseKotlin` and `./gradlew :app:testReleaseUnitTest`.
+  - `android/` with JDK 17: `./gradlew :app:compileReleaseKotlin` and `./gradlew :app:testReleaseUnitTest` (`.\gradlew.bat` on Windows).
   - `native/drawsplay-media/`: `make CC="cc -Werror"`.
 - Pin any new GitHub Action to a full commit SHA with a version comment, like the existing ones.
 - Keep Windows and Linux builds both compiling. Platform-specific host code uses `_windows.go`, `_linux.go` and `_other.go` filename suffixes. An `_other.go` file is the fallback for every platform its `_windows.go` or `_linux.go` siblings don't cover, and its build tag says so (`!windows`, `!linux` or `!linux && !windows`). Other platforms aren't supported, but the host still compiles there (`GOOS=darwin go vet ./...`), which catches a missing fallback.
