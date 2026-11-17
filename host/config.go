@@ -75,8 +75,8 @@ type settings struct {
 	// (videoScalingFill, videoScalingFit or videoScalingOriginal).
 	VideoScaling    string `json:"videoScaling"`
 	NoDriverInstall bool   `json:"noDriverInstall"`
-	// PairedWiFiEnabled turns on the paired mutual-TLS Wi-Fi transport (needs
-	// DRAWSPLAY_FEATURE_WIFI).
+	// PairedWiFiEnabled turns on the paired mutual-TLS Wi-Fi transport
+	// (forced off when DRAWSPLAY_FEATURE_WIFI disables the feature).
 	PairedWiFiEnabled bool `json:"pairedWifiEnabled"`
 	// PairedWiFiInterface is the explicit LAN interface for paired Wi-Fi.
 	PairedWiFiInterface string `json:"pairedWifiInterface,omitempty"`
