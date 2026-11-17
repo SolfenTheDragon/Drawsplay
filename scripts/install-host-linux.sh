@@ -336,6 +336,38 @@ echo
 }
 echo
 
+# --- vkms hold (X11 virtual display safety) ----------------------------------
+# Keeps the X server and the desktop away from the vkms virtual display until
+# DrawSplay has checked, in each boot, that the kernel can show the GPU's frames
+# on it. On some kernels (Intel xe GPUs, for one) it cannot, and a desktop that
+# picked vkms up froze. Installed on every session type: whoever loads vkms
+# (DrawSplay, or a manual modprobe), X never sees it unchecked.
+{
+  HOLD_RULE_SOURCE="$SCRIPT_DIR/72-drawsplay-vkms-hold.rules"
+  if [[ ! -f "$HOLD_RULE_SOURCE" ]]; then
+    HOLD_RULE_SOURCE="$ROOT_DIR/packaging/linux/72-drawsplay-vkms-hold.rules"
+  fi
+  HOLD_RULE_TARGET="/etc/udev/rules.d/72-drawsplay-vkms-hold.rules"
+  if [[ ! -f "$HOLD_RULE_SOURCE" ]]; then
+    echo "udev rule 72-drawsplay-vkms-hold.rules not found; DrawSplay installs it itself before it loads vkms."
+  elif cmp -s "$HOLD_RULE_SOURCE" "$HOLD_RULE_TARGET" 2>/dev/null; then
+    echo "vkms hold udev rule already installed: $HOLD_RULE_TARGET"
+  elif [[ "$SKIP_INSTALL" -eq 1 ]]; then
+    echo "Run manually:"
+    echo "  sudo install -m 0644 72-drawsplay-vkms-hold.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules"
+  else
+    echo "Installing the vkms hold udev rule (asks for your password)..."
+    # Only reloaded, not triggered: a vkms the X server already uses is left
+    # alone (the settings page offers to unload it).
+    if sudo install -m 0644 "$HOLD_RULE_SOURCE" "$HOLD_RULE_TARGET" && sudo udevadm control --reload-rules; then
+      echo "Installed $HOLD_RULE_TARGET."
+    else
+      echo "Could not install the vkms hold rule; DrawSplay installs it itself before it loads vkms." >&2
+    fi
+  fi
+  echo
+}
+
 # --- Spare HDMI connector access (X11 virtual display fallback) --------------
 # Lets the plugdev group force an unplugged HDMI port on, so the X11 fallback
 # virtual display works without root or a password prompt on every boot. This

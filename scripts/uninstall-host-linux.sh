@@ -83,6 +83,7 @@ SYSTEM_FILES=()
 for f in \
   /etc/udev/rules.d/70-drawsplay-aoa.rules \
   /etc/udev/rules.d/70-drawsplay-drm-connector.rules \
+  /etc/udev/rules.d/72-drawsplay-vkms-hold.rules \
   /etc/udev/rules.d/99-drawsplay-uinput.rules \
   /etc/modules-load.d/drawsplay-vkms.conf \
   /etc/modprobe.d/drawsplay-vkms.conf \
@@ -120,7 +121,7 @@ for a in "$@"; do
   if [[ "$a" == "--" ]]; then seen=1; continue; fi
   if [[ "$seen" -eq 0 ]]; then
     case "$a" in
-      /etc/udev/rules.d/70-drawsplay-aoa.rules|/etc/udev/rules.d/70-drawsplay-drm-connector.rules|/etc/udev/rules.d/99-drawsplay-uinput.rules|/etc/modules-load.d/drawsplay-vkms.conf|/etc/modprobe.d/drawsplay-vkms.conf|/usr/libexec/drawsplay/drawsplay-display-helper|/usr/share/polkit-1/actions/com.drawsplay.display-helper.policy) files+=("$a") ;;
+      /etc/udev/rules.d/70-drawsplay-aoa.rules|/etc/udev/rules.d/70-drawsplay-drm-connector.rules|/etc/udev/rules.d/72-drawsplay-vkms-hold.rules|/etc/udev/rules.d/99-drawsplay-uinput.rules|/etc/modules-load.d/drawsplay-vkms.conf|/etc/modprobe.d/drawsplay-vkms.conf|/usr/libexec/drawsplay/drawsplay-display-helper|/usr/share/polkit-1/actions/com.drawsplay.display-helper.policy) files+=("$a") ;;
       *) echo "refusing unexpected path: $a" >&2; exit 2 ;;
     esac
   else
@@ -130,6 +131,14 @@ for a in "$@"; do
 done
 for p in "${ports[@]}"; do echo detect >"$p"; done
 if [[ ${#files[@]} -gt 0 ]]; then
+  # A vkms that DrawSplay loaded but never released to X is unused; unload it
+  # before the hold rule goes, so X cannot pick up an unchecked device later.
+  for c in /sys/class/drm/card[0-9]*; do
+    [[ "${c##*/}" =~ ^card[0-9]+$ ]] || continue
+    [[ "$(basename "$(readlink -f "$c/device")")" == vkms ]] || continue
+    udevadm info -q property -p "$c" 2>/dev/null | grep -qx ID_SEAT=drawsplay-hold && modprobe -r vkms 2>/dev/null
+  done
+  rm -rf /run/drawsplay
   rm -f "${files[@]}"
   rmdir /usr/libexec/drawsplay 2>/dev/null
   udevadm control --reload-rules
