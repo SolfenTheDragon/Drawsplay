@@ -28,12 +28,17 @@ func sessionDisplayBlackout() bool {
 }
 
 type setupCheckItem struct {
-	Key     string `json:"key"`
-	Label   string `json:"label"`
-	OK      bool   `json:"ok"`
-	Detail  string `json:"detail"`
-	Action  string `json:"action,omitempty"`
-	Command string `json:"command,omitempty"`
+	Key    string `json:"key"`
+	Label  string `json:"label"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+	Action string `json:"action,omitempty"`
+	// Fix names a POST /api/setup/remediate action (setup_fixes.go) the Web
+	// UI offers as a button labelled FixLabel; it may show a password prompt.
+	// Every step the user can take on this computer is a fix; Action only
+	// describes what happens or what to do on the tablet.
+	Fix      string `json:"fix,omitempty"`
+	FixLabel string `json:"fixLabel,omitempty"`
 }
 
 type setupChecklist struct {
@@ -51,27 +56,21 @@ func currentSetupChecklist(cfg settings) setupChecklist {
 	var items []setupCheckItem
 	if cfg.ADBTunnelEnabled {
 		adb := currentADBStatus()
-		items = append(items, setupCheckItem{
-			Key:     "adb-ready",
-			Label:   "ADB is connected",
-			OK:      adb.Ready,
-			Detail:  cmp.Or(adb.Error, "Ready"),
-			Action:  adbSetupAction(hostOS, adb.Error),
-			Command: adbSetupCommand(hostOS),
-		})
+		item := setupCheckItem{
+			Key:    "adb-ready",
+			Label:  "ADB is connected",
+			OK:     adb.Ready,
+			Detail: cmp.Or(adb.Error, "Ready"),
+			Action: adbSetupAction(hostOS, adb.Error),
+		}
+		item.Fix, item.FixLabel = adbSetupFix(hostOS, adb.Error)
+		items = append(items, item)
 	}
 	if cfg.AOAEnabled {
 		items = append(items, aoaSetupItem(hostOS, currentAOAStatus()))
 	}
 	items = append(items, []setupCheckItem{
-		{
-			Key:     "ffmpeg-ready",
-			Label:   "Video encoder available",
-			OK:      !containsWarning(warnings, "ffmpeg"),
-			Detail:  warningDetail(warnings, "ffmpeg", "Ready"),
-			Action:  ffmpegSetupAction(hostOS),
-			Command: ffmpegSetupCommand(hostOS),
-		},
+		ffmpegSetupItem(hostOS, warnings),
 		{
 			Key:    "device-connected",
 			Label:  "Client connected and authorized",
@@ -79,13 +78,7 @@ func currentSetupChecklist(cfg settings) setupChecklist {
 			Detail: cmp.Or(activeDevice, "Waiting for client hello"),
 			Action: "Open DrawSplay on the client device and keep the app in foreground.",
 		},
-		{
-			Key:    "stream-live",
-			Label:  "Desktop stream active",
-			OK:     video.Streaming,
-			Detail: cmp.Or(video.Encoder, "Waiting for stream"),
-			Action: "If this stays idle, lower resolution/FPS or reconnect the session.",
-		},
+		streamSetupItem(video, activeDevice),
 	}...)
 	if hostOS == "linux" && video.Streaming {
 		detail := "Extended desktop"
@@ -101,21 +94,23 @@ func currentSetupChecklist(cfg settings) setupChecklist {
 	}
 	if hostOS == "linux" {
 		items = append(items, setupCheckItem{
-			Key:    "linux-uinput",
-			Label:  "uinput injection access",
-			OK:     !containsWarning(warnings, "uinput"),
-			Detail: warningDetail(warnings, "uinput", "Ready"),
-			Action: "Run the DrawSplay install script again (it installs 99-drawsplay-uinput.rules), then log out and back in and reconnect.",
+			Key:      "linux-uinput",
+			Label:    "uinput injection access",
+			OK:       !containsWarning(warnings, "uinput"),
+			Detail:   warningDetail(warnings, "uinput", "Ready"),
+			Action:   "Allows programs in your logged-in session to create the tablet's pen, touch and keyboard devices; you may be asked for your password.",
+			Fix:      setupFixUinputRule,
+			FixLabel: "Allow pen and touch input",
 		})
 		if x11SessionActive() {
-			items = append(items, setupCheckItem{
-				Key:     "linux-x11-vkms",
-				Label:   "X11 virtual display (vkms)",
-				OK:      !containsWarning(warnings, "vkms"),
-				Detail:  warningDetail(warnings, "vkms", "Ready"),
-				Action:  "The X server reconfigures displays when vkms loads; save your work first. After loading it, click Run setup repair checks to restart the stream onto the extended desktop. To load it automatically at boot, configure the module and its options.",
-				Command: "sudo modprobe vkms create_default_dev=1",
-			})
+			item := setupCheckItem{
+				Key:    "linux-x11-vkms",
+				Label:  "X11 virtual display (vkms)",
+				OK:     !containsWarning(warnings, "vkms"),
+				Detail: warningDetail(warnings, "vkms", "Ready"),
+			}
+			item.Fix, item.FixLabel, item.Action = x11DisplayFix()
+			items = append(items, item)
 		}
 		if waylandSessionActive() {
 			items = append(items, setupCheckItem{
@@ -132,9 +127,10 @@ func currentSetupChecklist(cfg settings) setupChecklist {
 				Label: "Wayland capture dependencies",
 				OK: !containsWarning(warnings, "gstreamer") &&
 					!containsWarning(warnings, "pipewire"),
-				Detail:  firstWarningDetail(warnings, []string{"pipewire", "gstreamer"}, "Ready"),
-				Action:  "Install the GStreamer and PipeWire capture dependencies.",
-				Command: "sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-pipewire",
+				Detail:   firstWarningDetail(warnings, []string{"pipewire", "gstreamer"}, "Ready"),
+				Action:   "Installs the GStreamer and PipeWire capture packages; you may be asked for your password.",
+				Fix:      setupFixWaylandCapture,
+				FixLabel: "Install capture packages",
 			})
 		}
 	}
@@ -196,14 +192,16 @@ func aoaSetupItem(hostOS string, st aoaStatusInfo) setupCheckItem {
 	case "error":
 		item.Detail = st.Detail
 		if hostOS == "linux" {
-			item.Action = "Install the udev rule so your user can open the tablet, then reconnect it."
-			item.Command = "sudo cp packaging/linux/70-drawsplay-aoa.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger"
+			item.Action = "Lets your user open the tablet over USB; you may be asked for your password."
+			item.Fix, item.FixLabel = setupFixUSBRule, "Allow USB access"
 		} else {
-			item.Action = "Reconnect the tablet so DrawSplay can install its signed WinUSB driver (in normal mode and again after it re-enumerates in accessory mode). If it still fails, rerun the DrawSplay installer."
+			item.Action = "Retrying lets DrawSplay install its signed WinUSB driver (in normal mode and again after the tablet re-enumerates in accessory mode). If it still fails, rerun the DrawSplay installer."
+			item.Fix, item.FixLabel = setupFixRetryUSB, "Retry"
 		}
 	default:
 		item.Detail = "No tablet detected"
 		item.Action = "Connect the tablet with a USB data cable and unlock it."
+		item.Fix, item.FixLabel = setupFixRetryUSB, "Look for the tablet again"
 	}
 	return item
 }
@@ -222,25 +220,48 @@ func adbSetupAction(hostOS, detail string) string {
 	return "Confirm USB cable and accept Android USB-debugging prompts."
 }
 
-func adbSetupCommand(hostOS string) string {
-	if hostOS == "linux" {
-		return "adb kill-server && adb start-server"
+// adbSetupFix: on Linux a permissions error needs the USB udev rule (which
+// also restarts adb); anything else is retried by restarting the adb server.
+func adbSetupFix(hostOS, detail string) (fix, label string) {
+	lower := strings.ToLower(detail)
+	if hostOS == "linux" && (strings.Contains(lower, "lacks usb permissions") || strings.Contains(lower, "no permissions")) {
+		return setupFixUSBRule, "Allow USB access"
 	}
-	return ""
+	return setupFixRestartADB, "Restart ADB"
 }
 
-func ffmpegSetupAction(hostOS string) string {
-	if hostOS == "linux" {
-		return "Set a valid ffmpeg path or install ffmpeg."
+func ffmpegSetupItem(hostOS string, warnings []string) setupCheckItem {
+	item := setupCheckItem{
+		Key:    "ffmpeg-ready",
+		Label:  "Video encoder available",
+		OK:     !containsWarning(warnings, "ffmpeg"),
+		Detail: warningDetail(warnings, "ffmpeg", "Ready"),
 	}
-	return "Set a valid ffmpeg path or allow automatic tool install."
+	switch hostOS {
+	case "linux":
+		item.Action = "Installs ffmpeg with your package manager; you may be asked for your password. A custom ffmpeg path in settings must point to a working ffmpeg."
+		item.Fix, item.FixLabel = setupFixFFmpeg, "Install ffmpeg"
+	case "windows":
+		item.Action = "Downloads ffmpeg next to DrawSplay. A custom ffmpeg path in settings must point to a working ffmpeg."
+		item.Fix, item.FixLabel = setupFixFFmpeg, "Download ffmpeg"
+	default:
+		item.Action = "Install ffmpeg or set a valid ffmpeg path in settings."
+	}
+	return item
 }
 
-func ffmpegSetupCommand(hostOS string) string {
-	if hostOS == "linux" {
-		return "sudo apt install ffmpeg"
+func streamSetupItem(video videoStatusInfo, activeDevice string) setupCheckItem {
+	item := setupCheckItem{
+		Key:    "stream-live",
+		Label:  "Desktop stream active",
+		OK:     video.Streaming,
+		Detail: cmp.Or(video.Encoder, "Waiting for stream"),
+		Action: "If this stays idle, lower the resolution or frame rate, or restart the video.",
 	}
-	return ""
+	if activeDevice != "" {
+		item.Fix, item.FixLabel = setupFixRestartVideo, "Restart video"
+	}
+	return item
 }
 
 // containsFold reports whether sub occurs in s, ignoring case.

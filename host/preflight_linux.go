@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -74,7 +75,9 @@ func x11VirtualDisplayWarning() string {
 	if err != nil {
 		return ""
 	}
-	return x11VirtualDisplayWarningFor(st, vkmsModuleLoaded(), vkmsModuleAvailable())
+	// A held vkms (loaded, not yet checked) is invisible to X: report it like
+	// an unloaded one, whose fix is to set the display up.
+	return x11VirtualDisplayWarningFor(st, vkmsModuleLoaded() && !vkmsIsHeld(), vkmsModuleAvailable())
 }
 
 func x11VirtualDisplayReady() bool {
@@ -88,6 +91,56 @@ func x11VirtualDisplayReady() bool {
 
 func refreshX11VkmsWarning() {
 	setOperationalWarning("vkms", x11VirtualDisplayWarning())
+}
+
+// x11DisplayFix gives the checklist button and explanation for the X11
+// virtual display item: unload a vkms module the kernel failed on, or set the
+// display up (vkms, else a spare connector). There is no button when only a
+// new login helps (vkms loaded after X started) or nothing can be set up.
+func x11DisplayFix() (fix, label, action string) {
+	loaded, blocked := vkmsModuleLoaded() && !vkmsIsHeld(), vkmsBlockedFn()
+	switch {
+	case loaded && blocked:
+		return setupFixUnloadVkms, "Unload vkms",
+			"This kernel fails on vkms. Unloading it lets DrawSplay use a spare HDMI connector instead; you may be asked for your password. If the X server still uses vkms, log out and back in afterwards."
+	case loaded:
+		return "", "", "Log out and back in so the X server picks up the virtual display."
+	case blocked && !spareHDMIConnectorFn():
+		return "", "", "This computer has no free HDMI connector to use instead of vkms, so the tablet mirrors the desktop."
+	}
+	return setupFixVirtualDisplay, "Set up virtual display",
+		"The X server reconfigures displays when the virtual display is added; save your work first. You may be asked for your password. A running stream moves onto the extended desktop by itself."
+}
+
+// vkmsUnloadOffered reports whether the Web UI offers to unload vkms: it is
+// loaded in an X11 session on a kernel that failed on it.
+func vkmsUnloadOffered() bool {
+	return x11SessionActive() && vkmsModuleLoaded() && vkmsBlockedFn()
+}
+
+// vkmsUnloadFn is replaced in tests.
+var vkmsUnloadFn = func() error { return unloadVkmsPrivileged(true) }
+
+// unloadBlockedVkms unloads vkms (one password prompt when needed) and
+// refreshes the warning it caused.
+func unloadBlockedVkms() error {
+	if !vkmsUnloadOffered() {
+		return errors.New("vkms is not loaded, or this kernel has not failed on it; nothing to unload")
+	}
+	err := vkmsUnloadFn()
+	refreshX11VkmsWarning()
+	return err
+}
+
+// spareHDMIConnectorFn reports whether an unplugged HDMI connector is free
+// for the forced-connector fallback.
+var spareHDMIConnectorFn = func() bool {
+	for _, c := range listHDMIConnectors() {
+		if c.Status == "disconnected" && !displayClaimedByOther(c.XName) {
+			return true
+		}
+	}
+	return false
 }
 
 func x11VirtualDisplayWarningFor(st xrandrState, loaded, available bool) string {
@@ -105,13 +158,20 @@ func x11VirtualDisplayWarningFor(st xrandrState, loaded, available bool) string 
 	}
 	switch {
 	case loaded && vkmsBlockedFn():
-		return "The vkms module is loaded, but this kernel failed on it (vkms_prepare_fb), so it is not used and the tablet mirrors the desktop; unload it (sudo modprobe -r vkms) and remove /etc/modules-load.d/drawsplay-vkms.conf to let DrawSplay use a spare HDMI connector instead"
+		return "The vkms module is loaded, but this kernel failed on it (vkms_prepare_fb), so it is not used and the tablet mirrors the desktop; click Unload vkms to let DrawSplay use a spare HDMI connector instead"
+	case vkmsBlockedFn():
+		// vkms is off on this kernel; the spare connector takes over when a
+		// tablet connects, so do not suggest loading vkms.
+		if spareHDMIConnectorFn() {
+			return ""
+		}
+		return "This kernel fails on vkms (vkms_prepare_fb) and no spare HDMI connector is free, so the tablet mirrors the desktop"
 	case loaded:
 		return "The vkms module is loaded but X11 shows no virtual output; log out and back in so the X server picks it up, or the tablet will mirror the desktop"
 	case available:
-		return "X11 has no virtual display, so the tablet mirrors the desktop; load vkms (sudo modprobe vkms create_default_dev=1) to extend it"
+		return "X11 has no virtual display, so the tablet mirrors the desktop; click Set up virtual display to extend it"
 	default:
-		return "X11 has no virtual display and this kernel has no vkms module; the tablet will mirror the desktop"
+		return "X11 has no virtual display and this kernel has no vkms module; click Set up virtual display to use a spare HDMI connector, or the tablet will mirror the desktop"
 	}
 }
 

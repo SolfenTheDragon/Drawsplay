@@ -11,6 +11,10 @@ import "errors"
 func init() {
 	sysfsDRMDir = "/nonexistent/drawsplay-test-drm"
 	vkmsLoadPrivileged = func(bool) error { return errors.New("loading vkms is disabled in tests") }
+	vkmsUnloadFn = func() error { return errors.New("unloading vkms is disabled in tests") }
+	runDisplayHelperFn = func(bool, ...string) (string, error) {
+		return "", errors.New("running the display helper is disabled in tests")
+	}
 	forceConnectorPrivileged = func(string, string, bool) error {
 		return errors.New("forcing connectors is disabled in tests")
 	}

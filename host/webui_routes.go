@@ -252,7 +252,25 @@ func (api webUIAPI) handleSetupRemediate(w http.ResponseWriter, r *http.Request)
 			"setup":          currentSetupChecklist(api.store.get()),
 		})
 	default:
-		httpError(w, http.StatusUnprocessableEntity, "unknown setup action: %s", req.Action)
+		res, err := runSetupFix(strings.TrimSpace(req.Action), cfg)
+		switch {
+		case errors.Is(err, errUnknownSetupFix):
+			httpError(w, http.StatusUnprocessableEntity, "unknown setup action: %s", req.Action)
+			return
+		case errors.Is(err, errPasswordPromptDismissed):
+			httpError(w, http.StatusConflict, "nothing was changed: the password prompt was dismissed")
+			return
+		case err != nil:
+			httpError(w, http.StatusUnprocessableEntity, "%v", err)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"ok":             true,
+			"action":         req.Action,
+			"message":        res.Message,
+			"videoRestarted": res.VideoRestarted,
+			"setup":          currentSetupChecklist(api.store.get()),
+		})
 	}
 }
 

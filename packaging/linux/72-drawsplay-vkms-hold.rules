@@ -1,0 +1,14 @@
+# DrawSplay: keep the X server, Wayland compositors and the desktop away from the vkms
+# virtual display until DrawSplay has checked, in this boot, that the kernel can show the
+# real GPU's frames on it (host/vkms_probe_linux.go).
+#
+# On some kernel and GPU pairs (Intel's xe driver, for one) vkms cannot map the GPU's
+# buffers. Once X adds the device, the desktop enables its output at once, the mode set
+# fails in vkms_prepare_fb, and that has frozen the display. Until
+# /run/drawsplay/vkms-verified exists, a vkms device gets a seat name that X and the
+# compositors skip; it is not a valid logind seat either, so no login screen starts on it.
+# /run is emptied at every boot, so each boot starts held again.
+#
+# Installed by the DrawSplay installer and the display helper; remove it to use vkms
+# without DrawSplay's check.
+SUBSYSTEM=="drm", KERNEL=="card[0-9]*", KERNELS=="vkms", TEST!="/run/drawsplay/vkms-verified", ENV{ID_SEAT}="drawsplay-hold"

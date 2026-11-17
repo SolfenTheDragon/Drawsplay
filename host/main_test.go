@@ -10,5 +10,6 @@ func TestMain(m *testing.M) {
 	// the background after a change; in tests that would outlive the test
 	// and race the ones stubbing those tools.
 	runBackgroundPreflight = func(settings) {}
+	runPreflightNow = func(settings) {}
 	os.Exit(m.Run())
 }

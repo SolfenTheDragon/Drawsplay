@@ -12,6 +12,8 @@ function safeHTTPSURL(value) {
     return "";
   }
 }
+// True while a setup fix button's request is running (see runSetupFix).
+let setupFixRunning = false;
 let autostartOn = false;
 let serviceBusy = false;
 const autostartToggles = document.querySelectorAll("[data-autostart-toggle]");
@@ -401,7 +403,7 @@ function linuxSetupPrompt(warnings, hostOS) {
   if (hasADBPermissionWarning) hints.push("install Android udev rules and reconnect USB");
   if (hasUinputWarning) hints.push("enable /dev/uinput write access and map DrawSplay Pen to the virtual monitor");
   if (hasPipewireWarning) hints.push("install GStreamer PipeWire packages for Wayland capture");
-  return `Linux setup required: ${hints.join("; ")}.`;
+  return `Linux setup required: ${hints.join("; ")}. Use the buttons below to fix it.`;
 }
 
 function initializeTheme() {
@@ -837,6 +839,7 @@ async function refreshStatus() {
     if (setupPrompt) lines.push(setupPrompt);
     $("warnings").hidden = warnings.length === 0;
     setText($("warnings"), lines.join("\n"));
+    renderWarningFixes(st.setup);
     const targetInfo = $("target-info");
     targetInfo.hidden = !activeClientLabel;
     targetInfo.textContent = activeClientLabel ? `Target Information: ${activeClientLabel}` : "";
@@ -876,6 +879,7 @@ async function refreshStatus() {
     $("client-badge").dataset.kind = "none";
     $("client-badge").textContent = "No client";
     $("warnings").hidden = true;
+    $("warning-fixes").hidden = true;
     $("connection-info").textContent = "";
     $("metrics-summary").textContent = "";
     setText($("connection-guidance"), hostStopped
@@ -1061,26 +1065,11 @@ function renderSetupChecklist(setup) {
       detail.className = "setup-item-detail";
       const instructions = document.createElement("div");
       instructions.className = "setup-item-action-text";
-      const command = document.createElement("code");
-      command.className = "setup-item-command";
-      const copy = document.createElement("button");
-      copy.type = "button";
-      copy.className = "setup-copy-button";
-      copy.textContent = "Copy";
-      copy.addEventListener("click", async () => {
-        try {
-          await navigator.clipboard.writeText(row.dataset.command);
-          copy.textContent = "Copied";
-          showMsg("Setup command copied.", true, copy);
-          window.setTimeout(() => { copy.textContent = "Copy"; }, 1400);
-        } catch (e) {
-          showMsg(`Could not copy command: ${e.message}`, false, copy);
-        }
-      });
-      const commandRow = document.createElement("div");
-      commandRow.className = "setup-item-command-row";
-      commandRow.append(command, copy);
-      row.append(heading, detail, instructions, commandRow);
+      const fix = document.createElement("button");
+      fix.type = "button";
+      fix.className = "setup-fix-button";
+      fix.addEventListener("click", () => runSetupFix(fix.dataset.fix, fix));
+      row.append(heading, detail, instructions, fix);
       el.appendChild(row);
     }
     row.className = `setup-item${item.ok ? " ready" : " needs-attention"}`;
@@ -1090,19 +1079,79 @@ function renderSetupChecklist(setup) {
     setText(row.querySelector(".setup-item-detail"), item.detail || "");
     setText(row.querySelector(".setup-item-action-text"), item.action || "");
     row.querySelector(".setup-item-action-text").hidden = item.ok || !item.action;
-    row.dataset.command = item.command || "";
-    setText(row.querySelector("code"), row.dataset.command);
-    row.querySelector("button").setAttribute("aria-label", `Copy instructions for ${item.label || "setup check"}`);
-    const commandRow = row.querySelector(".setup-item-command-row");
-    const hideCommand = item.ok || !item.command;
-    if (hideCommand && commandRow.contains(document.activeElement)) {
+    const fixButton = row.querySelector(".setup-fix-button");
+    fixButton.dataset.fix = item.fix || "";
+    if (!setupFixRunning) setText(fixButton, item.fixLabel || "Fix");
+    fixButton.disabled = setupFixRunning;
+    fixButton.setAttribute("aria-label", `${item.fixLabel || "Fix"}: ${item.label || "setup check"}`);
+    const hideFix = item.ok || !item.fix;
+    if (hideFix && fixButton === document.activeElement) {
       $("troubleshooting").querySelector("summary").focus();
     }
-    commandRow.hidden = hideCommand;
+    fixButton.hidden = hideFix;
   }
   for (const row of existing.values()) {
     if (row.contains(document.activeElement)) $("troubleshooting").querySelector("summary").focus();
     row.remove();
+  }
+}
+
+// renderWarningFixes puts a button under the warnings for every setup item
+// the host can repair itself (item.fix), such as unloading vkms.
+function renderWarningFixes(setup) {
+  const el = $("warning-fixes");
+  const items = (Array.isArray(setup?.items) ? setup.items : []).filter(item => !item.ok && item.fix);
+  const existing = new Map([...el.querySelectorAll("button")].map(btn => [btn.dataset.fix, btn]));
+  for (const item of items) {
+    let btn = existing.get(item.fix);
+    existing.delete(item.fix);
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "setup-fix-button";
+      btn.dataset.fix = item.fix;
+      btn.addEventListener("click", () => runSetupFix(btn.dataset.fix, btn));
+      el.appendChild(btn);
+    }
+    if (!setupFixRunning) setText(btn, item.fixLabel || "Fix");
+    btn.disabled = setupFixRunning;
+  }
+  for (const btn of existing.values()) {
+    if (btn === document.activeElement) $("troubleshooting").querySelector("summary").focus();
+    btn.remove();
+  }
+  el.hidden = items.length === 0;
+}
+
+// runSetupFix asks the host to repair a setup item. Fixes that need root show
+// a system password prompt (polkit), and installing packages can take a few
+// minutes, so every fix button stays disabled until the host answers.
+async function runSetupFix(action, btn) {
+  if (!action || setupFixRunning) return;
+  setupFixRunning = true;
+  const label = btn.textContent;
+  const setBusy = busy => {
+    for (const b of document.querySelectorAll(".setup-fix-button")) b.disabled = busy;
+  };
+  setBusy(true);
+  btn.textContent = "Working…";
+  showMsg("Working on it. Enter your password if the system asks for it.", true, btn);
+  try {
+    const result = await api("/api/setup/remediate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    let text = result.message || "Done.";
+    if (result.videoRestarted && action !== "restart-video") text += " Video restarted onto the new display.";
+    showMsg(text, true, btn);
+  } catch (e) {
+    showMsg(e.message, false, btn);
+  } finally {
+    btn.textContent = label;
+    setBusy(false);
+    setupFixRunning = false;
+    await refreshStatus().catch(() => {});
   }
 }
 
