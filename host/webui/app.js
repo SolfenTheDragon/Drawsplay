@@ -924,6 +924,10 @@ async function loadCalibration(device) {
   }
 }
 
+// How long a success notice stays on screen.
+const NOTICE_TIMEOUT_MS = 30000;
+const feedbackTimers = new WeakMap();
+
 function showMsg(text, ok, origin) {
   const panel = (origin || feedbackSource)?.closest(".panel");
   let feedback = $("msg");
@@ -938,6 +942,18 @@ function showMsg(text, ok, origin) {
   feedback.className = `action-feedback ${ok ? "ok" : "err"}`;
   feedback.setAttribute("role", ok ? "status" : "alert");
   setText(feedback, text);
+  // Notices clear themselves; errors stay until the next action replaces them.
+  window.clearTimeout(feedbackTimers.get(feedback));
+  feedbackTimers.delete(feedback);
+  if (ok && text) {
+    feedbackTimers.set(feedback, window.setTimeout(() => {
+      feedbackTimers.delete(feedback);
+      if (feedback.textContent !== text) return;
+      feedback.className = "action-feedback";
+      feedback.setAttribute("role", "status");
+      setText(feedback, "");
+    }, NOTICE_TIMEOUT_MS));
+  }
 }
 
 let feedbackSource = null;
