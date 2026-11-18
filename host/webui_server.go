@@ -32,6 +32,7 @@ import (
 	"embed"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"time"
 )
@@ -54,6 +55,10 @@ func runWebUI(ctx context.Context, store *settingsStore, stop, exit func()) {
 	server := &http.Server{
 		Handler:           newWebUIHandler(store, stop, exit),
 		ReadHeaderTimeout: 5 * time.Second,
+		// Requests end with the host: Shutdown waits for active requests, and
+		// an open settings page's /api/focus-events stream only returns when
+		// its request context is cancelled.
+		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 	go func() {
 		<-ctx.Done()

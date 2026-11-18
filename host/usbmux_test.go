@@ -49,3 +49,24 @@ func TestMuxFrameRejectsOversizedPayload(t *testing.T) {
 		t.Fatalf("expected payload too large error, got: %v", err)
 	}
 }
+
+// The input channel refuses a frame over its packet limit from the header
+// alone, before the payload is allocated or read.
+func TestMuxFrameLimitRejectsLargeInputPacketBeforeReading(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeMuxFrame(&buf, muxFrame{StreamID: muxStreamInput, Seq: 1, Payload: make([]byte, maxPacketBytes+1)}); err != nil {
+		t.Fatalf("writeMuxFrame: %v", err)
+	}
+	header := buf.Bytes()[:usbMuxHeaderSize]
+	_, err := readMuxFrameLimit(bytes.NewReader(header), maxPacketBytes)
+	if err == nil || !strings.Contains(err.Error(), "payload too large") {
+		t.Fatalf("expected payload too large error, got: %v", err)
+	}
+	buf.Reset()
+	if err := writeMuxFrame(&buf, muxFrame{StreamID: muxStreamInput, Seq: 2, Payload: make([]byte, maxPacketBytes)}); err != nil {
+		t.Fatalf("writeMuxFrame: %v", err)
+	}
+	if _, err := readMuxFrameLimit(&buf, maxPacketBytes); err != nil {
+		t.Fatalf("packet at the limit refused: %v", err)
+	}
+}

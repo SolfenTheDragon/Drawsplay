@@ -52,6 +52,12 @@ func writeMuxFrame(w io.Writer, frame muxFrame) error {
 }
 
 func readMuxFrame(r io.Reader) (muxFrame, error) {
+	return readMuxFrameLimit(r, usbMuxMaxPayload)
+}
+
+// readMuxFrameLimit is readMuxFrame refusing payloads over limit before
+// allocating them, for channels whose packets are known to be small.
+func readMuxFrameLimit(r io.Reader, limit uint32) (muxFrame, error) {
 	var header [usbMuxHeaderSize]byte
 	if _, err := io.ReadFull(r, header[:]); err != nil {
 		return muxFrame{}, err
@@ -63,7 +69,7 @@ func readMuxFrame(r io.Reader) (muxFrame, error) {
 		return muxFrame{}, fmt.Errorf("unsupported mux version %d", header[2])
 	}
 	size := binary.BigEndian.Uint32(header[9:13])
-	if size > usbMuxMaxPayload {
+	if size > limit {
 		return muxFrame{}, fmt.Errorf("mux payload too large: %d", size)
 	}
 	payload := make([]byte, int(size))

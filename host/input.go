@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"sync"
@@ -14,6 +15,8 @@ import (
 )
 
 const (
+	// maxPacketBytes bounds one input-channel packet (JSON hello, input or
+	// key event; real ones are well under 4 KiB).
 	maxPacketBytes                      = 64 * 1024
 	maxConcurrentConnectionsPerListener = 1
 )
@@ -229,7 +232,7 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 		return
 	}
 	for {
-		frame, err := readMuxFrame(reader)
+		frame, err := readMuxFrameLimit(reader, maxPacketBytes)
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() && !helloSeen {
 				log.Printf("Initial hello timeout, closing connection (session=%d)", id)
@@ -241,7 +244,7 @@ func handleConnection(ctx context.Context, id uint64, conn net.Conn, events *eve
 			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 				return
 			}
-			if err.Error() == "EOF" {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			log.Printf("Read error (session=%d): %v", id, err)

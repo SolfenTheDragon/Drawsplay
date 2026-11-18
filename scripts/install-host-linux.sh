@@ -227,16 +227,34 @@ for g in plugdev; do
 done
 if [[ ${#needs_groups[@]} -gt 0 ]]; then
   group_list="$(IFS=,; echo "${needs_groups[*]}")"
+  # Debian and Ubuntu ship plugdev; Fedora, Arch and others do not, and
+  # usermod -aG fails on a group that does not exist.
+  missing_groups=()
+  for g in "${needs_groups[@]}"; do
+    getent group "$g" >/dev/null 2>&1 || missing_groups+=("$g")
+  done
+  create_cmd=""
+  for g in "${missing_groups[@]}"; do
+    create_cmd+="sudo groupadd --system $g && "
+  done
   echo "User '$USER' is missing group membership: ${needs_groups[*]} (needed for USB and display access)."
   if [[ "$SKIP_INSTALL" -eq 0 ]]; then
-    if sudo usermod -aG "$group_list" "$USER"; then
+    groups_ready=1
+    for g in "${missing_groups[@]}"; do
+      if sudo groupadd --system "$g"; then
+        echo "Created the $g group (this system did not have one)."
+      else
+        groups_ready=0
+      fi
+    done
+    if [[ $groups_ready -eq 1 ]] && sudo usermod -aG "$group_list" "$USER"; then
       echo "Added $USER to: ${needs_groups[*]}. Log out and back in for this to take effect."
       NEEDS_RELOGIN=1
     else
-      echo "Could not add groups automatically. Run manually: sudo usermod -aG $group_list $USER"
+      echo "Could not add groups automatically. Run manually: ${create_cmd}sudo usermod -aG $group_list $USER"
     fi
   else
-    echo "Run manually: sudo usermod -aG $group_list $USER"
+    echo "Run manually: ${create_cmd}sudo usermod -aG $group_list $USER"
   fi
   echo
 fi

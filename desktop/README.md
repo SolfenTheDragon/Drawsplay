@@ -34,4 +34,4 @@ Release archives contain the GPL-3.0 license in `LICENSE`, third-party notices i
 are installed separately, not bundled in these desktop archives.
 
 Project source and issue tracking:
-<https://github.com/Solfen/Drawsplay>.
+<https://github.com/SolfenTheDragon/Drawsplay>.

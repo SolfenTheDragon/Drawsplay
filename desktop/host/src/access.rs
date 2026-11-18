@@ -1,10 +1,10 @@
 //! Which network addresses may even start a handshake.
 //!
-//! `dd-host` listens on all interfaces by default, and a paired client can type on the computer, so
-//! a connection from the open internet should never get as far as the pairing question. By default only
-//! loopback, private (RFC 1918), link-local, carrier-grade NAT (100.64.0.0/10, which Tailscale uses)
-//! and IPv6 unique-local addresses are served; `--allow NET` adds a network and `--allow-any` removes
-//! the check.
+//! `dd-host` listens on loopback only unless `--bind` names a LAN or VPN address. A paired client can
+//! type on the computer, so once it listens there, a connection from the open internet should never
+//! get as far as the pairing question. By default only loopback, private (RFC 1918), link-local,
+//! carrier-grade NAT (100.64.0.0/10, which Tailscale uses) and IPv6 unique-local addresses are
+//! served; `--allow NET` adds a network and `--allow-any` removes the check.
 
 use std::net::IpAddr;
 
