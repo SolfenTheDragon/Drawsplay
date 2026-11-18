@@ -282,7 +282,8 @@ func (u *updater) install(rel githubRelease, stop func()) error {
 	if err := verifyReleaseChecksumSignature(u.checksumPublicKeyHex, []byte(sumsText.String()), sig.Bytes()); err != nil {
 		return err
 	}
-	want, ok := parseSHA256Sums(sumsText.String())[bundleName]
+	sumsByName := parseSHA256Sums(sumsText.String())
+	want, ok := sumsByName[bundleName]
 	if !ok {
 		return fmt.Errorf("%s does not list %s", updateChecksumsName, bundleName)
 	}
@@ -325,7 +326,7 @@ func (u *updater) install(rel githubRelease, stop func()) error {
 	from := u.st.Current
 	u.mu.Unlock()
 
-	res, err := applyUpdate(path, rel.Tag)
+	res, err := applyUpdate(path, rel.Tag, sumsByName)
 	if err != nil {
 		return err
 	}

@@ -59,6 +59,8 @@ jobs:
     runs-on: windows-latest
     env:
       DRAWSPLAY_REQUIRE_SIGNING: ${{ vars.DRAWSPLAY_REQUIRE_SIGNING || '0' }}
+      # Android alone: Windows releases stay unsigned (SIGNING.md).
+      DRAWSPLAY_REQUIRE_ANDROID_SIGNING: ${{ vars.DRAWSPLAY_REQUIRE_ANDROID_SIGNING || '0' }}
       DRAWSPLAY_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
       DRAWSPLAY_WINDOWS_SIGNING_TIMESTAMP_URL: ${{ secrets.WINDOWS_SIGNING_TIMESTAMP_URL }}
       DRAWSPLAY_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -91,6 +93,10 @@ jobs:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           $requireSigning = $env:DRAWSPLAY_REQUIRE_SIGNING -in @("1", "true", "yes")
+          # A debug-signed APK would break the tablet's self-update for everyone
+          # (it only accepts the installed app's key), so Android can be made
+          # mandatory without also requiring the Windows certificate.
+          $requireAndroid = $env:DRAWSPLAY_REQUIRE_ANDROID_SIGNING -in @("1", "true", "yes")
           $signingGroups = @(
             @{
               Name = "Windows"
@@ -120,9 +126,12 @@ jobs:
             $missing = @($group.Secrets.Keys | Where-Object {
               [string]::IsNullOrWhiteSpace($group.Secrets[$_])
             })
-            if ($missing.Count -eq $group.Secrets.Count -and -not $requireSigning) {
+            $required = $requireSigning -or ($group.Name -eq "Android" -and $requireAndroid)
+            if ($missing.Count -eq $group.Secrets.Count -and -not $required) {
               if ($group.Name -eq "Windows") {
-                Write-Host "::warning::Windows signing is not configured; releasing an unsigned EXE."
+                # Expected: releases are not Authenticode-signed; updates are
+                # trusted through the Ed25519 signature on SHA256SUMS.txt.
+                Write-Host "::notice::Windows Authenticode signing is not configured; releasing an unsigned EXE (expected)."
               } else {
                 Write-Host "::warning::Android signing is not configured; releasing a debug-signed APK. Updates across runs may require reinstalling the app."
               }
@@ -276,6 +285,11 @@ jobs:
 
   publish-release:
     runs-on: ubuntu-latest
+    # Holds DRAWSPLAY_RELEASE_SIGNING_KEY, the only trust anchor for updates
+    # (Windows releases are not Authenticode-signed). Keep the secret in this
+    # environment, not the repository, and give it required reviewers and a
+    # v* tag rule (SIGNING.md, section 4.4).
+    environment: release
     permissions:
       contents: write
     needs:
@@ -344,9 +358,12 @@ jobs:
         working-directory: release
         env:
           RELEASE_TAG: ${{ needs.resolve-tag.outputs.tag }}
+        # The Windows installer is listed on its own as well: the host's
+        # updater checks it after extracting it from the zip (update_windows.go).
         run: |
           sha256sum \
             "DrawSplay-windows-${RELEASE_TAG}.zip" \
+            "drawsplay_installer_${RELEASE_TAG}.exe" \
             "DrawSplay-linux-${RELEASE_TAG}.tar.gz" \
             "DrawSplayDesktop-windows-x86_64-${RELEASE_TAG}.zip" \
             "DrawSplayDesktop-linux-x86_64-${RELEASE_TAG}.tar.gz" \

@@ -10,7 +10,7 @@ func updateInstallSupport() (bool, string) {
 	return false, "Updates install themselves only on Windows and Linux. Download the update from the release page."
 }
 
-func applyUpdate(string, string) (applyResult, error) {
+func applyUpdate(string, string, map[string]string) (applyResult, error) {
 	return applyResult{}, errors.New("updates are not supported on this platform")
 }
 

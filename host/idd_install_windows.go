@@ -281,7 +281,9 @@ func markVDDOwned() {
 	if err != nil {
 		return
 	}
-	if err := os.WriteFile(filepath.Join(dir, vddOwnedMarkerName), []byte("installed by DrawSplay\n"), 0o600); err != nil {
+	// Elevated, into a folder the user can write: refuse redirection by a
+	// planted junction (see elevated_result_windows.go).
+	if err := writeFileInVerifiedDir(filepath.Join(dir, vddOwnedMarkerName), []byte("installed by DrawSplay\n")); err != nil {
 		log.Printf("Could not record virtual display driver ownership: %v", err)
 	}
 }

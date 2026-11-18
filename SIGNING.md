@@ -189,13 +189,24 @@ the Release workflow does that after assembling all platform bundles.
 
 Release workflow: `.github/workflows/release.yml`
 
+Official Windows releases are **not** Authenticode-signed, and no certificate
+is planned. The trust anchor for Windows (and every) update is the Ed25519
+signature in `SHA256SUMS.sig` over `SHA256SUMS.txt`, which lists the Windows
+zip and the installer inside it; the host updater checks both. An installed
+copy that *is* Authenticode-signed (a build signed with your own certificate)
+only accepts installers signed with that same certificate, through the
+updater or a manual reinstall (`host/installer_publisher.go`).
+
 Production signing is optional by default. When a platform's signing secrets
 are entirely absent the release still publishes, with a workflow warning: the
 Windows EXE ships unsigned and the Android APK is debug-signed (updates across
 runs may then require reinstalling the app). A partially configured platform
 (some secrets set, others missing) always fails the release rather than
 silently shipping unsigned. To make signing mandatory, set the repository
-Actions variable `DRAWSPLAY_REQUIRE_SIGNING` to `1`.
+Actions variable `DRAWSPLAY_REQUIRE_SIGNING` to `1`. Because Windows releases
+are not Authenticode-signed, set `DRAWSPLAY_REQUIRE_ANDROID_SIGNING` to `1`
+instead: it makes only the Android keystore mandatory, so a release can never
+ship a debug-signed APK (which installed tablets refuse as an update).
 
 Configure these repository secrets to sign published builds:
 
@@ -238,6 +249,18 @@ The workflow signs the exact bytes of the final `SHA256SUMS.txt` using:
 openssl pkeyutl -sign -inkey release-signing-key.pem -rawin \
   -in SHA256SUMS.txt -out SHA256SUMS.sig
 ```
+
+Because Windows releases are not Authenticode-signed, this key alone decides
+which Windows and Android updates installed copies accept. The `publish-release`
+job runs in the GitHub environment `release`; protect the key there:
+
+1. **Settings → Environments → release** (created by the first release run, or
+   create it): add yourself under **Required reviewers**, and under
+   **Deployment branches and tags** allow only tags matching `v*`.
+2. Add `DRAWSPLAY_RELEASE_SIGNING_KEY` as an **environment secret** of
+   `release`, then delete the repository-level secret of the same name.
+3. Keep an offline copy of the PEM (for example in a password manager); losing
+   it means installed copies can never update themselves again.
 
 `SHA256SUMS.sig` must be a raw 64-byte signature, not Base64 or hex. Publish both
 files with the assets they describe. The host and tablet verify the signature

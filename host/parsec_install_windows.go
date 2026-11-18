@@ -98,7 +98,9 @@ func installParsecFallback() (bool, error) {
 		if err != nil {
 			return true, fmt.Errorf("record Parsec fallback ownership: %w", err)
 		}
-		if err := os.WriteFile(filepath.Join(stateDir, parsecOwnedMarkerName), []byte("installed by DrawSplay\n"), 0o600); err != nil {
+		// Elevated, into a folder the user can write: refuse redirection by a
+		// planted junction (see elevated_result_windows.go).
+		if err := writeFileInVerifiedDir(filepath.Join(stateDir, parsecOwnedMarkerName), []byte("installed by DrawSplay\n")); err != nil {
 			return true, fmt.Errorf("record Parsec fallback ownership: %w", err)
 		}
 	}

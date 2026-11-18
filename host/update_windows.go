@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,8 +34,15 @@ func updateInstallSupport() (bool, string) {
 
 // applyUpdate extracts the release installer and starts it as a quiet
 // reinstall. The installer waits for this process to exit, replaces the
-// installed copy and starts the new one.
-func applyUpdate(bundlePath, tag string) (applyResult, error) {
+// installed copy and starts the new one. sums is the verified
+// SHA256SUMS.txt; releases that list the installer itself get it checked
+// after extraction (older ones are covered by the verified bundle hash).
+//
+// The installer runs from the user's temp folder, so another program of the
+// same user could still swap it before the administrator prompt, as it
+// could a manual download; without an Authenticode signature Windows names
+// no publisher on that prompt either way.
+func applyUpdate(bundlePath, tag string, sums map[string]string) (applyResult, error) {
 	dir := filepath.Dir(bundlePath)
 	name := updateInstallerName(tag)
 	err := extractZipSubset(bundlePath, dir, func(entry string) (string, bool) {
@@ -44,6 +52,11 @@ func applyUpdate(bundlePath, tag string) (applyResult, error) {
 		return applyResult{}, fmt.Errorf("extract %s: %w", name, err)
 	}
 	installer := filepath.Join(dir, name)
+	if want, ok := sums[name]; ok {
+		if err := verifyFileSHA256(installer, want); err != nil {
+			return applyResult{}, fmt.Errorf("verify %s: %w", name, err)
+		}
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return applyResult{}, err
@@ -62,24 +75,53 @@ func applyUpdate(bundlePath, tag string) (applyResult, error) {
 	return applyResult{keepDir: true, restart: func(stop func()) { stop() }}, nil
 }
 
-// verifyUpdateInstallerSigner requires both the installed host and downloaded
-// installer to have valid signatures with the same certificate thumbprint.
-// Unsigned builds cannot self-update.
+// verifyUpdateInstallerSigner applies installerPublisherAllowed to the
+// installed host and the new installer.
 func verifyUpdateInstallerSigner(current, installer string) error {
-	script := "$ErrorActionPreference='Stop'; " +
-		"$cur=Get-AuthenticodeSignature -LiteralPath $env:DRAWSPLAY_CURRENT_EXE; " +
-		"if($cur.Status -ne 'Valid' -or -not $cur.SignerCertificate){ throw 'the installed host is not signed by a trusted publisher' }; " +
-		"$new=Get-AuthenticodeSignature -LiteralPath $env:DRAWSPLAY_UPDATE_INSTALLER; " +
-		"if($new.Status -ne 'Valid' -or -not $new.SignerCertificate -or " +
-		"$new.SignerCertificate.Thumbprint -ne $cur.SignerCertificate.Thumbprint) " +
-		"{ throw ('the installer is not signed by the publisher of this copy ('+$new.Status+')') }"
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	cmd := powerShellCommand(ctx, script, "DRAWSPLAY_CURRENT_EXE="+current, "DRAWSPLAY_UPDATE_INSTALLER="+installer)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("verify the installer's signature: %w (%s)", err, strings.TrimSpace(string(out)))
+	cur, err := authenticodeSignature(current)
+	if err != nil {
+		return fmt.Errorf("read the installed host's signature: %w", err)
+	}
+	var next authenticodeInfo
+	if cur.Status != "NotSigned" {
+		if next, err = authenticodeSignature(installer); err != nil {
+			return fmt.Errorf("read the installer's signature: %w", err)
+		}
+	}
+	if err := installerPublisherAllowed(cur, next); err != nil {
+		return err
+	}
+	if cur.Status == "NotSigned" {
+		log.Printf("Installed host is not Authenticode-signed; the installer is trusted through the release checksum signature")
 	}
 	return nil
+}
+
+// authenticodeSignature reads a file's Authenticode status and signer
+// thumbprint (replaced in tests).
+var authenticodeSignature = func(path string) (authenticodeInfo, error) {
+	script := "$ErrorActionPreference='Stop'; " +
+		"$s=Get-AuthenticodeSignature -LiteralPath $env:DRAWSPLAY_SIGNED_FILE; " +
+		"'STATUS='+$s.Status; if($s.SignerCertificate){ 'THUMBPRINT='+$s.SignerCertificate.Thumbprint }"
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	out, err := powerShellCommand(ctx, script, "DRAWSPLAY_SIGNED_FILE="+path).CombinedOutput()
+	if err != nil {
+		return authenticodeInfo{}, fmt.Errorf("%w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	var info authenticodeInfo
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if v, ok := strings.CutPrefix(line, "STATUS="); ok {
+			info.Status = v
+		} else if v, ok := strings.CutPrefix(line, "THUMBPRINT="); ok {
+			info.Thumbprint = v
+		}
+	}
+	if info.Status == "" {
+		return authenticodeInfo{}, fmt.Errorf("no signature status in output (%s)", strings.TrimSpace(string(out)))
+	}
+	return info, nil
 }
 
 // The Windows installer restarts the host itself.

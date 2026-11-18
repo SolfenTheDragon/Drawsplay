@@ -255,7 +255,12 @@ func compareVersions(a, b string) int {
 // directory into a staging directory, then swaps it into destDir.
 func installRuntimeArchive(tool, destDir string, archive runtimeArchive) error {
 	log.Printf("Downloading %s %s (%s) from %s", tool, archive.Version, archive.Source, archive.URL)
-	zipPath, err := downloadArchive(tool, archive.URL, archive.SHA256)
+	dlDir, err := runtimeDownloadDir(tool)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dlDir)
+	zipPath, err := downloadArchive(dlDir, tool, archive.URL, archive.SHA256)
 	if err != nil {
 		return err
 	}
@@ -400,8 +405,22 @@ func runtimeExpectedHashes(runtimeRoot, candidate, tool string) (map[string]stri
 // maxRuntimeArchiveBytes bounds an ffmpeg build download (about 200 MiB today).
 const maxRuntimeArchiveBytes = 1 << 30
 
-func downloadArchive(prefix, url, expectedSHA256 string) (string, error) {
-	tmp, err := os.CreateTemp(os.TempDir(), prefix+"-*.zip")
+// runtimeDownloadDir is a fresh folder for one runtime download. The
+// archive is hash-checked and then opened again to extract it, so an
+// elevated install (which extracts into Program Files) keeps it where only
+// SYSTEM and Administrators can write: its %TEMP% is the user's own, and a
+// program running there could swap the archive between check and extract.
+// A non-elevated repair crosses no privilege boundary and uses %TEMP%.
+func runtimeDownloadDir(tool string) (string, error) {
+	if isProcessElevated() {
+		return protectedStageDir("DrawSplay-download-")
+	}
+	return os.MkdirTemp("", "drawsplay-"+tool+"-*")
+}
+
+// downloadArchive downloads url into dir and checks its SHA-256.
+func downloadArchive(dir, prefix, url, expectedSHA256 string) (string, error) {
+	tmp, err := os.CreateTemp(dir, prefix+"-*.zip")
 	if err != nil {
 		return "", err
 	}

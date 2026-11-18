@@ -302,7 +302,13 @@ func runInstall(exe string, o installerOptions) int {
 		_ = os.Remove(previous.DesktopShortcut)
 	}
 	_ = os.Remove(filepath.Join(stateDir, portableMarkerName))
-	if err := writeJSONAtomic(filepath.Join(stateDir, installManifestName), m); err != nil {
+	writeManifest := writeJSONAtomic
+	if isProcessElevated() {
+		// An installer started elevated writes into the user's folder as
+		// administrator: refuse redirection by a planted junction.
+		writeManifest = writeElevatedResult
+	}
+	if err := writeManifest(filepath.Join(stateDir, installManifestName), m); err != nil {
 		report("DrawSplay setup failed", fmt.Sprintf("write install manifest: %v", err), showError)
 		return 1
 	}
@@ -372,6 +378,8 @@ func runInstallElevated(resultPath string, skipVDD bool) int {
 			return fail("copy %s: %v", staged, err)
 		}
 		if fileExists(m.HostExe) {
+			// A signed installed copy only accepts its own publisher; an
+			// unsigned one (every official release) accepts this installer.
 			if err := verifyUpdateInstallerSigner(m.HostExe, staged); err != nil {
 				_ = os.Remove(staged)
 				return fail("verify elevated installer against the installed host: %v", err)
@@ -548,39 +556,49 @@ func helperTaskXML(hostExe, userSID, description, args string) string {
 `
 }
 
+// helperTaskStageDir is where registerHelperTask writes the task definition
+// before schtasks reads it (replaced in tests).
+var helperTaskStageDir = func() (string, error) { return protectedStageDir("DrawSplay-task-") }
+
 // registerHelperTask registers taskXML as name; an empty <UserId> is filled
 // with the current (installing) user's SID.
+//
+// The definition is staged in a folder only SYSTEM and Administrators can
+// write, never in %TEMP%: the elevated installer's %TEMP% is the user's own,
+// and a program running there without elevation could rewrite the file
+// between this write and schtasks reading it, registering a hidden task that
+// runs its own command elevated on demand.
 func registerHelperTask(name, taskXML string) error {
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		return fmt.Errorf("current user SID: %w", err)
 	}
 	taskXML = strings.Replace(taskXML, "<UserId></UserId>", "<UserId>"+user.User.Sid.String()+"</UserId>", 1)
-	f, err := os.CreateTemp("", "drawsplay-task-*.xml")
+	dir, err := helperTaskStageDir()
 	if err != nil {
-		return err
+		return fmt.Errorf("stage task definition: %w", err)
 	}
-	path := f.Name()
-	defer os.Remove(path)
-	// Task Scheduler expects UTF-16 for an encoding="UTF-16" declaration.
-	u := utf16.Encode([]rune(taskXML))
-	buf := make([]byte, 2+2*len(u))
-	buf[0], buf[1] = 0xFF, 0xFE
-	for i, r := range u {
-		binary.LittleEndian.PutUint16(buf[2+2*i:], r)
-	}
-	_, err = f.Write(buf)
-	closeErr := f.Close()
-	if err == nil {
-		err = closeErr
-	}
-	if err != nil {
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "task.xml")
+	if err := os.WriteFile(path, encodeTaskXML(taskXML), 0o600); err != nil {
 		return err
 	}
 	if out, err := runHiddenCommand(schtasksPath(), "/create", "/tn", name, "/xml", path, "/f"); err != nil {
 		return fmt.Errorf("schtasks /create: %w (%s)", err, strings.TrimSpace(out))
 	}
 	return nil
+}
+
+// encodeTaskXML encodes a task definition as UTF-16LE with a byte-order
+// mark, which Task Scheduler expects for an encoding="UTF-16" declaration.
+func encodeTaskXML(taskXML string) []byte {
+	u := utf16.Encode([]rune(taskXML))
+	buf := make([]byte, 2+2*len(u))
+	buf[0], buf[1] = 0xFF, 0xFE
+	for i, r := range u {
+		binary.LittleEndian.PutUint16(buf[2+2*i:], r)
+	}
+	return buf
 }
 
 func writeUninstallRegistryEntry(m installManifest) error {

@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -55,5 +57,24 @@ func TestDecodeINFTextUTF16(t *testing.T) {
 	data := []byte{0xFF, 0xFE, 'W', 0, 'i', 0, 'n', 0}
 	if got := decodeINFText(data); got != "Win" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestEncodeTaskXMLIsUTF16LEWithBOM(t *testing.T) {
+	got := encodeTaskXML("<a>é</a>")
+	want := []byte{0xFF, 0xFE, '<', 0, 'a', 0, '>', 0, 0xE9, 0, '<', 0, '/', 0, 'a', 0, '>', 0}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("encodeTaskXML = % x, want % x", got, want)
+	}
+}
+
+// The task definition is never written outside the protected staging
+// folder: when that folder cannot be made, nothing is registered.
+func TestRegisterHelperTaskRefusesWithoutProtectedStaging(t *testing.T) {
+	defer func(old func() (string, error)) { helperTaskStageDir = old }(helperTaskStageDir)
+	helperTaskStageDir = func() (string, error) { return "", errors.New("not elevated") }
+	err := registerHelperTask(`\DrawSplay\Test Task That Must Not Exist`, helperTaskXML(`C:\x.exe`, "", "t", ""))
+	if err == nil || !strings.Contains(err.Error(), "stage task definition") {
+		t.Fatalf("registerHelperTask = %v, want a staging error", err)
 	}
 }

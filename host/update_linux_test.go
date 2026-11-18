@@ -102,7 +102,7 @@ func TestApplyUpdateReplacesInstalledHost(t *testing.T) {
 	newHost := "#!/bin/sh\necho v1.0.1\n"
 	writeTestTarGz(t, bundle, map[string]string{"DrawSplay-linux-v1.0.1/" + linuxBundleHostName: newHost})
 
-	res, err := applyUpdate(bundle, "v1.0.1")
+	res, err := applyUpdate(bundle, "v1.0.1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestApplyUpdateReplacesInstalledHost(t *testing.T) {
 
 	// A bundle whose host reports another version leaves the install alone.
 	writeTestTarGz(t, bundle, map[string]string{"x/" + linuxBundleHostName: "#!/bin/sh\necho v0.0.1\n"})
-	if _, err := applyUpdate(bundle, "v1.0.2"); err == nil {
+	if _, err := applyUpdate(bundle, "v1.0.2", nil); err == nil {
 		t.Fatal("applyUpdate must refuse a host that reports the wrong version")
 	}
 	if got, _ := os.ReadFile(target); string(got) != newHost {

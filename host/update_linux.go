@@ -99,7 +99,7 @@ func sameFile(a, b string) bool {
 
 // applyUpdate puts the new host binary in place of the installed one. The
 // running process keeps its old, now unlinked, file until it re-executes.
-func applyUpdate(bundlePath, tag string) (applyResult, error) {
+func applyUpdate(bundlePath, tag string, _ map[string]string) (applyResult, error) {
 	target, err := linuxInstalledHostPath()
 	if err != nil {
 		return applyResult{}, err
