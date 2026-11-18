@@ -82,7 +82,7 @@ func TestMutualTLSRejectsUnpairedClientsBeforeApplicationData(t *testing.T) {
 				// Test clients pin the host instead of requiring a public CA.
 				InsecureSkipVerify: true,
 				VerifyConnection: func(state tls.ConnectionState) error {
-					return VerifyPairedCertificate(state.PeerCertificates, hostPin, false, time.Now())
+					return VerifyPairedCertificate(state.PeerCertificates, hostPin, false)
 				},
 			}
 			if test.cert != nil {
@@ -99,34 +99,43 @@ func TestMutualTLSRejectsUnpairedClientsBeforeApplicationData(t *testing.T) {
 	}
 }
 
-func TestPairedCertificatePolicyRejectsExpiredWrongPurposeAndChangedKeys(t *testing.T) {
+func TestPairedCertificatePolicyRejectsWrongPurposeAndChangedKeys(t *testing.T) {
 	identity, pin := testIdentity(t)
 	leaf, err := x509.ParseCertificate(identity.Certificate[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPairedCertificate([]*x509.Certificate{leaf}, pin, true, time.Now()); err != nil {
+	if err := VerifyPairedCertificate([]*x509.Certificate{leaf}, pin, true); err != nil {
 		t.Fatal(err)
+	}
+	// A pinned peer stays trusted whatever its certificate dates say: a wrong
+	// clock on either device must not break a pairing.
+	for name, mutate := range map[string]func(*x509.Certificate){
+		"expired":       func(c *x509.Certificate) { c.NotAfter = time.Now().Add(-time.Hour) },
+		"not-yet-valid": func(c *x509.Certificate) { c.NotBefore = time.Now().Add(24 * time.Hour) },
+	} {
+		v := *leaf
+		mutate(&v)
+		if err := VerifyPairedCertificate([]*x509.Certificate{&v}, pin, true); err != nil {
+			t.Fatalf("%s pinned certificate rejected: %v", name, err)
+		}
 	}
 	for _, test := range []struct {
 		name string
 		leaf x509.Certificate
 		pin  [32]byte
-		now  time.Time
 	}{
-		{"expired", *leaf, pin, leaf.NotAfter.Add(time.Second)},
-		{"not-yet-valid", *leaf, pin, leaf.NotBefore.Add(-time.Second)},
-		{"changed-pin", *leaf, [32]byte{1}, time.Now()},
-		{"revoked", *leaf, [32]byte{}, time.Now()},
+		{"changed-pin", *leaf, [32]byte{1}},
+		{"revoked", *leaf, [32]byte{}},
 		{"wrong-purpose", func() x509.Certificate {
 			v := *leaf
 			v.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
 			return v
-		}(), pin, time.Now()},
-		{"no-signing", func() x509.Certificate { v := *leaf; v.KeyUsage = x509.KeyUsageKeyEncipherment; return v }(), pin, time.Now()},
+		}(), pin},
+		{"no-signing", func() x509.Certificate { v := *leaf; v.KeyUsage = x509.KeyUsageKeyEncipherment; return v }(), pin},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if err := VerifyPairedCertificate([]*x509.Certificate{&test.leaf}, test.pin, true, test.now); err == nil {
+			if err := VerifyPairedCertificate([]*x509.Certificate{&test.leaf}, test.pin, true); err == nil {
 				t.Fatal("unsafe paired certificate accepted")
 			}
 		})

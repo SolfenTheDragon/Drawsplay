@@ -63,6 +63,16 @@ class ConnectionPresentationTest {
 
     }
 
+    @Test fun aRejectedCodeKeepsTheSameAttemptOpenForAnotherCode() {
+        val state = PairingAttemptState()
+        val attempt = state.start()
+        assertTrue(state.update(attempt, PairingStatus.CHECKING))
+        assertTrue(state.update(attempt, PairingStatus.CODE_REJECTED))
+        assertFalse(PairingStatus.CODE_REJECTED.canRetry)
+        assertTrue(state.update(attempt, PairingStatus.CHECKING))
+        assertTrue(state.update(attempt, PairingStatus.APPROVAL))
+    }
+
     @Test fun aFailureCannotBeOverwrittenByLateProgressFromTheSameAttempt() {
         val state = PairingAttemptState()
         val attempt = state.start()

@@ -22,7 +22,7 @@ func sessionTLSPair(t *testing.T, hostIdentity, tabletIdentity tls.Certificate, 
 		MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{tabletIdentity},
 		InsecureSkipVerify: true, // Test client pins the actual paired host.
 		VerifyConnection: func(state tls.ConnectionState) error {
-			return VerifyPairedCertificate(state.PeerCertificates, hostPin, false, time.Now())
+			return VerifyPairedCertificate(state.PeerCertificates, hostPin, false)
 		},
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

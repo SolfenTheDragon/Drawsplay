@@ -41,7 +41,6 @@ class WiFiEnrollment(private val identity: X509KeyManager) {
                     ?: throw IOException("Wi-Fi enrollment requires a tablet EC identity")
                 val certificate = identity.getCertificateChain(alias)?.firstOrNull()
                     ?: throw IOException("Wi-Fi enrollment tablet certificate is missing")
-                certificate.checkValidity()
                 val tabletPin = MessageDigest.getInstance("SHA-256").digest(certificate.publicKey.encoded)
                 output.write(tabletPin)
                 output.flush()

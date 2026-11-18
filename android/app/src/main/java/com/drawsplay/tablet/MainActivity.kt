@@ -655,15 +655,21 @@ class MainActivity : AppCompatActivity() {
     private fun renderPairingStatus(state: PairingStatus) {
         findViewById<TextView>(R.id.wifiPairTitle).setText(when (state) {
             PairingStatus.SEARCHING -> R.string.pair_headline_searching
-            PairingStatus.ENTER_CODE, PairingStatus.INVALID_CODE -> R.string.pair_headline_code
+            PairingStatus.ENTER_CODE, PairingStatus.INVALID_CODE, PairingStatus.CODE_REJECTED -> R.string.pair_headline_code
             PairingStatus.CHECKING -> R.string.pair_headline_checking
             PairingStatus.APPROVAL -> R.string.pair_headline_approval
             PairingStatus.SAVING -> R.string.pair_headline_saving
             PairingStatus.PAIRED -> R.string.status_streaming
             else -> R.string.pair_headline_recovery
         })
-        val showInput = state == PairingStatus.ENTER_CODE || state == PairingStatus.INVALID_CODE
+        val showInput = state == PairingStatus.ENTER_CODE || state == PairingStatus.INVALID_CODE ||
+            state == PairingStatus.CODE_REJECTED
         wifiPairInputGroup.visibility = if (showInput) View.VISIBLE else View.GONE
+        if (showInput) {
+            // Submitting disables the field; a rejected code asks again.
+            wifiPairCode.isEnabled = true
+            wifiPairSubmit.isEnabled = true
+        }
         wifiPairProgress.visibility = if (showInput || state.canRetry || state == PairingStatus.PAIRED) View.GONE else View.VISIBLE
         if (showInput && !wifiPairCode.hasFocus()) wifiPairCode.requestFocus()
         wifiPairStatus.setText(when (state) {
@@ -671,6 +677,7 @@ class MainActivity : AppCompatActivity() {
             PairingStatus.COMPUTER_NOT_FOUND -> R.string.wifi_computer_not_found
             PairingStatus.ENTER_CODE -> R.string.wifi_ready_code
             PairingStatus.INVALID_CODE -> R.string.wifi_invalid_code
+            PairingStatus.CODE_REJECTED -> R.string.wifi_code_rejected
             PairingStatus.CHECKING -> R.string.wifi_checking
             PairingStatus.APPROVAL -> R.string.wifi_approval
             PairingStatus.SAVING -> R.string.wifi_saving

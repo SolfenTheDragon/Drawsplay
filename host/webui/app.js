@@ -281,7 +281,8 @@ function renderWifiPairing() {
   $("wifi-pair-start").textContent = v.paired ? "Pair another tablet" : "Show pairing code";
   if (p.phase === "waiting") {
     const left = Math.max(0, Math.round((p.expiresAtMs - Date.now()) / 1000));
-    setText(text, "Enter this code in the tablet's Wi-Fi connect screen.");
+    // After a failed code check the host keeps the code open and says so.
+    setText(text, p.error || "Enter this code in the tablet's Wi-Fi connect screen.");
     $("wifi-pair-expiry").textContent = `Code expires in ${left}s.`;
   } else if (p.phase === "approval") {
     setText(text, "Allow \"" + p.tablet + "\" (fingerprint " + p.fingerprint + ") to use this computer as a display and input device?");

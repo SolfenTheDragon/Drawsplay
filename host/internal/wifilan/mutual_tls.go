@@ -10,21 +10,24 @@ import (
 	"crypto/x509"
 	"errors"
 	"slices"
-	"time"
 )
 
-var ErrPairedIdentity = errors.New("Wi-Fi peer identity is unpaired, revoked, expired or incompatible; re-pair locally")
+var ErrPairedIdentity = errors.New("Wi-Fi peer identity is unpaired, revoked or incompatible; re-pair locally")
 
 // VerifyPairedCertificate checks a previously PAKE-confirmed SPKI. Public CA
 // names, discovery labels and supplied intermediate certificates confer no trust.
-func VerifyPairedCertificate(chain []*x509.Certificate, expected [32]byte, client bool, now time.Time) error {
+//
+// Validity dates are deliberately not checked: trust comes from the pinned
+// key, not the certificate, so dates could only reject a paired peer whose
+// clock is wrong (or whose self-signed certificate has aged out) without
+// adding any security. Revocation is forgetting the pin.
+func VerifyPairedCertificate(chain []*x509.Certificate, expected [32]byte, client bool) error {
 	if len(chain) == 0 || len(chain) > 3 || chain[0] == nil || expected == [32]byte{} {
 		return ErrPairedIdentity
 	}
 	leaf := chain[0]
 	key, ok := leaf.PublicKey.(*ecdsa.PublicKey)
-	if !ok || key.Curve != elliptic.P256() || now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) ||
-		len(leaf.UnhandledCriticalExtensions) != 0 ||
+	if !ok || key.Curve != elliptic.P256() || len(leaf.UnhandledCriticalExtensions) != 0 ||
 		(leaf.KeyUsage != 0 && leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0) {
 		return ErrPairedIdentity
 	}
@@ -54,7 +57,7 @@ func PairedServerTLS(identity tls.Certificate, pairedSPKI [32]byte) (*tls.Config
 		return nil, err
 	}
 	ownPin := sha256.Sum256(leaf.RawSubjectPublicKeyInfo)
-	if err := VerifyPairedCertificate([]*x509.Certificate{leaf}, ownPin, false, time.Now()); err != nil {
+	if err := VerifyPairedCertificate([]*x509.Certificate{leaf}, ownPin, false); err != nil {
 		return nil, err
 	}
 	signer, ok := identity.PrivateKey.(crypto.Signer)
@@ -76,7 +79,7 @@ func PairedServerTLS(identity tls.Certificate, pairedSPKI [32]byte) (*tls.Config
 		// A resumed session must never bypass a fresh revocation check.
 		SessionTicketsDisabled: true,
 		VerifyConnection: func(state tls.ConnectionState) error {
-			return VerifyPairedCertificate(state.PeerCertificates, pairedSPKI, true, time.Now())
+			return VerifyPairedCertificate(state.PeerCertificates, pairedSPKI, true)
 		},
 	}, nil
 }

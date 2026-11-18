@@ -83,7 +83,7 @@ func TestEnrollmentBindsActualKeysBeforeReturningMutualTLS(t *testing.T) {
 					MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{tablet},
 					InsecureSkipVerify: true, // Test client uses the PAKE-confirmed pin.
 					VerifyConnection: func(state tls.ConnectionState) error {
-						return VerifyPairedCertificate(state.PeerCertificates, hostPin, false, time.Now())
+						return VerifyPairedCertificate(state.PeerCertificates, hostPin, false)
 					},
 				})
 				var message [1]byte

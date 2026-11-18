@@ -87,7 +87,7 @@ func AuthenticateEnrollmentHost(ctx context.Context, raw net.Conn, identity tls.
 		return nil, peer, fmt.Errorf("send Wi-Fi host confirmation: %w", err)
 	}
 	config.VerifyConnection = func(state tls.ConnectionState) error {
-		return VerifyPairedCertificate(state.PeerCertificates, peer, true, time.Now())
+		return VerifyPairedCertificate(state.PeerCertificates, peer, true)
 	}
 	secured := tls.Server(raw, config)
 	handshakeContext, cancel := context.WithDeadline(ctx, deadline)

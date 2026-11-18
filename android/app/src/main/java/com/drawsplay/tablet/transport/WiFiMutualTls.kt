@@ -98,7 +98,8 @@ class WiFiMutualTls(keyManagers: Array<KeyManager>, pairedHostSpkiSha256: ByteAr
         override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
             if (chain == null || chain.isEmpty() || chain.size > 3) throw CertificateException(UNTRUSTED)
             val leaf = chain[0]
-            leaf.checkValidity()
+            // No date check: the pin authenticates the host, and dates would only
+            // reject a paired computer whose clock differs from this tablet's.
             val key = leaf.publicKey as? ECPublicKey ?: throw CertificateException(UNTRUSTED)
             val p256 = AlgorithmParameters.getInstance("EC").run {
                 init(ECGenParameterSpec("secp256r1"))

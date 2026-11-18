@@ -172,3 +172,96 @@ func TestWiFiPairingRejectsConcurrentStartAndApproveOutOfPhase(t *testing.T) {
 	env.svc.Cancel()
 	waitPhase(t, env.svc, "idle")
 }
+
+// A peer that fails the code check (an impostor that answered first, or a
+// mistyped code) does not end pairing: the host keeps the same code, says a
+// check failed, and pairs with the next tablet that passes.
+func TestWiFiPairingRetriesAfterAFailedCodeCheck(t *testing.T) {
+	defer func(old time.Duration) { wifiPairingRetryGrace = old }(wifiPairingRetryGrace)
+	wifiPairingRetryGrace = 10 * time.Millisecond
+	env := newPairingTestEnv(t)
+	impostor := wifilan.Candidate{Name: "Impostor", Addresses: []netip.Addr{netip.MustParseAddr("192.0.2.66")}, InputPort: 5000, Pairing: true}
+	tab := wifilan.Candidate{Name: "Tab", Addresses: []netip.Addr{netip.MustParseAddr("192.0.2.9")}, InputPort: 4000, Pairing: true}
+	var browses atomic.Int32
+	env.svc.deps.browse = func(ctx context.Context, _ string, found func(wifilan.Candidate)) error {
+		// The impostor always answers first; the real tablet only from the
+		// second search on.
+		found(impostor)
+		if browses.Add(1) > 1 {
+			found(tab)
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	succeed := env.svc.deps.authenticate
+	var tried []string
+	env.svc.deps.authenticate = func(ctx context.Context, iface string, c wifilan.Candidate, store *wifilan.TrustStore, inv *wifilan.PairingInvitation) (pairingConn, [32]byte, error) {
+		tried = append(tried, c.Name)
+		if c.Name == "Impostor" {
+			return nil, [32]byte{}, wifilan.ErrPairing
+		}
+		return succeed(ctx, iface, c, store, inv)
+	}
+	if err := env.svc.Start(false); err != nil {
+		t.Fatal(err)
+	}
+	approval := waitPhase(t, env.svc, "approval")
+	if approval.Tablet != "Tab" {
+		t.Fatalf("paired with %q, want the tablet that passed the check", approval.Tablet)
+	}
+	if len(tried) != 2 || tried[0] != "Impostor" || tried[1] != "Tab" {
+		t.Fatalf("attempts = %v, want [Impostor Tab] (the failed peer avoided while another answers)", tried)
+	}
+	if err := env.svc.Approve(); err != nil {
+		t.Fatal(err)
+	}
+	waitPhase(t, env.svc, "done")
+}
+
+// A tablet whose user mistyped the code keeps its endpoint; with nobody else
+// answering, the host tries it again after the grace period.
+func TestWiFiPairingRetriesTheSameTabletWhenNoOtherAnswers(t *testing.T) {
+	defer func(old time.Duration) { wifiPairingRetryGrace = old }(wifiPairingRetryGrace)
+	wifiPairingRetryGrace = 10 * time.Millisecond
+	env := newPairingTestEnv(t)
+	close(env.foundTablet)
+	succeed := env.svc.deps.authenticate
+	var calls atomic.Int32
+	env.svc.deps.authenticate = func(ctx context.Context, iface string, c wifilan.Candidate, store *wifilan.TrustStore, inv *wifilan.PairingInvitation) (pairingConn, [32]byte, error) {
+		if calls.Add(1) == 1 {
+			return nil, [32]byte{}, wifilan.ErrPairing
+		}
+		return succeed(ctx, iface, c, store, inv)
+	}
+	if err := env.svc.Start(false); err != nil {
+		t.Fatal(err)
+	}
+	waitPhase(t, env.svc, "approval")
+	if calls.Load() != 2 {
+		t.Fatalf("authenticate calls = %d, want 2", calls.Load())
+	}
+	env.svc.Cancel()
+}
+
+// The host gives up after the invitation's attempt limit.
+func TestWiFiPairingStopsAfterTheAttemptLimit(t *testing.T) {
+	defer func(old time.Duration) { wifiPairingRetryGrace = old }(wifiPairingRetryGrace)
+	wifiPairingRetryGrace = time.Millisecond
+	env := newPairingTestEnv(t)
+	close(env.foundTablet)
+	var calls atomic.Int32
+	env.svc.deps.authenticate = func(context.Context, string, wifilan.Candidate, *wifilan.TrustStore, *wifilan.PairingInvitation) (pairingConn, [32]byte, error) {
+		calls.Add(1)
+		return nil, [32]byte{}, wifilan.ErrPairing
+	}
+	if err := env.svc.Start(false); err != nil {
+		t.Fatal(err)
+	}
+	failed := waitPhase(t, env.svc, "failed")
+	if calls.Load() != wifiPairingMaxAttempts {
+		t.Fatalf("authenticate calls = %d, want %d", calls.Load(), wifiPairingMaxAttempts)
+	}
+	if failed.Error == "" {
+		t.Fatal("failed state has no error")
+	}
+}

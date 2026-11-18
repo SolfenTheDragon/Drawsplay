@@ -34,6 +34,8 @@ object ConnectionPresentation {
 
 enum class PairingStatus(val canRetry: Boolean = false) {
     SEARCHING, ENTER_CODE, CHECKING, APPROVAL, SAVING, PAIRED, INVALID_CODE,
+    /** The last code check failed; the same pairing waits for the code again. */
+    CODE_REJECTED,
     EXPIRED(true), NOT_APPROVED(true), VERIFICATION_FAILED(true), NETWORK_UNAVAILABLE(true),
     DISCOVERY_FAILED(true), TRUST_REPAIR(true), IDENTITY_REPAIR(true), FAILED(true), COMPUTER_NOT_FOUND(true)
 }

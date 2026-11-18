@@ -152,8 +152,9 @@ class WiFiTrustStore(context: Context) {
         if (KeyProperties.DIGEST_NONE !in information.digests) {
             throw IOException("Existing Wi-Fi identity cannot sign TLS transcripts; explicitly reset Wi-Fi identity and re-pair locally")
         }
-        (entry.certificate as? X509Certificate)?.checkValidity()
-            ?: throw IOException("Wi-Fi identity certificate is unavailable")
+        // Dates are not checked: the paired host trusts this key, not the
+        // certificate, so a wrong clock must not make the identity unusable.
+        if (entry.certificate !is X509Certificate) throw IOException("Wi-Fi identity certificate is unavailable")
         entry
     }
 

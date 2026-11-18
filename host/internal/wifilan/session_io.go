@@ -13,7 +13,7 @@ func preparePairedExchange(ctx context.Context, conn *tls.Conn, pin [32]byte, ex
 		return time.Time{}, nil, ErrPairedIdentity
 	}
 	state := conn.ConnectionState()
-	if err := VerifyPairedCertificate(state.PeerCertificates, pin, true, time.Now()); err != nil {
+	if err := VerifyPairedCertificate(state.PeerCertificates, pin, true); err != nil {
 		return time.Time{}, nil, err
 	}
 	if err := ctx.Err(); err != nil {

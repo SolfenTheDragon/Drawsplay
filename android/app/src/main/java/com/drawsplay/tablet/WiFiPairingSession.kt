@@ -11,6 +11,7 @@ import android.util.Log
 import com.drawsplay.tablet.transport.WiFiEnrollment
 import com.drawsplay.tablet.transport.WiFiLan
 import com.drawsplay.tablet.transport.WiFiLanPolicy
+import com.drawsplay.tablet.transport.WiFiPendingEnrollment
 import com.drawsplay.tablet.transport.WiFiTrustException
 import com.drawsplay.tablet.transport.WiFiTrustFailure
 import com.drawsplay.tablet.transport.WiFiTrustStore
@@ -36,7 +37,7 @@ class WiFiPairingSession(
 ) {
     private val app = context.applicationContext
     private val stopped = AtomicBoolean(false)
-    private val code = CompletableFuture<String>()
+    @Volatile private var code = CompletableFuture<String>()
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val resources = WiFiSessionCancellation()
@@ -102,24 +103,47 @@ class WiFiPairingSession(
             failure = PairingStatus.COMPUTER_NOT_FOUND
             val store = WiFiTrustStore(app)
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120)
-            var raw: Socket? = null
-            while (raw == null && resources.isActive && System.nanoTime() < deadline) {
-                val candidate = try { listener.accept() } catch (_: SocketTimeoutException) { continue }
-                if (WiFiLanPolicy.isDirectPeer(local.address, local.prefixLength, candidate.inetAddress)) {
-                    raw = resources.track(candidate)
-                } else candidate.close()
+            // Any device on the network can connect first, or the code can be
+            // mistyped: a failed check waits for the computer to connect again
+            // and asks for the code again, a few times, instead of ending pairing.
+            // Each failed check gives a wrong peer one guess at the code.
+            var attempts = 0
+            var pending: WiFiPendingEnrollment? = null
+            while (pending == null) {
+                var raw: Socket? = null
+                while (raw == null && resources.isActive && System.nanoTime() < deadline) {
+                    val candidate = try { listener.accept() } catch (_: SocketTimeoutException) { continue }
+                    if (WiFiLanPolicy.isDirectPeer(local.address, local.prefixLength, candidate.inetAddress)) {
+                        raw = resources.track(candidate)
+                    } else candidate.close()
+                }
+                if (raw == null) throw TimeoutException("Pairing listener expired")
+                failure = PairingStatus.EXPIRED
+                if (attempts == 0) postStatus(PairingStatus.ENTER_CODE)
+                val remaining = deadline - System.nanoTime()
+                if (remaining <= 0) throw TimeoutException("Pairing code expired")
+                val entered = code.get(minOf(TimeUnit.SECONDS.toNanos(110), remaining), TimeUnit.NANOSECONDS)
+                failure = PairingStatus.IDENTITY_REPAIR
+                val keyManager = store.keyManagers().filterIsInstance<X509KeyManager>().single()
+                failure = PairingStatus.VERIFICATION_FAILED
+                attempts++
+                try {
+                    pending = WiFiEnrollment(keyManager).authenticateAccepted(raw, entered, 30000)
+                } catch (error: IOException) {
+                    if (error is WiFiTrustException || attempts >= MAX_CODE_ATTEMPTS ||
+                        !resources.isActive || System.nanoTime() >= deadline
+                    ) throw error
+                    Log.w(TAG, "Pairing check $attempts failed; waiting for the computer to connect again", error)
+                    // A fresh code slot before the prompt; re-check cancellation
+                    // after the swap so release() never misses the new future.
+                    code = CompletableFuture()
+                    if (stopped.get()) throw IOException("Pairing cancelled")
+                    failure = PairingStatus.EXPIRED
+                    postStatus(PairingStatus.CODE_REJECTED)
+                }
             }
-            if (raw == null) throw TimeoutException("Pairing listener expired")
-            failure = PairingStatus.EXPIRED
-            postStatus(PairingStatus.ENTER_CODE)
-            val remaining = deadline - System.nanoTime()
-            if (remaining <= 0) throw TimeoutException("Pairing code expired")
-            val entered = code.get(minOf(TimeUnit.SECONDS.toNanos(110), remaining), TimeUnit.NANOSECONDS)
-            failure = PairingStatus.IDENTITY_REPAIR
-            val keyManager = store.keyManagers().filterIsInstance<X509KeyManager>().single()
-            failure = PairingStatus.VERIFICATION_FAILED
-            val pending = WiFiEnrollment(keyManager).authenticateAccepted(raw, entered, 30000)
-            resources.track(pending.socket).use { secured ->
+            val verified = pending ?: throw IOException("Pairing ended without a verified computer")
+            resources.track(verified.socket).use { secured ->
                 postStatus(PairingStatus.APPROVAL)
                 failure = PairingStatus.NOT_APPROVED
                 secured.soTimeout = 60000
@@ -128,7 +152,7 @@ class WiFiPairingSession(
                 failure = PairingStatus.TRUST_REPAIR
                 // Serialize saving with cancellation so a cancelled attempt cannot
                 // restore trust after a user has forgotten the previous computer.
-                if (!resources.publish { store.savePairedHost(pending.hostSpkiSha256, "Paired computer") }) {
+                if (!resources.publish { store.savePairedHost(verified.hostSpkiSha256, "Paired computer") }) {
                     throw IOException("Pairing cancelled")
                 }
                 failure = PairingStatus.FAILED
@@ -174,5 +198,7 @@ class WiFiPairingSession(
 
     companion object {
         private const val TAG = "WiFiPairingSession"
+        /** Code checks per pairing session (wrong peer first, or a typo). */
+        private const val MAX_CODE_ATTEMPTS = 3
     }
 }
