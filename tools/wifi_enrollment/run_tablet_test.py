@@ -48,7 +48,9 @@ def main():
     process = None
     try:
         # No -r: installation must never overwrite an existing application.
-        if "Success" not in command("install", "--no-streaming", str(args.apk.resolve())):
+        # -g grants runtime permissions, including Android 17's
+        # ACCESS_LOCAL_NETWORK, which the LAN probe needs and cannot prompt for.
+        if "Success" not in command("install", "--no-streaming", "-g", str(args.apk.resolve())):
             raise RuntimeError("Test APK installation did not succeed")
         installed = True
         command("shell", "am", "start", "-W", "-n", ACTIVITY,

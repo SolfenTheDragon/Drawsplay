@@ -146,7 +146,7 @@ The settings page's **Troubleshooting** section shows setup checks and can save 
 Wi-Fi works for display, touch and pen, but it's in beta and has more delay than USB. When both are connected, USB is used.
 
 1. In the settings, turn on **Wi-Fi**, choose your network and save. A pairing code appears in **Host overview**.
-2. On the tablet, tap **Wi-Fi connect** and enter the eight digits.
+2. On the tablet, tap **Wi-Fi connect** and enter the eight digits. On Android 17 and later, allow the **Nearby devices** permission when Android asks; Wi-Fi can't reach your computer without it.
 3. When the tablet says the code is verified, click **Approve** on the computer.
 
 The tablet then reconnects to that computer by itself. Connections are encrypted and only paired devices are accepted. For the best picture, use a 5 GHz network with a strong signal (**Host overview** shows the signal strength).

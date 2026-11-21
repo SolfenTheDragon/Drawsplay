@@ -31,6 +31,9 @@ import android.media.ImageReader
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AlertDialog
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
+import android.provider.Settings
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -110,6 +113,24 @@ class MainActivity : AppCompatActivity() {
     private var hasSavedWifiHost = false
     private var wifiWaitingMessage: String? = null
     private var pairing: WiFiPairingSession? = null
+
+    // Android 17 local network permission (LocalNetworkAccess). Automatic
+    // reconnects ask once per activity; the waiting screen's button and the
+    // Wi-Fi connect button always ask again.
+    private enum class LocalNetworkAction { PAIR, RECONNECT }
+    private var pendingLocalNetworkAction: LocalNetworkAction? = null
+    private var pendingLocalNetworkUserAction = false
+    private var localNetworkAsked = false
+    private var localNetworkPromptInFlight = false
+    // Whether the system prompt had been shown before the current request
+    // (persisted, so it survives restarts).
+    private var localNetworkPromptedBefore = false
+    private val localNetworkRequest =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            localNetworkPromptInFlight = false
+            onLocalNetworkResult(granted, prompted = true)
+        }
+
     private var backgroundSink: ImageReader? = null
     @Volatile
     private var pendingForegroundSurface: Surface? = null
@@ -148,6 +169,9 @@ class MainActivity : AppCompatActivity() {
         wifiForgetButton = findViewById(R.id.wifiForgetButton)
         wifiForgetButton.setOnClickListener { confirmForgetWifiHost() }
         findViewById<View>(R.id.usbRetryButton).setOnClickListener { AccessoryTransport.retryPermission() }
+        findViewById<View>(R.id.wifiPermissionButton).setOnClickListener {
+            requestLocalNetwork(LocalNetworkAction.RECONNECT, userAction = true)
+        }
         configureHelp(R.id.usbHelpToggle, R.id.usbHelpDetails)
         configureHelp(R.id.wifiHelpToggle, R.id.wifiHelpDetails)
         findViewById<View>(R.id.wifiPairClose).setOnClickListener { closeWifiPairing() }
@@ -363,7 +387,7 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         appForeground = true
-        if (!wifiHostReset.reconnectBlocked) pairedWifiHost.start()
+        if (!wifiHostReset.reconnectBlocked) startPairedWifiHost()
         refreshSavedWifiHost()
         AccessoryTransport.refresh()
         AccessoryTransport.setPolling(true)
@@ -601,6 +625,11 @@ class MainActivity : AppCompatActivity() {
             )
             return
         }
+        // Android 17: pairing listens and advertises on the LAN, so ask first.
+        if (!LocalNetworkAccess.granted(this)) {
+            requestLocalNetwork(LocalNetworkAction.PAIR, userAction = true)
+            return
+        }
         wifiWaitingMessage = null
         // The paired session advertises the same service type, so it pauses while pairing.
         pairedWifiHost.stop()
@@ -640,7 +669,7 @@ class MainActivity : AppCompatActivity() {
                 // Hand straight over to the display instead of waiting for Back.
                 hideWifiPanel()
                 pairedStatus = PairedConnectionStatus.CONNECTING
-                pairedWifiHost.start()
+                startPairedWifiHost()
                 updateStatus()
             } else {
                 refreshSavedWifiHost()
@@ -713,8 +742,90 @@ class MainActivity : AppCompatActivity() {
         pairing = null
         hideWifiPanel()
         refreshSavedWifiHost()
-        if (!wifiHostReset.reconnectBlocked && appForeground) pairedWifiHost.start()
+        if (!wifiHostReset.reconnectBlocked && appForeground) startPairedWifiHost()
         updateStatus()
+    }
+
+    /** Starts the paired Wi-Fi session, or first asks for Android 17's local network permission. */
+    private fun startPairedWifiHost() {
+        if (LocalNetworkAccess.granted(this)) {
+            pairedWifiHost.start()
+            return
+        }
+        // Without a saved computer there is nothing to reconnect to, so nothing to ask for.
+        if (hasSavedWifiHost) requestLocalNetwork(LocalNetworkAction.RECONNECT, userAction = false)
+    }
+
+    private fun requestLocalNetwork(action: LocalNetworkAction, userAction: Boolean) {
+        if (!appForeground || isDestroyed || localNetworkPromptInFlight) return
+        if (!userAction && localNetworkAsked) {
+            // Already asked: the waiting screen shows the Allow Wi-Fi access button.
+            updateStatus()
+            return
+        }
+        localNetworkAsked = true
+        pendingLocalNetworkAction = action
+        pendingLocalNetworkUserAction = userAction
+        if (shouldShowRequestPermissionRationale(LocalNetworkAccess.PERMISSION)) {
+            showLocalDialog(AlertDialog.Builder(this)
+                .setTitle(R.string.wifi_permission_title)
+                .setMessage(R.string.wifi_permission_rationale)
+                .setNegativeButton(R.string.action_not_now) { _, _ -> onLocalNetworkResult(false, prompted = false) }
+                .setPositiveButton(R.string.wifi_permission_allow) { _, _ -> launchLocalNetworkPrompt() }
+                .setOnCancelListener { onLocalNetworkResult(false, prompted = false) }
+            )
+        } else {
+            launchLocalNetworkPrompt()
+        }
+    }
+
+    private fun launchLocalNetworkPrompt() {
+        if (localNetworkPromptInFlight || isDestroyed) return
+        localNetworkPromptInFlight = true
+        localNetworkPromptedBefore = displayPrefs.getBoolean(KEY_LOCAL_NETWORK_PROMPTED, false)
+        displayPrefs.edit().putBoolean(KEY_LOCAL_NETWORK_PROMPTED, true).apply()
+        localNetworkRequest.launch(LocalNetworkAccess.PERMISSION)
+    }
+
+    private fun onLocalNetworkResult(granted: Boolean, prompted: Boolean) {
+        val action = pendingLocalNetworkAction
+        val userAction = pendingLocalNetworkUserAction
+        pendingLocalNetworkAction = null
+        pendingLocalNetworkUserAction = false
+        if (isDestroyed) return
+        if (granted) {
+            when (action) {
+                LocalNetworkAction.PAIR -> openWifiPairing()
+                LocalNetworkAction.RECONNECT, null ->
+                    if (!wifiHostReset.reconnectBlocked && appForeground) pairedWifiHost.start()
+            }
+            updateStatus()
+            return
+        }
+        // After repeated denials Android answers "denied" without showing a
+        // prompt; only Settings can grant it then. Offer that when the user
+        // asked for Wi-Fi themselves. A first prompt dismissed without an
+        // answer also reports "denied" with no rationale, but asking again
+        // still works, so Settings is only offered once Android has prompted
+        // before.
+        if (prompted && userAction && appForeground && localNetworkPromptedBefore &&
+            !shouldShowRequestPermissionRationale(LocalNetworkAccess.PERMISSION)) {
+            showLocalDialog(AlertDialog.Builder(this)
+                .setTitle(R.string.wifi_permission_title)
+                .setMessage(R.string.wifi_permission_denied)
+                .setNegativeButton(R.string.action_cancel, null)
+                .setPositiveButton(R.string.action_open_settings) { _, _ -> openAppSettings() }
+            )
+        }
+        updateStatus()
+    }
+
+    private fun openAppSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+        } catch (error: android.content.ActivityNotFoundException) {
+            Log.w(TAG, "No app settings screen", error)
+        }
     }
 
     private fun refreshSavedWifiHost() {
@@ -728,7 +839,7 @@ class MainActivity : AppCompatActivity() {
                 updateStatus()
                 if (saved && !wifiHostReset.reconnectBlocked && appForeground &&
                     pairing == null && wifiPairPanel.visibility != View.VISIBLE) {
-                    pairedWifiHost.start()
+                    startPairedWifiHost()
                 }
             }
         }
@@ -799,7 +910,8 @@ class MainActivity : AppCompatActivity() {
             statusOverlay.visibility = FrameLayout.VISIBLE
             val state = ConnectionPresentation.status(
                 configured = streamConfigured, picture = picture, savedWifi = hasSavedWifiHost,
-                usb = usbStatus, wifi = pairedStatus, usbBlocksWifi = !wifiAllowedNow()
+                usb = usbStatus, wifi = pairedStatus, usbBlocksWifi = !wifiAllowedNow(),
+                wifiPermissionMissing = !LocalNetworkAccess.granted(this)
             )
             val message = wifiWaitingMessage ?: getString(when (state) {
                 ConnectionStatus.STREAMING -> R.string.status_streaming
@@ -815,6 +927,7 @@ class MainActivity : AppCompatActivity() {
                 ConnectionStatus.CONNECTING_WIFI -> R.string.status_connecting_wifi
                 ConnectionStatus.TRUST_REPAIR -> R.string.wifi_trust_repair
                 ConnectionStatus.IDENTITY_REPAIR -> R.string.wifi_identity_repair
+                ConnectionStatus.WIFI_PERMISSION -> R.string.status_wifi_permission
             })
             val headline = getString(when (state) {
                 ConnectionStatus.WAITING -> R.string.headline_waiting
@@ -828,12 +941,15 @@ class MainActivity : AppCompatActivity() {
                 ConnectionStatus.CONNECTING_WIFI -> R.string.status_connecting_wifi
                 ConnectionStatus.WIFI_NETWORK -> R.string.headline_wifi_network
                 ConnectionStatus.TRUST_REPAIR, ConnectionStatus.IDENTITY_REPAIR -> R.string.headline_wifi_repair
+                ConnectionStatus.WIFI_PERMISSION -> R.string.headline_wifi_permission
             })
             if (statusText.text.toString() != headline) statusText.text = headline
             val detail = findViewById<TextView>(R.id.statusDetail)
             if (detail.text.toString() != message) detail.text = message
             findViewById<View>(R.id.usbRetryButton).visibility =
                 if (usbStatus == UsbConnectionStatus.PERMISSION_DENIED || usbStatus == UsbConnectionStatus.OPEN_FAILED) View.VISIBLE else View.GONE
+            findViewById<View>(R.id.wifiPermissionButton).visibility =
+                if (state == ConnectionStatus.WIFI_PERMISSION) View.VISIBLE else View.GONE
         }
         connectionBack.isEnabled = localPanel || picture
         releaseRemoteKeysIfLocal()
@@ -1108,6 +1224,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_VIDEO_SCALING = "videoScaling"
         private const val KEY_CONNECTION_HINT_SHOWN = "connectionHintShown"
         private const val KEY_RETIRED_WIFI_CLEANED = "retiredWifiCredentialsRemoved"
+        private const val KEY_LOCAL_NETWORK_PROMPTED = "localNetworkPrompted"
         private const val RETIRED_MASTER_KEY_ALIAS = "_androidx_security_master_key_"
     }
 

@@ -4,7 +4,9 @@ enum class UsbConnectionStatus { WAITING, PERMISSION_NEEDED, PERMISSION_DENIED, 
 enum class PairedConnectionStatus { IDLE, RECONNECTING, NETWORK_UNAVAILABLE, CONNECTING, WAITING_PICTURE, TRUST_REPAIR, IDENTITY_REPAIR }
 enum class ConnectionStatus {
     WAITING, STREAMING, WAITING_PICTURE, USB_PERMISSION, USB_DENIED, CONNECTING_USB,
-    USB_ERROR, USB_PRIORITY, RECONNECTING_WIFI, WIFI_NETWORK, CONNECTING_WIFI, TRUST_REPAIR, IDENTITY_REPAIR
+    USB_ERROR, USB_PRIORITY, RECONNECTING_WIFI, WIFI_NETWORK, CONNECTING_WIFI, TRUST_REPAIR, IDENTITY_REPAIR,
+    /** A computer is saved but Android 17's local network permission is not granted. */
+    WIFI_PERMISSION
 }
 
 object ConnectionPresentation {
@@ -14,7 +16,8 @@ object ConnectionPresentation {
         savedWifi: Boolean = false,
         usb: UsbConnectionStatus = UsbConnectionStatus.WAITING,
         wifi: PairedConnectionStatus = PairedConnectionStatus.IDLE,
-        usbBlocksWifi: Boolean = false
+        usbBlocksWifi: Boolean = false,
+        wifiPermissionMissing: Boolean = false
     ): ConnectionStatus = when {
         picture -> ConnectionStatus.STREAMING
         configured || wifi == PairedConnectionStatus.WAITING_PICTURE -> ConnectionStatus.WAITING_PICTURE
@@ -23,6 +26,7 @@ object ConnectionPresentation {
         usb == UsbConnectionStatus.OPEN_FAILED -> ConnectionStatus.USB_ERROR
         usb == UsbConnectionStatus.CONNECTED -> ConnectionStatus.CONNECTING_USB
         savedWifi && usbBlocksWifi -> ConnectionStatus.USB_PRIORITY
+        savedWifi && wifiPermissionMissing -> ConnectionStatus.WIFI_PERMISSION
         wifi == PairedConnectionStatus.TRUST_REPAIR -> ConnectionStatus.TRUST_REPAIR
         wifi == PairedConnectionStatus.IDENTITY_REPAIR -> ConnectionStatus.IDENTITY_REPAIR
         wifi == PairedConnectionStatus.NETWORK_UNAVAILABLE -> ConnectionStatus.WIFI_NETWORK

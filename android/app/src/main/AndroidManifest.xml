@@ -7,6 +7,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Android 17+: runtime permission (Nearby devices) for Wi-Fi pairing and
+         reconnecting: mDNS, the tablet's listening sockets and LAN TCP. USB does
+         not need it (LocalNetworkAccess.kt). -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <!-- In-app updates from the project's GitHub releases (update/AppUpdater.kt). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Android 12+: lets a tapped update install without a second confirmation

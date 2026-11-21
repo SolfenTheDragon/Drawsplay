@@ -99,6 +99,15 @@
                 android:visibility="gone" />
 
             <Button
+                android:id="@+id/wifiPermissionButton"
+                style="@style/DrawSplay.SecondaryButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/wifi_permission_allow"
+                android:visibility="gone" />
+
+            <Button
                 android:id="@+id/wifiConnectButton"
                 style="@style/DrawSplay.PrimaryButton"
                 android:layout_width="match_parent"

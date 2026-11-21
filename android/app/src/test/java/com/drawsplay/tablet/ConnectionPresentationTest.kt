@@ -27,6 +27,15 @@ class ConnectionPresentationTest {
             savedWifi = true, wifi = PairedConnectionStatus.NETWORK_UNAVAILABLE))
     }
 
+    @Test fun missingLocalNetworkPermissionIsNotShownAsSearching() {
+        assertEquals(ConnectionStatus.WIFI_PERMISSION, ConnectionPresentation.status(
+            savedWifi = true, wifiPermissionMissing = true))
+        // USB still has priority, and nothing is asked without a saved computer.
+        assertEquals(ConnectionStatus.USB_PRIORITY, ConnectionPresentation.status(
+            savedWifi = true, usbBlocksWifi = true, wifiPermissionMissing = true))
+        assertEquals(ConnectionStatus.WAITING, ConnectionPresentation.status(wifiPermissionMissing = true))
+    }
+
     @Test fun stoppedWifiDoesNotInventAUsbFailure() {
         assertEquals(ConnectionStatus.WAITING, ConnectionPresentation.status())
         assertEquals(ConnectionStatus.CONNECTING_USB, ConnectionPresentation.status(

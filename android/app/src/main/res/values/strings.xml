@@ -28,6 +28,14 @@
     <string name="headline_wifi_reconnecting">Finding your computer…</string>
     <string name="headline_wifi_network">Check your Wi-Fi</string>
     <string name="headline_wifi_repair">Wireless pairing needs attention</string>
+    <string name="headline_wifi_permission">Allow Wi-Fi access</string>
+    <string name="status_wifi_permission">Android needs your permission before DrawSplay can reach your computer over Wi-Fi. Tap Allow Wi-Fi access. USB works without it.</string>
+    <string name="wifi_permission_allow">Allow Wi-Fi access</string>
+    <string name="wifi_permission_title">Allow DrawSplay on your local network</string>
+    <string name="wifi_permission_rationale">DrawSplay finds your computer and receives its display over your Wi-Fi network, so Android asks for the Nearby devices permission. DrawSplay only connects to computers you pair with. USB works without this permission.</string>
+    <string name="wifi_permission_denied">Wi-Fi needs the Nearby devices permission. Tap Open settings, then Permissions → Nearby devices → Allow. USB works without it.</string>
+    <string name="action_open_settings">Open settings</string>
+    <string name="action_not_now">Not now</string>
     <string name="help_show">Show setup help</string>
     <string name="help_hide">Hide setup help</string>
     <string name="help_expanded">Expanded</string>
