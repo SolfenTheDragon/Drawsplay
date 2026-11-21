@@ -45,8 +45,6 @@ func runInstallerMode(o installerOptions) (bool, int) {
 
 func attachParentConsole() {}
 
-func handOffToRunningInstance(bool) bool { return false }
-
 // hideChildWindow is a Windows concern (console tools spawned by the
 // GUI-subsystem host); a no-op elsewhere.
 func hideChildWindow(*exec.Cmd) {}

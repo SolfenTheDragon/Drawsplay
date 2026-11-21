@@ -34,3 +34,18 @@ func acquireInstanceLock() (bool, error) {
 }
 
 var instanceLockFile *os.File
+
+// instanceLockHeld reports whether another host of this user holds host.lock.
+// It only probes: a lock it gets is released at once by closing the file.
+func instanceLockHeld() bool {
+	dir, err := configDir()
+	if err != nil {
+		return false
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "host.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	return unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB) == unix.EWOULDBLOCK
+}
