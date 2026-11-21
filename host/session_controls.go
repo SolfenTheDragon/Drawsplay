@@ -189,11 +189,15 @@ func aoaSetupItem(hostOS string, st aoaStatusInfo) setupCheckItem {
 		item.Action = "Accept the USB prompt on the tablet and keep DrawSplay open."
 	case "switching":
 		item.Detail = "Switching the tablet to accessory mode"
+	case "file-transfer", "manual-switch":
+		// The tablet is attached but DrawSplay leaves it alone until asked.
+		item.Detail = cmp.Or(st.Detail, "Tablet attached but not in USB accessory mode")
+		item.Action = "Unlock the tablet, then switch it to USB accessory mode to start DrawSplay."
+		item.Fix, item.FixLabel = setupFixRetryUSB, "Switch to USB accessory mode"
 	case "error":
 		item.Detail = st.Detail
 		if hostOS == "linux" {
-			item.Action = "Lets your user open the tablet over USB; you may be asked for your password."
-			item.Fix, item.FixLabel = setupFixUSBRule, "Allow USB access"
+			item.Action, item.Fix, item.FixLabel = linuxAOAErrorFix(st.Detail)
 		} else {
 			item.Action = "Retrying lets DrawSplay install its signed WinUSB driver (in normal mode and again after the tablet re-enumerates in accessory mode). If it still fails, rerun the DrawSplay installer."
 			item.Fix, item.FixLabel = setupFixRetryUSB, "Retry"
@@ -204,6 +208,27 @@ func aoaSetupItem(hostOS string, st aoaStatusInfo) setupCheckItem {
 		item.Fix, item.FixLabel = setupFixRetryUSB, "Look for the tablet again"
 	}
 	return item
+}
+
+// linuxAOAErrorFix offers the udev rule only for permission errors; a busy
+// interface or a tablet that did not switch needs a retry, not a rule.
+func linuxAOAErrorFix(detail string) (action, fix, label string) {
+	lower := strings.ToLower(detail)
+	switch {
+	case strings.Contains(lower, "no permission") || strings.Contains(lower, "permission denied") ||
+		strings.Contains(lower, "operation not permitted"):
+		return "Lets your user open the tablet over USB; you may be asked for your password.",
+			setupFixUSBRule, "Allow USB access"
+	case strings.Contains(lower, "another program") || strings.Contains(lower, "resource busy"):
+		return "Close other programs using the tablet over USB (adb, scrcpy, file managers showing the tablet), then retry.",
+			setupFixRetryUSB, "Retry"
+	case strings.Contains(lower, "did not switch"):
+		return "Unlock the tablet, unplug it and plug it back in, then retry. Use a USB data cable, not a charge-only one.",
+			setupFixRetryUSB, "Retry"
+	default:
+		return "Unlock the tablet and retry; if it keeps failing, unplug it and plug it back in.",
+			setupFixRetryUSB, "Retry"
+	}
 }
 
 func adbSetupAction(hostOS, detail string) string {
