@@ -7,12 +7,34 @@ import (
 	"log"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 const winusbInstallTimeout = 3 * time.Minute
 
 var winusbInstallAttempts sync.Map // "vid:pid" -> struct{}
+
+// winusbRetryWindow is how long after the checklist's Retry a portable host
+// may prompt again despite a recorded earlier attempt. It covers both tablet
+// identities (normal, then accessory mode after re-enumeration) and expires,
+// so a later plug-in never brings up an unasked-for UAC prompt.
+const winusbRetryWindow = 2 * time.Minute
+
+// winusbRetryUntil is the end of the current Retry window (Unix nanoseconds).
+var winusbRetryUntil atomic.Int64
+
+// resetWinUSBInstallAttempts lets scans in the next winusbRetryWindow try
+// the WinUSB install again, once per device; it backs the setup checklist's
+// Retry button.
+func resetWinUSBInstallAttempts() {
+	winusbInstallAttempts.Clear()
+	winusbRetryUntil.Store(time.Now().Add(winusbRetryWindow).UnixNano())
+}
+
+func winusbRetryActive(now time.Time) bool {
+	return now.UnixNano() < winusbRetryUntil.Load()
+}
 
 // ensureWinUSBDriver binds DrawSplay's signed WinUSB package to an attached
 // tablet identity that has no WinUSB interface. Installed hosts run the
@@ -41,7 +63,7 @@ func ensureWinUSBDriver(vid, pid uint16) bool {
 	}
 
 	stateDir, stateErr := userStateDir()
-	if stateErr == nil && winusbAttemptRecorded(stateDir, key) {
+	if stateErr == nil && !winusbRetryActive(time.Now()) && winusbAttemptRecorded(stateDir, key) {
 		log.Printf("AOA: WinUSB install for %s was already attempted; not prompting again (install DrawSplay with -install to bind it automatically)", key)
 		return false
 	}

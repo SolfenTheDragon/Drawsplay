@@ -56,6 +56,8 @@ func runSetupFix(action string, cfg settings) (setupFixResult, error) {
 		if !cfg.AOAEnabled {
 			return res, errors.New("USB accessory mode is off in settings")
 		}
+		// A Retry after a failed or declined WinUSB install tries it again.
+		resetWinUSBInstallAttempts()
 		requestAOASwitch()
 		res.Message = "Looking for the tablet again. Keep it unlocked with DrawSplay open."
 	case setupFixRestartVideo:
