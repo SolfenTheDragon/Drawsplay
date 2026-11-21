@@ -1,6 +1,5 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 fun Project.propOrEnv(name: String): String? {
@@ -21,12 +20,14 @@ val releaseVersion = Regex("""^v(\d{1,3})\.(\d{1,3})\.(\d{1,3})$""")
 
 android {
     namespace = "com.drawsplay.tablet"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.drawsplay.tablet"
         minSdk = 26
-        targetSdk = 36
+        // Android 17: Wi-Fi needs the ACCESS_LOCAL_NETWORK runtime permission
+        // (LocalNetworkAccess.kt).
+        targetSdk = 37
         versionCode = releaseVersion?.let { (major, minor, patch) -> 100 + major * 1_000_000 + minor * 1_000 + patch } ?: 2
         versionName = releaseVersion?.let { (major, minor, patch) -> "$major.$minor.$patch" } ?: "dev"
     }
@@ -96,9 +97,13 @@ android {
             throw GradleException("Release signing is required; missing Android signing settings: ${missing.joinToString(", ")}")
         }
     }
+}
 
-    kotlinOptions {
-        jvmTarget = "17"
+// Built-in Kotlin takes its JVM target from compileOptions.targetCompatibility
+// (17); this states it explicitly.
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
 

@@ -41,7 +41,7 @@ When the legacy ADB transport is enabled, the host prefers a bundled ADB copy. I
 
 - Android Studio (recommended), or the checked-in Gradle wrapper with Android SDK installed
 - Java/JDK **17**
-- Android SDK Platform **36** (`compileSdk`/`targetSdk` 36, `minSdk` 26) and matching Build Tools
+- Android SDK Platform **37** (`compileSdk`/`targetSdk` 37, `minSdk` 26) and matching Build Tools; the wrapper uses Gradle 9.6.1 with Android Gradle Plugin 9.5.2 (built-in Kotlin)
 - A USB-connected Android tablet/device; Developer Options and USB debugging are not required for AOA
 
 ## Build the host service
