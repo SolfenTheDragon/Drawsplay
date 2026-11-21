@@ -1335,6 +1335,7 @@ $("aoa-enabled").addEventListener("change", () => {
 $("run-setup-remediation-btn").addEventListener("click", async () => {
   const btn = $("run-setup-remediation-btn");
   btn.disabled = true;
+  btn.textContent = "Checking setup…";
   try {
     const result = await api("/api/setup/remediate", {
       method: "POST",
@@ -1352,6 +1353,7 @@ $("run-setup-remediation-btn").addEventListener("click", async () => {
     showMsg(e.message, false);
   } finally {
     btn.disabled = false;
+    updateADBVisibility();
   }
 });
 

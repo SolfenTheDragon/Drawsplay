@@ -54,6 +54,13 @@ func setOperationalWarning(key, warning string) {
 	operationalWarnings.values[key] = warning
 }
 
+// operationalWarning returns the current warning for one key ("" if none).
+func operationalWarning(key string) string {
+	operationalWarnings.RLock()
+	defer operationalWarnings.RUnlock()
+	return operationalWarnings.values[key]
+}
+
 func currentOperationalWarnings() []string {
 	operationalWarnings.RLock()
 	warnings := make([]string, 0, len(operationalWarnings.values))

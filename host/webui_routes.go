@@ -230,13 +230,15 @@ func (api webUIAPI) handleSetupRemediate(w http.ResponseWriter, r *http.Request)
 	cfg := api.store.get()
 	switch strings.TrimSpace(req.Action) {
 	case "", "restart-adb":
-		if !cfg.ADBTunnelEnabled {
-			// Nothing to restart without the adb tunnel.
-		} else if err := ensureADBAvailable(cfg.ADB); err != nil {
-			httpError(w, http.StatusUnprocessableEntity, "adb restart failed: %v", err)
-			return
+		// Re-check setup answers with fresh results, so wait for the checks.
+		// With the adb tunnel on they also (re)start adb, once.
+		runPreflightNow(cfg)
+		if cfg.ADBTunnelEnabled {
+			if warning := operationalWarning("adb-preflight"); warning != "" {
+				httpError(w, http.StatusUnprocessableEntity, "adb restart failed: %s", warning)
+				return
+			}
 		}
-		runBackgroundPreflight(cfg)
 		if x11SessionActive() {
 			refreshX11VkmsWarning()
 		}
