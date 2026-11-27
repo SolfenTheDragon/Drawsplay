@@ -87,3 +87,41 @@ func TestHostIDPersistsAndIsValid(t *testing.T) {
 		t.Fatalf("host id changed: %q -> %q", first, second)
 	}
 }
+
+// A hello or modePrefs packet must not size the virtual display beyond what
+// a real tablet could have: the USB accessory link is not authenticated and
+// the Linux backends create whatever size they are given.
+func TestImplausibleClientModesAreDropped(t *testing.T) {
+	bindTestIdentity(903, clientIdentity{
+		Platform: "android", NativeWidth: 65535, NativeHeight: 65535,
+		PrefWidth: 100000, PrefHeight: 1200,
+	})
+	defer unbindClientSession(903)
+	got := activeClientIdentity()
+	if got.NativeWidth != 0 || got.NativeHeight != 0 || got.PrefWidth != 0 || got.PrefHeight != 0 {
+		t.Fatalf("implausible sizes kept: %+v", got)
+	}
+	opts := videoOptions{Width: 1920, Height: 1080}
+	applyClientDisplayDefaults(&opts, got)
+	if opts.Width != 1920 || opts.Height != 1080 {
+		t.Fatalf("display = %dx%d, want the host's 1920x1080", opts.Width, opts.Height)
+	}
+
+	bindSessionModePrefs(903, 7680, 7680, 60) // each side fits, the area does not
+	if got := activeClientIdentity(); got.PrefWidth != 0 || got.PrefHeight != 0 {
+		t.Fatalf("modePrefs over 8K kept: %+v", got)
+	}
+}
+
+func TestPlausibleClientModes(t *testing.T) {
+	for _, m := range [][2]int{{2560, 1600}, {1600, 2560}, {7680, 4320}, {4320, 7680}, {320, 480}} {
+		if !plausibleClientMode(m[0], m[1]) {
+			t.Errorf("%dx%d refused", m[0], m[1])
+		}
+	}
+	for _, m := range [][2]int{{0, 0}, {-1920, 1080}, {319, 480}, {7681, 1080}, {7680, 7680}, {65535, 65535}} {
+		if plausibleClientMode(m[0], m[1]) {
+			t.Errorf("%dx%d accepted", m[0], m[1])
+		}
+	}
+}

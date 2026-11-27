@@ -156,8 +156,8 @@ func (s settings) validate() error {
 	if s.FPS < 10 || s.FPS > maxCaptureFPS {
 		return fmt.Errorf("fps must be between 10 and %d", maxCaptureFPS)
 	}
-	if kbps := parseBitrateKbps(s.Bitrate); kbps < minLadderKbps {
-		return fmt.Errorf("bitrate must be at least %dk (ffmpeg syntax, e.g. 24M)", minLadderKbps)
+	if kbps, ok := strictBitrateKbps(s.Bitrate); !ok || kbps < minLadderKbps || kbps > maxLadderKbps {
+		return fmt.Errorf("bitrate must be between %dk and %dM, written like 24M or 8000k", minLadderKbps, maxLadderKbps/1000)
 	}
 	if s.Width < 640 || s.Width > 7680 || s.Height < 480 || s.Height > 4320 {
 		return errors.New("resolution must be between 640x480 and 7680x4320")
@@ -261,6 +261,13 @@ func loadSettings() settings {
 	}
 	// Configs written before the rate was locked may hold a higher fps.
 	s.FPS = clampFPS(s.FPS)
+	// The settings page has no bitrate field, so a stored value the
+	// validator refuses would make every later save fail; use the default.
+	if kbps, ok := strictBitrateKbps(s.Bitrate); !ok || kbps < minLadderKbps || kbps > maxLadderKbps {
+		fmt.Fprintf(os.Stderr, "Warning: config bitrate %q is not between %dk and %dM; using %s\n",
+			s.Bitrate, minLadderKbps, maxLadderKbps/1000, defaultSettings().Bitrate)
+		s.Bitrate = defaultSettings().Bitrate
+	}
 	return applyFeatureFlags(s)
 }
 

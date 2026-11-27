@@ -180,3 +180,38 @@ func TestApplyFeatureFlagsKeepsOneUSBTransport(t *testing.T) {
 		t.Fatal("AOA forced on although ADB tunnel is enabled")
 	}
 }
+
+func TestSettingsBitrateValidation(t *testing.T) {
+	for _, b := range []string{"24M", "500k", "60M"} {
+		s := defaultSettings()
+		s.Bitrate = b
+		if err := s.validate(); err != nil {
+			t.Errorf("bitrate %q rejected: %v", b, err)
+		}
+	}
+	for _, b := range []string{"banana", "1.5", "8m", "499k", "61M", "10000M"} {
+		s := defaultSettings()
+		s.Bitrate = b
+		if err := s.validate(); err == nil {
+			t.Errorf("bitrate %q unexpectedly accepted", b)
+		}
+	}
+}
+
+// A stored bitrate the validator refuses is replaced on load, so later saves
+// from the settings page (which has no bitrate field) keep working.
+func TestLoadSettingsReplacesInvalidBitrate(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s := defaultSettings()
+	s.Bitrate = "banana"
+	if err := saveSettings(s); err != nil {
+		t.Fatalf("saveSettings: %v", err)
+	}
+	loaded := loadSettings()
+	if loaded.Bitrate != defaultSettings().Bitrate {
+		t.Fatalf("loaded bitrate = %q, want the default %q", loaded.Bitrate, defaultSettings().Bitrate)
+	}
+	if err := loaded.validate(); err != nil {
+		t.Fatalf("loaded settings do not validate: %v", err)
+	}
+}

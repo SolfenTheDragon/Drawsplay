@@ -32,7 +32,7 @@ type clientIdentity struct {
 // bindSessionModePrefs applies the tablet's remembered mode for this host.
 func bindSessionModePrefs(sessionID uint64, w, h, fps int) {
 	updateClientSessions(sessionID, func(ident *clientIdentity) {
-		if w > 0 && h > 0 {
+		if plausibleClientMode(w, h) {
 			ident.PrefWidth, ident.PrefHeight = w, h
 		}
 		if fps > 0 {
@@ -122,10 +122,33 @@ func (ident clientIdentity) normalized() clientIdentity {
 	if ident.Type == "" {
 		ident.Type = "unknown"
 	}
-	ident.NativeWidth = max(ident.NativeWidth, 0)
-	ident.NativeHeight = max(ident.NativeHeight, 0)
+	if !plausibleClientMode(ident.NativeWidth, ident.NativeHeight) {
+		ident.NativeWidth, ident.NativeHeight = 0, 0
+	}
+	if !plausibleClientMode(ident.PrefWidth, ident.PrefHeight) {
+		ident.PrefWidth, ident.PrefHeight = 0, 0
+	}
 	ident.RefreshRates = normalizeRefreshRates(ident.RefreshRates)
 	return ident
+}
+
+// Bounds for a display size a client reports (its panel or a remembered
+// mode). Either orientation is allowed, so each side may reach the long
+// edge; the area is capped at 8K. The Windows virtual display driver clamps
+// on its own, but the Linux backends would create whatever was asked for,
+// and the USB accessory link does not authenticate the tablet.
+const (
+	minClientDisplaySide = 320
+	maxClientDisplaySide = 7680
+	maxClientDisplayArea = 7680 * 4320
+)
+
+// plausibleClientMode reports whether w x h is a display size a real tablet
+// could have. Callers treat anything else as "not reported".
+func plausibleClientMode(w, h int) bool {
+	return w >= minClientDisplaySide && h >= minClientDisplaySide &&
+		w <= maxClientDisplaySide && h <= maxClientDisplaySide &&
+		w*h <= maxClientDisplayArea
 }
 
 // Bounds for refresh rates accepted from a client.

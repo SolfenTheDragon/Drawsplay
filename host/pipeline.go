@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -70,6 +71,41 @@ type pipelineSpec struct {
 // "800000") into kilobits per second for tools that take integer kbps
 // (GStreamer encoders). Falls back to 8000 kbps on unparseable input.
 func parseBitrateKbps(bitrate string) int {
+	if kbps, ok := strictBitrateKbps(strings.TrimSpace(bitrate)); ok {
+		return kbps
+	}
+	return lenientBitrateKbps(bitrate)
+}
+
+// bitrateRE is the ffmpeg bitrate syntax the settings accept: a plain
+// number of bits per second, or a number with a k, K or M suffix. Lowercase
+// m is refused: ffmpeg reads it as milli, not mega.
+var bitrateRE = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)([kKM]?)$`)
+
+// strictBitrateKbps parses bitrate as ffmpeg would, reporting false for
+// anything it does not understand instead of falling back to a default.
+func strictBitrateKbps(bitrate string) (int, bool) {
+	m := bitrateRE.FindStringSubmatch(bitrate)
+	if m == nil {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(m[1], 64)
+	if err != nil || v <= 0 || v > 1e12 {
+		return 0, false
+	}
+	switch m[2] {
+	case "M":
+		v *= 1000
+	case "":
+		v /= 1000
+	}
+	return int(v), true
+}
+
+// lenientBitrateKbps is the historical parser, kept for values the strict
+// syntax refuses (configs written before validation tightened): unparseable
+// input falls back to 8000 kbps.
+func lenientBitrateKbps(bitrate string) int {
 	s := strings.TrimSpace(strings.ToUpper(bitrate))
 	mult := 1 // value already in kbps after suffix handling below
 	switch {

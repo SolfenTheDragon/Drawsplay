@@ -55,3 +55,18 @@ func TestIsFingerRelease(t *testing.T) {
 		}
 	}
 }
+
+func TestStrictBitrateKbps(t *testing.T) {
+	good := map[string]int{"24M": 24000, "2.5M": 2500, "8000k": 8000, "8000K": 8000, "800000": 800}
+	for in, want := range good {
+		if got, ok := strictBitrateKbps(in); !ok || got != want {
+			t.Errorf("strictBitrateKbps(%q) = %d, %v; want %d", in, got, ok, want)
+		}
+	}
+	// "8m" is milli to ffmpeg; the rest are not ffmpeg bitrates.
+	for _, in := range []string{"", "garbage", "8m", "-5M", "1e3M", " 24M", "24 M", "0", "24MB", "1.5.2M"} {
+		if got, ok := strictBitrateKbps(in); ok {
+			t.Errorf("strictBitrateKbps(%q) = %d, accepted", in, got)
+		}
+	}
+}
