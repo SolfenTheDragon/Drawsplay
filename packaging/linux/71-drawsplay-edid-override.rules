@@ -1,0 +1,12 @@
+# DrawSplay: lets members of the plugdev group set the kernel's EDID override list
+# (drm.edid_firmware) without root. On KDE Plasma, DrawSplay shows the tablet on a spare,
+# unplugged HDMI port as a monitor with the tablet's EDID (installed once, as root, in
+# /lib/firmware/edid/drawsplay-*.bin), so Display Configuration offers the tablet's
+# resolutions. The host adds its own entry only while the tablet uses the port and removes
+# it afterwards; it never changes the entries it did not add.
+#
+# The parameter is global: a plugdev member could point any connector at any EDID file in
+# the firmware directory, which can at worst give a monitor the wrong modes until the entry
+# is removed or the computer restarts. Remove this file to keep the parameter root-only;
+# DrawSplay then asks for a password each time it sets the entry.
+ACTION=="add|change", SUBSYSTEM=="drm", KERNEL=="card[0-9]*", ENV{DEVTYPE}=="drm_minor", RUN+="/bin/sh -c 'chgrp plugdev /sys/module/drm/parameters/edid_firmware && chmod 0664 /sys/module/drm/parameters/edid_firmware'"

@@ -29,7 +29,7 @@ func TestEmbeddedDisplayHelperMatchesPackaged(t *testing.T) {
 }
 
 func TestDisplayHelperCarriesPackagedUdevRules(t *testing.T) {
-	for _, name := range []string{"99-drawsplay-uinput.rules", "70-drawsplay-aoa.rules"} {
+	for _, name := range []string{"99-drawsplay-uinput.rules", "70-drawsplay-aoa.rules", "71-drawsplay-edid-override.rules"} {
 		heredoc := "  cat <<'RULE'\n" + readPackaged(t, name) + "RULE\n"
 		if !strings.Contains(embeddedDisplayHelper, heredoc) {
 			t.Errorf("drawsplay-display-helper does not carry %s verbatim", name)

@@ -189,6 +189,7 @@ jobs:
           cp drawsplay-tray.png ../release/drawsplay-tray.png
           cp ../packaging/linux/70-drawsplay-aoa.rules ../release/70-drawsplay-aoa.rules
           cp ../packaging/linux/70-drawsplay-drm-connector.rules ../release/70-drawsplay-drm-connector.rules
+          cp ../packaging/linux/71-drawsplay-edid-override.rules ../release/71-drawsplay-edid-override.rules
           cp ../packaging/linux/72-drawsplay-vkms-hold.rules ../release/72-drawsplay-vkms-hold.rules
           cp ../packaging/linux/99-drawsplay-uinput.rules ../release/99-drawsplay-uinput.rules
           cp ../packaging/linux/drawsplay-display-helper ../release/drawsplay-display-helper
@@ -207,6 +208,7 @@ jobs:
             release/drawsplay-tray.png
             release/70-drawsplay-aoa.rules
             release/70-drawsplay-drm-connector.rules
+            release/71-drawsplay-edid-override.rules
             release/72-drawsplay-vkms-hold.rules
             release/99-drawsplay-uinput.rules
             release/drawsplay-display-helper
@@ -346,7 +348,7 @@ jobs:
           mkdir "$lin"
           cp drawsplay-host-linux-amd64 install-drawsplay-host-linux.sh \
             uninstall-drawsplay-host-linux.sh drawsplay-tray.png \
-            70-drawsplay-aoa.rules 70-drawsplay-drm-connector.rules 72-drawsplay-vkms-hold.rules 99-drawsplay-uinput.rules \
+            70-drawsplay-aoa.rules 70-drawsplay-drm-connector.rules 71-drawsplay-edid-override.rules 72-drawsplay-vkms-hold.rules 99-drawsplay-uinput.rules \
             drawsplay-display-helper com.drawsplay.display-helper.policy DrawSplay.APK "$lin/"
           cp ../LICENSE ../THIRD-PARTY-NOTICES.md "$lin/"
           mkdir -p "$lin/drivers/windows/idd"

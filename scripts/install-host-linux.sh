@@ -386,27 +386,32 @@ echo
   echo
 }
 
-# --- Spare HDMI connector access (X11 virtual display fallback) --------------
+# --- Spare HDMI connector access (X11 and KDE virtual displays) ---------------
 # Lets the plugdev group force an unplugged HDMI port on, so the X11 fallback
 # virtual display works without root or a password prompt on every boot. This
 # is what keeps the tablet extending the desktop on kernels where vkms is
 # unsafe, so it is installed on every session type (see the display helper).
+# KDE Plasma's optional spare-HDMI-port display (off by default) also needs
+# 71-drawsplay-edid-override.rules and the tablet's EDID; the display helper
+# installs both the first time the user turns that option on, so the installer
+# leaves drm.edid_firmware root-only on every other computer.
 {
-  DRM_RULE_SOURCE="$SCRIPT_DIR/70-drawsplay-drm-connector.rules"
+  DRM_RULE_NAME=70-drawsplay-drm-connector.rules
+  DRM_RULE_SOURCE="$SCRIPT_DIR/$DRM_RULE_NAME"
   if [[ ! -f "$DRM_RULE_SOURCE" ]]; then
-    DRM_RULE_SOURCE="$ROOT_DIR/packaging/linux/70-drawsplay-drm-connector.rules"
+    DRM_RULE_SOURCE="$ROOT_DIR/packaging/linux/$DRM_RULE_NAME"
   fi
-  DRM_RULE_TARGET="/etc/udev/rules.d/70-drawsplay-drm-connector.rules"
-  DRM_MANUAL="  sudo cp 70-drawsplay-drm-connector.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=drm --action=change"
+  DRM_RULE_TARGET="/etc/udev/rules.d/$DRM_RULE_NAME"
+  DRM_MANUAL="  sudo cp $DRM_RULE_NAME /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=drm --action=change"
   if [[ ! -f "$DRM_RULE_SOURCE" ]]; then
-    echo "udev rule 70-drawsplay-drm-connector.rules not found; the X11 spare-connector display will ask for a password each boot without it."
+    echo "udev rule $DRM_RULE_NAME not found; the spare-connector display will ask for a password each boot without it."
   elif cmp -s "$DRM_RULE_SOURCE" "$DRM_RULE_TARGET" 2>/dev/null; then
     echo "Display connector udev rule already installed: $DRM_RULE_TARGET"
   elif [[ "$SKIP_INSTALL" -eq 1 ]]; then
     echo "Run manually:"
     echo "$DRM_MANUAL"
   else
-    echo "Installing display connector udev rule (asks for your password)..."
+    echo "Installing display connector udev rule $DRM_RULE_NAME (asks for your password)..."
     if sudo install -m 0644 "$DRM_RULE_SOURCE" "$DRM_RULE_TARGET" &&
       sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=drm --action=change; then
       echo "Installed $DRM_RULE_TARGET."

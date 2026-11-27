@@ -75,20 +75,23 @@ if command -v update-desktop-database >/dev/null 2>&1 && [[ -d "$APPLICATIONS_DI
 fi
 
 # --- System files the installer or the host may have created ----------------
-# udev rules (USB accessory, /dev/uinput, spare HDMI connector), the vkms boot
-# configuration written by older installs, and a spare HDMI port the host
-# forced on. Everything that needs root runs in one privileged step, so there
+# udev rules (USB accessory, /dev/uinput, spare HDMI connector, EDID override),
+# the tablet EDIDs the display helper wrote for KDE, the vkms boot
+# configuration written by older installs, a spare HDMI port the host forced
+# on, and the host's entries in drm.edid_firmware. Everything that needs root runs in one privileged step, so there
 # is at most one password prompt.
 SYSTEM_FILES=()
 for f in \
   /etc/udev/rules.d/70-drawsplay-aoa.rules \
   /etc/udev/rules.d/70-drawsplay-drm-connector.rules \
+  /etc/udev/rules.d/71-drawsplay-edid-override.rules \
   /etc/udev/rules.d/72-drawsplay-vkms-hold.rules \
   /etc/udev/rules.d/99-drawsplay-uinput.rules \
   /etc/modules-load.d/drawsplay-vkms.conf \
   /etc/modprobe.d/drawsplay-vkms.conf \
   /usr/libexec/drawsplay/drawsplay-display-helper \
-  /usr/share/polkit-1/actions/com.drawsplay.display-helper.policy; do
+  /usr/share/polkit-1/actions/com.drawsplay.display-helper.policy \
+  /lib/firmware/edid/drawsplay-*.bin; do
   [[ -e "$f" ]] || continue
   # DrawSplay Desktop's dd-host uses the same uinput rule; keep it while dd-host is installed.
   if [[ "$f" == */99-drawsplay-uinput.rules ]] && { command -v dd-host >/dev/null 2>&1 || [[ -x "$HOME/.local/bin/dd-host" ]]; }; then
@@ -98,14 +101,37 @@ for f in \
   SYSTEM_FILES+=("$f")
 done
 
-# A forced port is connected with no monitor identity (no EDID) behind it. It
-# goes back to autodetect; with the DrawSplay udev rule installed that needs
-# no root, otherwise it joins the privileged step.
+# The host's entries in drm.edid_firmware (KDE) go before the ports they point
+# at, so a released port reads its real EDID again; entries the host did not
+# add stay. With the DrawSplay udev rule installed that needs no root,
+# otherwise the privileged step does it, and releases those ports after it.
+EDID_PARAM=/sys/module/drm/parameters/edid_firmware
+edid_param_has_ours() { grep -q edid/drawsplay- "$EDID_PARAM" 2>/dev/null; }
+if edid_param_has_ours; then
+  keep=()
+  IFS=, read -ra ents <<<"$(tr -d '\000\n' <"$EDID_PARAM")"
+  for e in "${ents[@]}"; do [[ -z "$e" || "$e" == *:edid/drawsplay-* ]] || keep+=("$e"); done
+  if [[ ${#keep[@]} -gt 0 ]]; then
+    (IFS=,; printf '%s' "${keep[*]}") 2>/dev/null >"$EDID_PARAM"
+  else
+    printf '\0' 2>/dev/null >"$EDID_PARAM"
+  fi && echo "Removed DrawSplay's entries from drm.edid_firmware."
+fi
+
+# A forced port is connected with no monitor identity (no EDID) behind it, or
+# with the tablet EDID the host gives it on KDE (manufacturer DSP, product
+# 0x7464). It goes back to autodetect; with the DrawSplay udev rule installed
+# that needs no root, otherwise it joins the privileged step.
 FORCED_PORTS=()
 for dir in /sys/class/drm/card*-HDMI-A-*; do
   [[ -e "$dir/status" ]] || continue
-  if [[ "$(cat "$dir/status" 2>/dev/null)" == "connected" && ! -s "$dir/edid" ]]; then
-    if echo detect >"$dir/status" 2>/dev/null; then
+  own_edid=0
+  [[ "$(od -An -tx1 -j8 -N4 "$dir/edid" 2>/dev/null | tr -d ' \n')" == 12706474 ]] && own_edid=1
+  if [[ "$(cat "$dir/status" 2>/dev/null)" == "connected" ]] && { [[ ! -s "$dir/edid" ]] || [[ "$own_edid" -eq 1 ]]; }; then
+    if [[ "$own_edid" -eq 1 ]] && edid_param_has_ours; then
+      # Its override is still there: released after it, as root.
+      FORCED_PORTS+=("$dir/status")
+    elif echo detect >"$dir/status" 2>/dev/null; then
       echo "Released the forced display port: $dir/status"
     else
       FORCED_PORTS+=("$dir/status")
@@ -119,9 +145,11 @@ set +e
 files=(); ports=(); seen=0
 for a in "$@"; do
   if [[ "$a" == "--" ]]; then seen=1; continue; fi
-  if [[ "$seen" -eq 0 ]]; then
+  if [[ "$seen" -eq 0 && "$a" =~ ^/lib/firmware/edid/drawsplay-[0-9]{3,4}x[0-9]{3,4}\.bin$ ]]; then
+    files+=("$a")
+  elif [[ "$seen" -eq 0 ]]; then
     case "$a" in
-      /etc/udev/rules.d/70-drawsplay-aoa.rules|/etc/udev/rules.d/70-drawsplay-drm-connector.rules|/etc/udev/rules.d/72-drawsplay-vkms-hold.rules|/etc/udev/rules.d/99-drawsplay-uinput.rules|/etc/modules-load.d/drawsplay-vkms.conf|/etc/modprobe.d/drawsplay-vkms.conf|/usr/libexec/drawsplay/drawsplay-display-helper|/usr/share/polkit-1/actions/com.drawsplay.display-helper.policy) files+=("$a") ;;
+      /etc/udev/rules.d/70-drawsplay-aoa.rules|/etc/udev/rules.d/70-drawsplay-drm-connector.rules|/etc/udev/rules.d/71-drawsplay-edid-override.rules|/etc/udev/rules.d/72-drawsplay-vkms-hold.rules|/etc/udev/rules.d/99-drawsplay-uinput.rules|/etc/modules-load.d/drawsplay-vkms.conf|/etc/modprobe.d/drawsplay-vkms.conf|/usr/libexec/drawsplay/drawsplay-display-helper|/usr/share/polkit-1/actions/com.drawsplay.display-helper.policy) files+=("$a") ;;
       *) echo "refusing unexpected path: $a" >&2; exit 2 ;;
     esac
   else
@@ -129,6 +157,15 @@ for a in "$@"; do
     ports+=("$a")
   fi
 done
+# The host'"'"'s drm.edid_firmware entries go first, so a released port reads
+# its real EDID again; entries the host did not add stay.
+param=/sys/module/drm/parameters/edid_firmware
+if [[ -e "$param" ]] && grep -q edid/drawsplay- "$param" 2>/dev/null; then
+  keep=()
+  IFS=, read -ra ents <<<"$(tr -d "\000\n" <"$param")"
+  for e in "${ents[@]}"; do [[ -z "$e" || "$e" == *:edid/drawsplay-* ]] || keep+=("$e"); done
+  if [[ ${#keep[@]} -gt 0 ]]; then (IFS=,; printf "%s" "${keep[*]}") >"$param"; else printf "\0" >"$param"; fi
+fi
 for p in "${ports[@]}"; do echo detect >"$p"; done
 if [[ ${#files[@]} -gt 0 ]]; then
   # A vkms that DrawSplay loaded but never released to X is unused; unload it
@@ -167,10 +204,16 @@ run_as_root() {
   fi
 }
 
-if [[ ${#SYSTEM_FILES[@]} -gt 0 || ${#FORCED_PORTS[@]} -gt 0 ]]; then
+# The host's drm.edid_firmware entries (KDE) still there: removed by the
+# privileged step.
+EDID_PARAM_LEFT=0
+edid_param_has_ours && EDID_PARAM_LEFT=1
+
+if [[ ${#SYSTEM_FILES[@]} -gt 0 || ${#FORCED_PORTS[@]} -gt 0 || "$EDID_PARAM_LEFT" -eq 1 ]]; then
   echo "Removing system files DrawSplay installed (asks for your password):"
   [[ ${#SYSTEM_FILES[@]} -gt 0 ]] && printf '  %s\n' "${SYSTEM_FILES[@]}"
   [[ ${#FORCED_PORTS[@]} -gt 0 ]] && printf '  release forced port %s\n' "${FORCED_PORTS[@]}"
+  [[ "$EDID_PARAM_LEFT" -eq 1 ]] && echo "  remove DrawSplay's entries from drm.edid_firmware"
   if run_as_root bash -c "$ROOT_CLEANUP" bash "${SYSTEM_FILES[@]}" -- "${FORCED_PORTS[@]}"; then
     echo "System files removed."
   else

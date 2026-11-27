@@ -10,6 +10,8 @@
 #   drawsplay-display-helper vkms-unload
 #   drawsplay-display-helper udev-rule uinput|aoa
 #   drawsplay-display-helper packages ffmpeg|wayland-capture
+#   drawsplay-display-helper edid-install drawsplay-WxH.bin HEX
+#   drawsplay-display-helper edid-firmware HDMI-A-N drawsplay-WxH.bin|-
 #
 # The Web UI's setup checklist runs the last three when the user clicks a fix
 # button. The host carries a copy of this file (host/linuxhelper) and runs that
@@ -29,6 +31,15 @@
 # when it is missing and opens the HDMI status files to the plugdev group right
 # away, so the password is asked once: every later boot the host writes the
 # connector itself.
+#
+# edid-install writes a tablet EDID the host generated (host/edid.go) to
+# /lib/firmware/edid, after checking that it is one (header, DrawSplay's
+# manufacturer and product code, one or two blocks), and installs
+# 71-drawsplay-edid-override.rules so the host sets drm.edid_firmware itself
+# from then on. edid-firmware sets or removes the host's entry in
+# drm.edid_firmware for one HDMI port, for when that rule is not in effect
+# (the user is not in the plugdev group); it keeps every entry the host did not
+# add.
 set -euo pipefail
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
@@ -55,6 +66,42 @@ open_connectors_to_plugdev() {
     } >"$DRM_RULE_TARGET".tmp && mv "$DRM_RULE_TARGET".tmp "$DRM_RULE_TARGET" || { rm -f "$DRM_RULE_TARGET".tmp; return 0; }
     chmod 0644 "$DRM_RULE_TARGET" || true
     command -v udevadm >/dev/null 2>&1 && udevadm control --reload-rules 2>/dev/null || true
+  fi
+}
+
+EDID_RULE_TARGET=/etc/udev/rules.d/71-drawsplay-edid-override.rules
+EDID_PARAM=/sys/module/drm/parameters/edid_firmware
+EDID_DIR=/lib/firmware/edid
+EDID_NAME_RE='^drawsplay-[0-9]{3,4}x[0-9]{3,4}\.bin$'
+
+# open_edid_override_to_plugdev installs 71-drawsplay-edid-override.rules and
+# applies it now, so the host sets its drm.edid_firmware entry without root.
+open_edid_override_to_plugdev() {
+  edid_override_rule | install_rule "$EDID_RULE_TARGET"
+  getent group plugdev >/dev/null 2>&1 || return 0
+  [[ -e "$EDID_PARAM" ]] || return 0
+  chgrp plugdev "$EDID_PARAM" 2>/dev/null && chmod 0664 "$EDID_PARAM" 2>/dev/null || true
+}
+
+# set_edid_override CONNECTOR NAME|-: puts CONNECTOR:edid/NAME first in
+# drm.edid_firmware (or, with -, leaves it out), dropping every other DrawSplay
+# entry and keeping all others.
+set_edid_override() {
+  [[ -e "$EDID_PARAM" ]] || { echo "this kernel has no drm.edid_firmware parameter" >&2; exit 8; }
+  local cur e out=()
+  cur=$(tr -d '\000\n' <"$EDID_PARAM")
+  [[ "$2" != - ]] && out+=("$1:edid/$2")
+  local IFS=, e_list
+  read -ra e_list <<<"$cur"
+  for e in "${e_list[@]}"; do
+    [[ -z "$e" || "$e" == *:edid/drawsplay-* ]] && continue
+    out+=("$e")
+  done
+  if ((${#out[@]})); then
+    printf '%s' "${out[*]}" >"$EDID_PARAM"
+  else
+    # A lone NUL empties the parameter; a newline would count as a file name.
+    printf '\0' >"$EDID_PARAM"
   fi
 }
 
@@ -213,6 +260,23 @@ SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}!="*:03????:
 RULE
 }
 
+edid_override_rule() {
+  cat <<'RULE'
+# DrawSplay: lets members of the plugdev group set the kernel's EDID override list
+# (drm.edid_firmware) without root. On KDE Plasma, DrawSplay shows the tablet on a spare,
+# unplugged HDMI port as a monitor with the tablet's EDID (installed once, as root, in
+# /lib/firmware/edid/drawsplay-*.bin), so Display Configuration offers the tablet's
+# resolutions. The host adds its own entry only while the tablet uses the port and removes
+# it afterwards; it never changes the entries it did not add.
+#
+# The parameter is global: a plugdev member could point any connector at any EDID file in
+# the firmware directory, which can at worst give a monitor the wrong modes until the entry
+# is removed or the computer restarts. Remove this file to keep the parameter root-only;
+# DrawSplay then asks for a password each time it sets the entry.
+ACTION=="add|change", SUBSYSTEM=="drm", KERNEL=="card[0-9]*", ENV{DEVTYPE}=="drm_minor", RUN+="/bin/sh -c 'chgrp plugdev /sys/module/drm/parameters/edid_firmware && chmod 0664 /sys/module/drm/parameters/edid_firmware'"
+RULE
+}
+
 # install_rule TARGET: writes stdin to TARGET atomically, world-readable.
 install_rule() {
   install -d -m 0755 /etc/udev/rules.d
@@ -335,8 +399,30 @@ case "${1:-}" in
       exit 3
     fi
     ;;
+  edid-install)
+    [[ $# -eq 3 ]] || { echo "usage: $0 edid-install drawsplay-WxH.bin HEX" >&2; exit 2; }
+    [[ "$2" =~ $EDID_NAME_RE ]] || { echo "refusing file name: $2" >&2; exit 2; }
+    [[ "$3" =~ ^([0-9a-f]{256}|[0-9a-f]{512})$ ]] || { echo "refusing EDID: not one or two 128-byte blocks in hex" >&2; exit 2; }
+    # Header, then manufacturer "DSP" (0x1270) and product code 0x7464 (little-endian).
+    [[ "${3:0:24}" == 00ffffffffffff0012706474 ]] || { echo "refusing EDID: not one DrawSplay generated" >&2; exit 2; }
+    install -d -m 0755 "$EDID_DIR" 2>/dev/null && [[ -w "$EDID_DIR" ]] ||
+      { echo "cannot write to $EDID_DIR (is the system read-only?)" >&2; exit 7; }
+    tmp=$(mktemp "$EDID_DIR/.drawsplay.XXXXXX")
+    printf '%b' "$(sed 's/../\\x&/g' <<<"$3")" >"$tmp"
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$EDID_DIR/$2"
+    open_edid_override_to_plugdev
+    open_connectors_to_plugdev
+    ;;
+  edid-firmware)
+    [[ $# -eq 3 ]] || { echo "usage: $0 edid-firmware HDMI-A-N drawsplay-WxH.bin|-" >&2; exit 2; }
+    [[ "$2" =~ ^HDMI-A-[0-9]+$ ]] || { echo "refusing connector: $2" >&2; exit 2; }
+    [[ "$3" == - || "$3" =~ $EDID_NAME_RE ]] || { echo "refusing file name: $3" >&2; exit 2; }
+    [[ "$3" == - || -f "$EDID_DIR/$3" ]] || { echo "no such EDID: $EDID_DIR/$3" >&2; exit 5; }
+    set_edid_override "$2" "$3"
+    ;;
   *)
-    echo "usage: $0 connector PATH on|detect | vkms-load | vkms-release | vkms-unload | udev-rule uinput|aoa | packages ffmpeg|wayland-capture" >&2
+    echo "usage: $0 connector PATH on|detect | vkms-load | vkms-release | vkms-unload | udev-rule uinput|aoa | packages ffmpeg|wayland-capture | edid-install NAME HEX | edid-firmware HDMI-A-N NAME|-" >&2
     exit 2
     ;;
 esac

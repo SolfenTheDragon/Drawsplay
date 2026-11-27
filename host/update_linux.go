@@ -53,6 +53,8 @@ var linuxSystemFiles = []struct {
 	{"99-drawsplay-uinput.rules", "/etc/udev/rules.d/99-drawsplay-uinput.rules", true},
 	{"70-drawsplay-aoa.rules", "/etc/udev/rules.d/70-drawsplay-aoa.rules", true},
 	{"70-drawsplay-drm-connector.rules", "/etc/udev/rules.d/70-drawsplay-drm-connector.rules", false},
+	// The display helper installs it with the first tablet EDID (KDE).
+	{"71-drawsplay-edid-override.rules", "/etc/udev/rules.d/71-drawsplay-edid-override.rules", false},
 	// The display helper installs it before it ever loads vkms.
 	{"72-drawsplay-vkms-hold.rules", "/etc/udev/rules.d/72-drawsplay-vkms-hold.rules", false},
 	{"drawsplay-display-helper", "/usr/libexec/drawsplay/drawsplay-display-helper", false},
