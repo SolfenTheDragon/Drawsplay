@@ -38,6 +38,9 @@ func platformDependencyWarnings() map[string]string {
 			if err := exec.Command("gst-inspect-1.0", "x264enc").Run(); err != nil {
 				warnings["gst-x264enc"] = "GStreamer x264enc is missing (install gstreamer1.0-plugins-ugly); Wayland capture has no software-encoder fallback"
 			}
+			// Measured before a tablet connects, so the first session
+			// does not wait for it.
+			startVAUploadProbe()
 		}
 	}
 	if currentLinuxSessionBackend() == "x11" {

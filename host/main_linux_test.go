@@ -10,6 +10,9 @@ import "errors"
 // the spare-connector path point sysfsDRMDir at a temporary tree themselves.
 func init() {
 	sysfsDRMDir = "/nonexistent/drawsplay-test-drm"
+	// Pipelines keep their usual shape unless a test says otherwise.
+	vaUploadProbeFn = func() bool { return false }
+	vaUploadCopyNeeded = func() bool { return false }
 	vkmsLoadPrivileged = func(bool) error { return errors.New("loading vkms is disabled in tests") }
 	vkmsUnloadFn = func() error { return errors.New("unloading vkms is disabled in tests") }
 	runDisplayHelperFn = func(bool, ...string) (string, error) {

@@ -398,6 +398,12 @@ func gstPipeWireSpecs(target captureTarget, opts videoOptions) []pipelineSpec {
 	vaNormalized := fmt.Sprintf(
 		"vapostproc ! video/x-raw(memory:VAMemory),format=NV12,width=%d,height=%d ! videorate drop-only=true ! video/x-raw(memory:VAMemory),framerate=%d/1",
 		target.Width, target.Height, pipewireFPS)
+	// Where vapostproc uploads foreign system memory too slowly, frames are
+	// copied into its own pool first (see va_upload_linux.go).
+	vaSysNormalized := vaNormalized
+	if vaUploadCopyNeeded() {
+		vaSysNormalized = vaUploadCopy + " ! " + vaNormalized
+	}
 	tail := "h264parse config-interval=1 ! video/x-h264,stream-format=byte-stream,alignment=au ! fdsink fd=1 sync=false"
 
 	// Rate control is VBR capped at the session bitrate, as on the X11 path
@@ -424,7 +430,7 @@ func gstPipeWireSpecs(target captureTarget, opts videoOptions) []pipelineSpec {
 				kbps, kbps, gop),
 		},
 		{name: "vah264enc-dmabuf", base: "vah264enc", source: dmabufSrc, normalized: vaNormalized, elements: vah264},
-		{name: "vah264enc", source: sysSrc, normalized: vaNormalized, elements: vah264},
+		{name: "vah264enc", source: sysSrc, normalized: vaSysNormalized, elements: vah264},
 		{
 			// Its SPS carries no bitstream_restriction, which leaves Android
 			// decoders free to buffer frames: only reached without vah264enc.
