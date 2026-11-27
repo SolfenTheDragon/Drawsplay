@@ -240,7 +240,7 @@ function applyTheme(theme) {
 
 let hostOSName = "";
 
-function applyPlatformVisibility(hostOS) {
+function applyPlatformVisibility(hostOS, kdeWayland) {
   hostOSName = hostOS || "";
   const showWindowsOnly = hostOS === "windows";
   for (const el of document.querySelectorAll("[data-windows-only]")) {
@@ -248,6 +248,10 @@ function applyPlatformVisibility(hostOS) {
   }
   for (const el of document.querySelectorAll("[data-linux-only]")) {
     el.hidden = hostOS !== "linux" || (el.hasAttribute("data-high-fps-only") && framerateLocked());
+  }
+  // Options for KDE Plasma's extended display (KWin on Wayland) only.
+  for (const el of document.querySelectorAll("[data-kde-only]")) {
+    el.hidden = hostOS !== "linux" || !kdeWayland;
   }
 }
 
@@ -367,8 +371,12 @@ function applyResolutionPolicy(status) {
   // user picks resolution from Settings -> Displays like any other
   // monitor. Only resolution is host-managed here -- FPS is independent
   // of the display's refresh rate on Linux, so the FPS control stays.
-  // Displays the desktop offers no other resolution for (GNOME 49 and
-  // older, KDE Plasma before 6.7) take the configured one instead.
+  // On KDE Plasma with "Show the tablet on a spare HDMI port" on, the tablet
+  // is a monitor called DrawSplay (kwin_connector_linux.go), whose modes
+  // Display Configuration lists. Displays the desktop offers no other
+  // resolution for (GNOME 49 and older, KWin's virtual output, the KDE
+  // default) take the configured one instead: the host reports those as
+  // "host".
   const hostResolution = String(status?.video?.resolutionControl || "") === "host";
   const linuxManaged = hostOS === "linux" && isTabletClient && !hostResolution;
   const managed = windowsManaged || linuxManaged;
@@ -798,7 +806,7 @@ async function refreshStatus() {
         versionEl.removeAttribute("href");
       }
     }
-    applyPlatformVisibility(st.hostOS);
+    applyPlatformVisibility(st.hostOS, st.kdeWayland === true);
     applyFeatureVisibility(st.featureFlags || {});
     const v = st.video || {};
     const activeClient = st.activeClient || {};

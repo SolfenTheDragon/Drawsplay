@@ -61,6 +61,20 @@ type drmHDMIConnector struct {
 	XName  string // RandR output name: HDMI-1
 	Status string // sysfs status: connected / disconnected
 	NoEDID bool   // no monitor identity behind it
+	// OwnEDID: it shows the tablet EDID the KDE path gives a forced port
+	// (kwin_connector_linux.go), so no real monitor is behind it either.
+	OwnEDID bool
+}
+
+// Name is the DRM connector's name (HDMI-A-1), which Wayland compositors
+// use for the output.
+func (c drmHDMIConnector) Name() string {
+	return strings.Replace(c.XName, "HDMI-", "HDMI-A-", 1)
+}
+
+// forced reports whether the connector is on with no monitor behind it.
+func (c drmHDMIConnector) forced() bool {
+	return c.Status == "connected" && (c.NoEDID || c.OwnEDID)
 }
 
 // listHDMIConnectors returns the HDMI connectors of PCI GPUs.
@@ -82,10 +96,11 @@ func listHDMIConnectors() []drmHDMIConnector {
 		}
 		edid, _ := os.ReadFile(filepath.Join(dir, "edid"))
 		out = append(out, drmHDMIConnector{
-			Dir:    dir,
-			XName:  strings.Replace(m[1], "HDMI-A-", "HDMI-", 1),
-			Status: strings.TrimSpace(string(st)),
-			NoEDID: len(edid) == 0,
+			Dir:     dir,
+			XName:   strings.Replace(m[1], "HDMI-A-", "HDMI-", 1),
+			Status:  strings.TrimSpace(string(st)),
+			NoEDID:  len(edid) == 0,
+			OwnEDID: isDrawsplayEDID(edid),
 		})
 	}
 	return out
@@ -100,7 +115,7 @@ func isForcedX11Output(name string) bool {
 	}
 	for _, c := range listHDMIConnectors() {
 		if c.XName == name {
-			return c.Status == "connected" && c.NoEDID
+			return c.forced()
 		}
 	}
 	return false
@@ -196,7 +211,8 @@ func writeConnectorStatusPrivileged(path, value string, mayPrompt bool) error {
 }
 
 // releaseForcedConnectors returns every spare connector that is forced on
-// (connected without an EDID, which a real monitor always has) to the
+// (connected without an EDID, which a real monitor always has, or with the
+// tablet EDID the KDE path gives it) to the
 // kernel's own detection, so no phantom HDMI monitor outlives the host. It
 // never prompts: with no root access it reports the failure and leaves the
 // connector for the uninstaller or the next host start to clear. It reports
@@ -204,7 +220,7 @@ func writeConnectorStatusPrivileged(path, value string, mayPrompt bool) error {
 func releaseForcedConnectors() int {
 	released := 0
 	for _, c := range listHDMIConnectors() {
-		if c.Status != "connected" || !c.NoEDID {
+		if !c.forced() {
 			continue
 		}
 		// Forced by dd-host (DrawSplay Desktop), which is still using it.

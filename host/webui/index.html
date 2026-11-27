@@ -150,7 +150,7 @@
         <div id="recommended-resolution-reason" class="hint"></div>
       </div>
       <div id="resolution-policy-hint" class="hint" hidden>Resolution and refresh rate are set in Windows Display Settings.</div>
-      <div id="resolution-policy-hint-linux" class="hint" hidden>Set resolution in your desktop's Displays settings: MetaVendor on GNOME, Virtual-1-1 on X11.</div>
+      <div id="resolution-policy-hint-linux" class="hint" hidden>Set resolution in your desktop's Displays settings: MetaVendor on GNOME, DrawSplay on KDE Plasma, Virtual-1-1 on X11.</div>
       <label for="video-scaling">Tablet scaling</label>
       <select id="video-scaling" data-setting="videoScaling">
         <option value="fill" selected>Fill (stretch)</option>
@@ -300,6 +300,14 @@
               <span class="slider"></span>
             </label>
           </div>
+          <div class="toggle-row" data-kde-only hidden>
+            <label for="kde-spare-hdmi-port">Show the tablet on a spare HDMI port (pick its resolution in Display Configuration)</label>
+            <label class="switch">
+              <input id="kde-spare-hdmi-port" data-setting="kdeSpareHdmiPort" type="checkbox">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="hint" data-kde-only hidden>Backup for KDE Plasma when the virtual display does not work well. DrawSplay turns an unplugged HDMI port on as a monitor called DrawSplay; it asks for your password once per tablet size, and uses the virtual display when there is no free HDMI port or you are not in the plugdev group (needed to switch the port off again without a password). Leave the port unplugged while this is on.</div>
           <div class="toggle-row">
             <label for="auto-launch-android-app">Open the tablet app when USB connects</label>
             <label class="switch">

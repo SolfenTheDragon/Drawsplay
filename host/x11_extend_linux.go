@@ -968,9 +968,11 @@ func releaseVirtualDisplaysOnExit() {
 	verifyX11ReleasedLocked()
 	switchOffX11OutputsLocked()
 	x11Ext.mu.Unlock()
-	releaseForcedConnectors()
 	releaseMutterOnExit()
+	// Before the forced connectors: KDE's spare HDMI port is one, and its
+	// stream and EDID override go first (kwinConnectorOutput.Remove).
 	releaseWlExtOnExit()
+	releaseForcedConnectors()
 }
 
 // x11ExtendedDisplay is one session's use of the virtual output.

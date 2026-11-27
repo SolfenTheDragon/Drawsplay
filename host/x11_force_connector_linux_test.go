@@ -29,7 +29,9 @@ func fakeSysfsDRM(t *testing.T, status string, edid []byte) (statusFile string) 
 	// A vkms connector must be ignored.
 	faux := filepath.Join(root, "devices", "faux", "vkms")
 	os.MkdirAll(faux, 0o755)
-	vc := filepath.Join(root, "class", "drm", "card1-HDMI-A-1")
+	// (Named apart from the PCI port: a shared name rules that port out on
+	// KDE, see connectorNameUnique.)
+	vc := filepath.Join(root, "class", "drm", "card1-HDMI-A-9")
 	os.MkdirAll(vc, 0o755)
 	os.Symlink(faux, filepath.Join(vc, "device"))
 	os.WriteFile(filepath.Join(vc, "status"), []byte("disconnected\n"), 0o644)

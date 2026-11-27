@@ -136,6 +136,7 @@ The settings page's **Troubleshooting** section shows setup checks and can save 
 #### Linux: mirror instead of an extra display
 
 - **Wayland:** use GNOME, KDE Plasma 6, sway or Hyprland.
+- **KDE Plasma:** the tablet is a virtual display whose resolution you set in DrawSplay's settings. As a backup, turn on **Show the tablet on a spare HDMI port** in the settings: with an unused HDMI port, the tablet then shows up in Display Configuration as a monitor called **DrawSplay**, and you pick its resolution there. DrawSplay asks for your password once per tablet size to install the tablet's display description, and uses the virtual display when no HDMI port is free. The option needs you in the `plugdev` group (`sudo groupadd -f plugdev && sudo usermod -aG plugdev $USER`, then log in again), so DrawSplay can switch the port off again without a password; otherwise it keeps using the virtual display.
 - **X11:** DrawSplay tries the `vkms` virtual display module, then an unused HDMI port, then mirroring. It may ask for your password when the tablet connects. `vkms` loading is blocked automatically after crashes or known kernel problems. `DRAWSPLAY_X11_VKMS_AUTOLOAD=0` turns it off.
 
 > [!CAUTION]

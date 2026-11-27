@@ -47,6 +47,9 @@ type hostStatus struct {
 	AutostartError          string `json:"autostartError,omitempty"`
 	AutostartImplementation string `json:"autostartImplementation"`
 	HostOS                  string `json:"hostOS"`
+	// KDEWayland: the extended display is KWin's (KDE Plasma on Wayland);
+	// the Web UI then offers the spare-HDMI-port option.
+	KDEWayland bool `json:"kdeWayland"`
 	// MaxFPS is the stream-rate ceiling (maxCaptureFPS); the Web UI hides the
 	// framerate choice while it is 60 or lower.
 	MaxFPS          int               `json:"maxFps"`
@@ -67,6 +70,7 @@ func currentHostStatus(cfg settings) hostStatus {
 		Autostart:               autostart,
 		AutostartImplementation: autostartImplementation(),
 		HostOS:                  runtime.GOOS,
+		KDEWayland:              kdeWaylandSession(),
 		MaxFPS:                  maxCaptureFPS,
 		Version:                 hostVersion(),
 		FeatureFlags:            map[string]bool{"wifi": wifiFeatureEnabled()},

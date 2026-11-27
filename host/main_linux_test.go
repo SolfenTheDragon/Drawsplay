@@ -4,12 +4,19 @@ package main
 
 import "errors"
 
-// Never touch the real DRM connectors, load vkms, or run sudo/pkexec from
+// Never touch the real DRM connectors or drm.edid_firmware, load vkms, or run sudo/pkexec from
 // tests: an unstubbed run once forced the developer's HDMI port on, and loading
 // vkms has crashed X (vkms_prepare_fb on Linux 7.0 OEM). Tests that exercise
 // the spare-connector path point sysfsDRMDir at a temporary tree themselves.
 func init() {
 	sysfsDRMDir = "/nonexistent/drawsplay-test-drm"
+	edidFirmwareParamPath = "/nonexistent/drawsplay-test-edid_firmware"
+	kwinEDIDFirmwareDir = "/nonexistent/drawsplay-test-firmware"
+	kwinRootWithoutPrompt = func() bool { return false }
+	kwinInPlugdev = func() bool { return false }
+	edidParamDirectWrite = func(string, []byte) error {
+		return errors.New("writing drm.edid_firmware is disabled in tests")
+	}
 	// Pipelines keep their usual shape unless a test says otherwise.
 	vaUploadProbeFn = func() bool { return false }
 	vaUploadCopyNeeded = func() bool { return false }

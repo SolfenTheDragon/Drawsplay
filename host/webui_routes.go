@@ -195,7 +195,9 @@ func videoSettingsChanged(old, next settings) bool {
 		old.TemporalLayering != next.TemporalLayering ||
 		old.IdleCaptureGate != next.IdleCaptureGate ||
 		old.X11HighRateCapture != next.X11HighRateCapture ||
-		old.NativeMediaHelper != next.NativeMediaHelper
+		old.NativeMediaHelper != next.NativeMediaHelper ||
+		// The display is made again, on the port or as a virtual output.
+		old.KDESpareHDMIPort != next.KDESpareHDMIPort
 }
 
 func (api webUIAPI) handleStatus(w http.ResponseWriter, _ *http.Request) {

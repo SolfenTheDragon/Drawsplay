@@ -2,12 +2,15 @@
 
 package main
 
-// KDE Plasma extended display (see wl_extend_linux.go): a KWin virtual
-// output made through KWin's zkde_screencast_unstable_v1 protocol, which
-// streams it over PipeWire. KWin lays the output out and remembers where
-// the user puts it, how it is turned and scaled, under its connector name;
-// its one mode is the size it was made with, so the host's configured
-// resolution sets it. The output lasts as long as the host's stream.
+// KDE Plasma extended display (see wl_extend_linux.go). The host prefers a
+// spare HDMI port shown as a monitor with the tablet's EDID
+// (kwin_connector_linux.go), whose resolution the user picks in Display
+// Configuration. Without one it falls back to a KWin virtual output made
+// through KWin's zkde_screencast_unstable_v1 protocol, which streams it over
+// PipeWire. KWin lays the output out and remembers where the user puts it,
+// how it is turned and scaled, under its connector name; its one mode is
+// the size it was made with, so the host's configured resolution sets it.
+// Either output lasts as long as the host's stream.
 //
 // KWin only offers the protocol to programs whose .desktop file asks for
 // it, so the host installs one for itself.
@@ -41,9 +44,20 @@ var (
 	kwinSetTouchOutput  = setKWinTouchOutput
 	kwinEnableOutput    = enableKWinOutput
 	kwinPrepare         = installKWinDesktopFile
+	kwinStartConnector  = startKWinConnectorHandle
 	kwinStreamTimeout   = 5 * time.Second
 	kwinRedialDelay     = 2 * time.Second
 )
+
+// startKWinConnectorHandle is startKWinConnector as a wlExtHandle (never a
+// typed nil).
+func startKWinConnectorHandle(w, h int, installed bool) (wlExtHandle, error) {
+	ho, err := startKWinConnector(w, h, installed)
+	if err != nil {
+		return nil, err
+	}
+	return ho, nil
+}
 
 var errKWinNoScreencast = errors.New("KWin does not offer its screencast protocol to the host")
 
@@ -54,8 +68,51 @@ func (kwinBackend) Arranges() bool                                 { return fals
 func (kwinBackend) Anchored() bool                                 { return false }
 func (kwinBackend) LogicalSize(w, h int, scale float64) (int, int) { return w, h }
 
+// kwinSpareConnectorWanted reports whether the user turned on the spare HDMI
+// port (settings.KDESpareHDMIPort). Test hook.
+var kwinSpareConnectorWanted = func() bool {
+	return globalSettingsStore != nil && globalSettingsStore.get().KDESpareHDMIPort
+}
+
+// kwinPortFailed: with the spare HDMI port asked for, the last attempt at it
+// failed and the virtual output stands in. Guarded by wlExt.mu.
+var kwinPortFailed bool
+
+// Keeps reports whether the held output is the kind the setting asks for, so
+// turning the spare HDMI port on or off replaces it. A virtual output that
+// stands in for a port that could not be used is kept, as any other held
+// output, rather than made again (and the port tried again) every session;
+// the port is tried again when the output goes.
+func (kwinBackend) Keeps(hd wlExtHandle) bool {
+	_, onPort := hd.(*kwinConnectorOutput)
+	if kwinSpareConnectorWanted() {
+		return onPort || kwinPortFailed
+	}
+	return !onPort
+}
+
 func (kwinBackend) Create(modeW, modeH int) (wlExtHandle, error) {
 	installed := kwinPrepare()
+	if kwinSpareConnectorWanted() {
+		// The monitor's EDID describes the tablet's panel; the mode in
+		// use is the one the user picks in Display Configuration.
+		w, h := tabletNativeSize(modeW, modeH)
+		ho, err := kwinStartConnector(w, h, installed)
+		kwinPortFailed = err != nil
+		switch {
+		case err == nil:
+			return ho, nil
+		case errors.Is(err, errNoSpareConnector):
+			log.Printf("KWin extended display: no unplugged HDMI port to show the tablet on; using a virtual output")
+		case errors.Is(err, errKWinConnectorRefusedEarlier):
+		default:
+			log.Printf("KWin extended display: cannot use a spare HDMI port (%v); using a virtual output, whose resolution only DrawSplay's settings can change", err)
+		}
+	} else {
+		// Turning the option off and on again asks for the password, and
+		// tries the port, again.
+		kwinConnectorRefused, kwinPortFailed = nil, false
+	}
 	hd, err := startKWinStream(modeW, modeH)
 	if errors.Is(err, errKWinNoScreencast) && installed {
 		// KWin reads the new .desktop file once its service cache catches
@@ -107,26 +164,60 @@ func (k *kwinOutput) streamEvent(op uint16, m *wlMessage) {
 
 func (k *kwinOutput) end() { k.once.Do(func() { close(k.closed) }) }
 
-// startKWinStream asks KWin for a virtual output of modeW x modeH and its
-// PipeWire stream.
-func startKWinStream(modeW, modeH int) (*kwinOutput, error) {
-	c, err := kwinDial()
+// dialKWinScreencast connects to KWin, follows its outputs and binds its
+// screencast protocol.
+func dialKWinScreencast() (c *wlConn, outs *wlOutputs, sc, version uint32, err error) {
+	c, err = kwinDial()
 	if err != nil {
-		return nil, err
+		return nil, nil, 0, 0, err
 	}
 	outs, reg, err := watchWlOutputs(c)
 	if err != nil {
 		c.Close()
-		return nil, err
+		return nil, nil, 0, 0, err
 	}
 	gs := reg.find(kwinScreencastInterface)
 	if len(gs) == 0 || gs[0].Version < 2 {
 		c.Close()
-		return nil, errKWinNoScreencast
+		return nil, nil, 0, 0, errKWinNoScreencast
 	}
-	sc, v, err := reg.bind(gs[0], 5, nil)
+	sc, version, err = reg.bind(gs[0], 5, nil)
 	if err != nil {
 		c.Close()
+		return nil, nil, 0, 0, err
+	}
+	return c, outs, sc, version, nil
+}
+
+// waitReady waits for the stream's first created or failed event, then ends
+// the stream when the connection does.
+func (k *kwinOutput) waitReady() error {
+	var err error
+	select {
+	case err = <-k.ready:
+	case <-k.c.Done():
+		err = k.c.Err()
+	case <-time.After(kwinStreamTimeout):
+		err = errors.New("KWin did not start the output's stream")
+	}
+	if err != nil {
+		return err
+	}
+	go func() {
+		select {
+		case <-k.c.Done():
+			k.end()
+		case <-k.closed:
+		}
+	}()
+	return nil
+}
+
+// startKWinStream asks KWin for a virtual output of modeW x modeH and its
+// PipeWire stream.
+func startKWinStream(modeW, modeH int) (*kwinOutput, error) {
+	c, outs, sc, v, err := dialKWinScreencast()
+	if err != nil {
 		return nil, err
 	}
 	k := &kwinOutput{c: c, outs: outs, ready: make(chan error, 1), closed: make(chan struct{})}
@@ -145,14 +236,7 @@ func startKWinStream(modeW, modeH int) (*kwinOutput, error) {
 		c.Close()
 		return nil, err
 	}
-	select {
-	case err = <-k.ready:
-	case <-c.Done():
-		err = c.Err()
-	case <-time.After(kwinStreamTimeout):
-		err = errors.New("KWin did not start the virtual output's stream")
-	}
-	if err != nil {
+	if err := k.waitReady(); err != nil {
 		// KWin streams only an enabled output; it keeps the one it made
 		// until the stream closes, so it can be switched on for next time.
 		if _, _, ok := outs.lookup(kwinOutputName); !ok {
@@ -173,13 +257,6 @@ func startKWinStream(modeW, modeH int) (*kwinOutput, error) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	go func() {
-		select {
-		case <-c.Done():
-			k.end()
-		case <-k.closed:
-		}
-	}()
 	return k, nil
 }
 

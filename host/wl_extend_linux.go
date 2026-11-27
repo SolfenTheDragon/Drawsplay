@@ -123,6 +123,21 @@ type wlExtHandle interface {
 
 var errWlExtSize = errors.New("the output does not show the configured resolution")
 
+// compositorSized reports whether the user sets hd's mode in the desktop's
+// display settings and the host follows it (a KDE monitor on a spare HDMI
+// port); the configured resolution then plays no part.
+func compositorSized(hd wlExtHandle) bool {
+	s, ok := hd.(interface{ CompositorSized() bool })
+	return ok && s.CompositorSized()
+}
+
+// wlExtKeeps reports whether backend b still wants the held output hd. A
+// backend that does not say keeps every output it made.
+func wlExtKeeps(b wlExtBackend, hd wlExtHandle) bool {
+	k, ok := b.(interface{ Keeps(wlExtHandle) bool })
+	return !ok || k.Keeps(hd)
+}
+
 // wlExtLook is how the user had the last virtual output turned and scaled.
 type wlExtLook struct {
 	Transform int
@@ -249,6 +264,9 @@ func arrangeWlExtLocked(b wlExtBackend, hd wlExtHandle, w, h int, fresh bool) er
 	if !ok {
 		return fmt.Errorf("%s is gone", hd.Name())
 	}
+	if cur.Active && compositorSized(hd) {
+		return nil
+	}
 	// A new output goes where the last one was, not where the compositor
 	// put it.
 	if uw, uh := cur.upright(); cur.Active && uw == w && uh == h && !(fresh && b.Arranges()) {
@@ -298,7 +316,7 @@ func arrangeWlExtLocked(b wlExtBackend, hd wlExtHandle, w, h int, fresh bool) er
 // displays, creating one when none is held or the held one cannot show
 // w x h.
 func ensureWlExtLocked(b wlExtBackend, w, h int) error {
-	if hd := wlExt.held; hd != nil && (wlExt.backend != b || chanClosed(hd.Closed())) {
+	if hd := wlExt.held; hd != nil && (wlExt.backend != b || chanClosed(hd.Closed()) || !wlExtKeeps(b, hd)) {
 		stopHeldWlExtLocked()
 	}
 	if hd := wlExt.held; hd != nil {
@@ -456,6 +474,12 @@ func newWlExtDisplay(b wlExtBackend, opts videoOptions) (*wlExtDisplay, error) {
 	}
 	d := &wlExtDisplay{backend: b, held: hd}
 	d.init(gen, b.Label()+" extended display", w, h, t)
+	if compositorSized(hd) {
+		// The mode the desktop remembers for this monitor is the user's
+		// choice: keep it as the configured resolution, as the watcher
+		// does for later changes.
+		d.saveUserResolution(obs.Active, obs.W, obs.H, false)
+	}
 	go d.watch(obs)
 	return d, nil
 }

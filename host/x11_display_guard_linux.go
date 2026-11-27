@@ -44,6 +44,10 @@ import (
 const (
 	guardMethodVkms            = "vkms"
 	guardMethodForcedConnector = "forced-connector"
+	// guardMethodKWinConnector is KDE Plasma's spare HDMI port
+	// (kwin_connector_linux.go): a failure there says nothing about the X11
+	// fallback, nor the other way round.
+	guardMethodKWinConnector = "kwin-connector"
 
 	// displayGuardDenialTTL is how long a failed method stays off. A new
 	// kernel or X server may fix it, so it is not permanent.
@@ -252,7 +256,11 @@ func recoverDisplayGuard() {
 	displayGuardMu.Unlock()
 
 	for _, m := range failed {
-		log.Printf("X11 virtual display: %s did not finish setting up last time (the host or display server stopped); not using it again for %d days", m, int(displayGuardDenialTTL/(24*time.Hour)))
+		label := "X11 virtual display"
+		if m == guardMethodKWinConnector {
+			label = "KWin extended display"
+		}
+		log.Printf("%s: %s did not finish setting up last time (the host or display server stopped); not using it again for %d days", label, m, int(displayGuardDenialTTL/(24*time.Hour)))
 		switch m {
 		case guardMethodForcedConnector:
 			undoForcedOutput()
@@ -260,13 +268,15 @@ func recoverDisplayGuard() {
 			log.Printf("X11 virtual display: vkms stays loaded until you unload it (sudo modprobe -r vkms) or remove its boot config (/etc/modules-load.d/drawsplay-vkms.conf)")
 		}
 	}
+	// The KDE port (guardMethodKWinConnector) is released here in any case.
+	releaseKWinConnectorLeftovers()
 }
 
 // undoForcedConnectors returns every forced spare connector to autodetect so
 // a half-configured one cannot linger as a phantom monitor.
 func undoForcedConnectors() {
 	for _, c := range listHDMIConnectors() {
-		if c.Status == "connected" && c.NoEDID {
+		if c.forced() {
 			if err := forceConnectorPrivileged(filepath.Join(c.Dir, "status"), "detect", false); err != nil {
 				log.Printf("X11 virtual display: could not release the forced connector %s: %v", c.XName, err)
 			} else {

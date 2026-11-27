@@ -67,6 +67,13 @@ type settings struct {
 	// Off clamps X11 capture to 60 fps. Has no effect (and is hidden in the
 	// Web UI) while maxCaptureFPS <= 60.
 	X11HighRateCapture bool `json:"x11HighRateCapture"`
+	// KDESpareHDMIPort shows the tablet on KDE Plasma as a monitor on an
+	// unplugged HDMI port (kwin_connector_linux.go), so Display
+	// Configuration lists its resolutions, instead of KWin's virtual output,
+	// whose resolution only the host's settings change. It asks for a
+	// password once per tablet size. Off by default; without a spare port it
+	// falls back to the virtual output.
+	KDESpareHDMIPort bool `json:"kdeSpareHdmiPort"`
 	// NativeMediaHelper selects the optional native capture/encode helper
 	// ("auto", "on", "off"; empty is auto). It only ever adds a candidate in
 	// front of the ffmpeg ones, which remain the fallback.

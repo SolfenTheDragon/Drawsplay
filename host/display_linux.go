@@ -114,6 +114,15 @@ func detectWlExtBackend() wlExtBackend {
 	return nil
 }
 
+// kdeWaylandSession reports whether the extended display is KWin's.
+func kdeWaylandSession() bool {
+	if !waylandSessionActive() {
+		return false
+	}
+	_, ok := detectWlExtBackend().(kwinBackend)
+	return ok
+}
+
 // wlExtNeedsPipeWire: the backend's output is captured over PipeWire.
 func wlExtNeedsPipeWire(b wlExtBackend) bool {
 	_, ok := b.(kwinBackend)
